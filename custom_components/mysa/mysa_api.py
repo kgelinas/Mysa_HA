@@ -1,0 +1,776 @@
+"""API Client for Mysa."""
+import logging
+import asyncio
+import json
+import time
+from urllib.parse import urlparse
+from uuid import uuid1
+import ssl
+
+import requests
+import websockets
+from homeassistant.helpers.storage import Store
+from .lib.mysotherm import auth, mysa_stuff, aws
+from .lib.mysotherm.aws import Cognito
+from . import mqtt_packet
+
+_LOGGER = logging.getLogger(__name__)
+
+STORAGE_KEY = "mysa.auth"
+STORAGE_VERSION = 1
+
+class MysaApi:
+    """Mysa API Client."""
+
+    def __init__(self, username, password, hass, coordinator_callback=None):
+        """Initialize the API."""
+        self.username = username
+        self.password = password
+        self.hass = hass
+        self.coordinator_callback = coordinator_callback
+        self._user_obj = None
+        self._session = None
+        self._user_id = None # Mysa User UUID
+        self.devices = {}
+        self.states = {}
+        self._last_command_time = {}  # device_id: timestamp
+        self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+        
+        # MQTT Listener attributes
+        self._mqtt_listener_task = None
+        self._mqtt_connected = asyncio.Event()
+        self._mqtt_ws = None
+        self._mqtt_should_reconnect = True
+        self._mqtt_reconnect_delay = 5  # Start with 5 seconds
+
+    async def authenticate(self):
+        """Authenticate with Mysa (Async)."""
+        # 1. Load cached tokens
+        cached_data = await self._store.async_load()
+        
+        def do_sync_login():
+            bsess = aws.boto3.session.Session(region_name=mysa_stuff.REGION)
+            
+            # Try to restore session
+            if cached_data and isinstance(cached_data, dict):
+                id_token = cached_data.get("id_token")
+                refresh_token = cached_data.get("refresh_token")
+                if id_token and refresh_token:
+                    try:
+                        u = Cognito(
+                            user_pool_id=mysa_stuff.USER_POOL_ID,
+                            client_id=mysa_stuff.CLIENT_ID,
+                            id_token=id_token,
+                            refresh_token=refresh_token,
+                            username=self.username,
+                            session=bsess,
+                            pool_jwk=mysa_stuff.JWKS
+                        )
+                        # Verify logic (similar to auth.load_credentials)
+                        try:
+                            u.verify_token(u.id_token, "id_token", "id")
+                        except Exception:
+                            # Try refresh
+                            u.renew_access_token()
+                        
+                        _LOGGER.debug("Restored credentials from storage")
+                        return u
+                    except Exception as e:
+                        _LOGGER.debug("Failed to restore credentials: %s", e)
+            
+            # Fallback to Password Login
+            _LOGGER.debug("Logging in with password...")
+            return auth.login(self.username, self.password, bsess=bsess, cf=None)
+
+        try:
+            self._user_obj = await self.hass.async_add_executor_job(do_sync_login)
+        except Exception as e:
+            _LOGGER.error("Authentication failed: %s", e)
+            raise
+
+        # 2. Save tokens back to Store
+        if self._user_obj:
+            await self._store.async_save({
+                "id_token": self._user_obj.id_token,
+                "refresh_token": self._user_obj.refresh_token
+            })
+
+        # 3. Setup Requests Session
+        self._session = requests.Session()
+        self._session.headers.update(mysa_stuff.CLIENT_HEADERS)
+        self._session.auth = mysa_stuff.auther(self._user_obj)
+        
+        # 4. Fetch User ID (needed for MQTT commands)
+        try:
+           r = await self.hass.async_add_executor_job(
+               lambda: self._session.get(f"{mysa_stuff.BASE_URL}/users")
+           )
+           r.raise_for_status()
+           user_data = r.json()
+           self._user_id = user_data.get("User", {}).get("Id")
+           _LOGGER.debug("Fetched User ID: %s", self._user_id)
+        except Exception as e:
+           _LOGGER.error("Failed to fetch User ID: %s", e)
+
+        return True
+
+    async def get_devices(self):
+        """Get devices."""
+        return await self.hass.async_add_executor_job(self._get_devices_sync)
+
+    def _get_devices_sync(self):
+        """Get devices synchronously from HTTP API."""
+        if not self._session:
+            raise RuntimeError("Session not initialized")
+            
+        url = f"{mysa_stuff.BASE_URL}/devices"
+        r = self._session.get(url)
+        r.raise_for_status()
+        
+        # Store as a dict indexed by Id for efficient lookups
+        # Handle both list and dict responses for robustness
+        devices_raw = r.json().get('DevicesObj', [])
+        if isinstance(devices_raw, list):
+             self.devices = {d['Id']: d for d in devices_raw}
+        else:
+             self.devices = devices_raw
+             
+        return self.devices
+
+    def fetch_firmware_info(self, device_id):
+        """Fetch firmware update info (Sync)."""
+        if not self._session:
+             raise RuntimeError("Session not initialized")
+        
+        url = f"{mysa_stuff.BASE_URL}/devices/update_available/{device_id}"
+        try:
+            r = self._session.get(url, timeout=10)
+            r.raise_for_status()
+            # Response: {"update": bool, "installedVersion": "...", "allowedVersion": "..."}
+            return r.json()
+        except Exception as e:
+            _LOGGER.debug("Failed to fetch firmware info for %s: %s", device_id, e)
+            return None
+
+    async def get_state(self):
+        """Get full state of all devices."""
+        return await self.hass.async_add_executor_job(self._get_state_sync)
+
+    def _get_state_sync(self):
+        """Get full state (settings + live data) from HTTP API."""
+        if not self._session:
+            raise RuntimeError("Session not initialized")
+            
+        # 1. Fetch live metrics (temp, humidity, duty, etc.)
+        r_state = self._session.get(f"{mysa_stuff.BASE_URL}/devices/state")
+        r_state.raise_for_status()
+        state_json = r_state.json()
+        new_states_raw = state_json.get('DeviceStatesObj', state_json.get('DeviceStates', []))
+        if isinstance(new_states_raw, list):
+            new_states = {d['Id']: d for d in new_states_raw}
+        else:
+            new_states = new_states_raw
+
+        # 2. Fetch device settings (Lock, Brightness, AutoBrightness, Proximity, etc.)
+        r_devices = self._session.get(f"{mysa_stuff.BASE_URL}/devices")
+        r_devices.raise_for_status()
+        devices_json = r_devices.json()
+        
+        devices_raw = devices_json.get('DevicesObj', devices_json.get('Devices', []))
+        if isinstance(devices_raw, list):
+            self.devices = {d['Id']: d for d in devices_raw}
+        else:
+            self.devices = devices_raw
+            
+        # Merge settings into states
+        now = time.time()
+        for device_id, live_data in new_states.items():
+            # Add information from /devices to a merged object
+            if device_id in self.devices:
+                # Start with static settings, then overlay live data (sensors)
+                new_data = self.devices[device_id].copy()
+                
+                # If there's an Attributes dict, flatten it first
+                if "Attributes" in new_data and isinstance(new_data["Attributes"], dict):
+                     new_data.update(new_data["Attributes"])
+                
+                # Now overlay live sensors/state (this ensures live 'Lock' wins)
+                new_data.update(live_data)
+            else:
+                new_data = live_data
+
+            # Normalize keys before updating
+            self._normalize_state(new_data)
+
+            if device_id not in self.states:
+                self.states[device_id] = new_data
+            else:
+                # If we recently sent a command, ignore stale cloud status for a bit
+                if now - self._last_command_time.get(device_id, 0) < 15:
+                    _LOGGER.debug("Ignoring potentially stale HTTP state for %s", device_id)
+                    stale_keys = ['Mode', 'md', 'TstatMode', 'SetPoint', 'sp', 'stpt', 'Lock', 'lc', 'lk', 'Brightness', 'br', 'MinBrightness', 'MaxBrightness']
+                    filtered_data = {k: v for k, v in new_data.items() if k not in stale_keys}
+                    self.states[device_id].update(filtered_data)
+                else:
+                    self.states[device_id].update(new_data)
+            
+            _LOGGER.debug("Merged state for %s. Keys: %s", device_id, list(self.states[device_id].keys()))
+
+        return self.states
+
+    def _normalize_state(self, state):
+        """Standardize keys across HTTP and MQTT responses."""
+        # Helper to get first available value that isn't None
+        def get_v(keys, prefer_v=True):
+            for k in keys:
+                val = state.get(k)
+                if val is not None:
+                    if isinstance(val, dict):
+                        extracted = val.get('v')
+                        if extracted is not None:
+                            return extracted
+                        # V2 Brightness logic: prefer active_brightness (a_br)
+                        if k == 'Brightness':
+                             v2_br = val.get('a_br')
+                             if v2_br is not None: return v2_br
+                        # If no 'v' and it's a dict, we might want to continue to next key 
+                        if prefer_v: continue 
+                    return val
+            return None
+
+        # Basic mappings
+        # For V2, sp and md are often more reliable than the long names
+        state['Mode'] = get_v(['md', 'TstatMode', 'Mode'])
+        state['SetPoint'] = get_v(['sp', 'stpt', 'SetPoint'])
+        state['Duty'] = get_v(['dc', 'Duty', 'DutyCycle'])
+        state['Rssi'] = get_v(['rssi', 'Rssi', 'RSSI'])
+        state['Voltage'] = get_v(['volts', 'Voltage', 'LineVoltage'])
+        state['Current'] = get_v(['amps', 'Current'])
+        state['HeatSink'] = get_v(['hs', 'HeatSink'])
+        if 'if' in state: state['Infloor'] = get_v(['if', 'Infloor'])
+            
+        # Brightness variants
+        # prefer 'br' then 'MaxBrightness' then complex 'Brightness' dict
+        br_val = get_v(['br', 'MaxBrightness', 'Brightness'])
+        if br_val is not None:
+            state['Brightness'] = int(br_val)
+            
+        # Lock variants
+        lock_val = get_v(['ButtonState', 'alk', 'lc', 'lk', 'Lock'])
+        if lock_val is not None:
+            # Handle int/string/bool
+            state['Lock'] = 1 if (str(lock_val).lower() in ['1', 'true', 'on', 'locked']) else 0
+        
+        # Zone identification
+        zone_val = get_v(['Zone', 'zone_id', 'zn'])
+        if zone_val is not None:
+             state['Zone'] = zone_val
+             
+        # Proximity variants
+        px_val = get_v(['px', 'ProximityMode'])
+        if px_val is not None:
+             state['ProximityMode'] = str(px_val).lower() in ['1', 'true', 'on']
+
+        # AutoBrightness variants
+        ab_val = get_v(['ab', 'AutoBrightness'])
+        if ab_val is not None:
+             state['AutoBrightness'] = str(ab_val).lower() in ['1', 'true', 'on']
+             
+        # EcoMode variants (0=On, 1=Off)
+        eco_val = get_v(['ecoMode', 'eco'])
+        if eco_val is not None:
+             state['EcoMode'] = (str(eco_val) == '0')
+             
+        # New Diagnostic mappings
+        state['MinBrightness'] = get_v(['MinBrightness', 'mnbr'])
+        state['MaxBrightness'] = get_v(['MaxBrightness', 'mxbr'])
+        state['MaxCurrent'] = get_v(['MaxCurrent', 'mxc'])
+        state['MaxSetpoint'] = get_v(['MaxSetpoint', 'mxs'])
+        state['TimeZone'] = get_v(['TimeZone', 'tz'])
+
+    async def _get_signed_mqtt_url(self):
+        """Get signed MQTT URL."""
+        def _sign():
+            # Proactively check and refresh Cognito tokens if expired
+            try:
+                self._user_obj.check_token()
+            except Exception as e:
+                _LOGGER.debug("Token refresh failed or not needed: %s", e)
+                
+            cred = self._user_obj.get_credentials(identity_pool_id=mysa_stuff.IDENTITY_POOL_ID)
+            return mysa_stuff.sigv4_sign_mqtt_url(cred)
+        return await self.hass.async_add_executor_job(_sign)
+
+    async def _send_mqtt_command(self, device_id, payload, msg_type=44, src_type=100, wrap=True):
+        """Connect to MQTT, send command, and disconnect."""
+        if not self._user_id:
+             await self.authenticate()
+             if not self._user_id:
+                 _LOGGER.error("Cannot send MQTT command: User ID not found")
+                 return
+
+        try:
+            signed_url = await self._get_signed_mqtt_url()
+            url_parts = urlparse(signed_url)
+            ws_url = url_parts._replace(scheme='wss').geturl()
+            
+            # Construct MQTT payload
+            timestamp = int(time.time())
+            timestamp_ms = int(time.time() * 1000)
+            
+            if wrap:
+                # Outer payload wrapper (Modern Envelope)
+                outer_payload = {
+                    "Timestamp": timestamp,
+                    "body": payload,
+                    "dest": {"ref": device_id, "type": 1},
+                    "id": timestamp_ms,
+                    "msg": msg_type,
+                    "resp": 2,
+                    "src": {"ref": self._user_id, "type": src_type},
+                    "time": timestamp,
+                    "ver": "1.0"
+                }
+            else:
+                outer_payload = payload
+            
+            json_payload = json.dumps(outer_payload)
+            
+            # Sanitize device ID for MQTT topic (no colons, lowercase)
+            safe_device_id = device_id.replace(":", "").lower()
+            topic = f"/v1/dev/{safe_device_id}/in"
+
+            _LOGGER.info("Sending MQTT command to %s: %s", topic, json_payload)
+            _LOGGER.debug("Connecting to MQTT: %s", ws_url)
+            
+            # Create SSL context in executor to avoid blocking the loop
+            ssl_context = await self.hass.async_add_executor_job(ssl.create_default_context)
+            
+            # Critical: Server/device requires proper User-Agent header
+            # The official Mysa app uses okhttp/4.11.0
+            headers = {'user-agent': 'okhttp/4.11.0'}
+            
+            # Try additional_headers first (websockets 14+), fallback to extra_headers
+            try:
+                async with websockets.connect(
+                    ws_url,
+                    subprotocols=['mqtt'],
+                    ssl=ssl_context,
+                    additional_headers=headers
+                ) as ws:
+                    # MQTT Connect
+                    connect_pkt = mqtt_packet.connect(str(uuid1()), 60)
+                    await ws.send(connect_pkt)
+                    
+                    # Wait for Connack
+                    resp = await ws.recv()
+
+                    # Subscribe to topics to establish "active" presence?
+                    # liten_up subscribes to /out, /in, /batch
+                    # Packet ID 1 for subscribe
+                    sub_topics = [
+                        mqtt_packet.SubscriptionSpec(f'/v1/dev/{safe_device_id}/out', 0x01),
+                        mqtt_packet.SubscriptionSpec(f'/v1/dev/{safe_device_id}/in', 0x01),
+                        mqtt_packet.SubscriptionSpec(f'/v1/dev/{safe_device_id}/batch', 0x01)
+                    ]
+                    sub_pkt = mqtt_packet.subscribe(1, sub_topics)
+                    await ws.send(sub_pkt)
+                    
+                    # Wait for Suback
+                    resp = await ws.recv()
+                    
+                    # Publish
+                    _LOGGER.debug("Sending MQTT command to %s: %s", topic, json_payload)
+                    # Packet ID 2 for publish
+                    pub_pkt = mqtt_packet.publish(topic, False, 1, False, packet_id=2, payload=json_payload.encode())
+                    await ws.send(pub_pkt)
+                    
+                    # Wait for Puback
+                    resp = await ws.recv()
+                    _LOGGER.debug("Received response (likely PUBACK)")
+                    
+                    # Wait for device response (PUBLISH on /out)
+                    # We give it a small timeout to not hang if the device is slow
+                    try:
+                         # Wait for up to 2 seconds for a response from the device
+                         resp = await asyncio.wait_for(ws.recv(), timeout=2.0)
+                         pkt = mqtt_packet.parse_one(resp)
+                         if isinstance(pkt, mqtt_packet.PublishPacket):
+                              _LOGGER.debug("Received status update from device: %s", pkt.payload)
+                              payload = json.loads(pkt.payload)
+                              # If it's a response to our command (msg 44) or a state update (msg 40)
+                              if payload.get('msg') in [40, 44]:
+                                   body = payload.get('body', {})
+                                   state_update = body.get('state', body)
+                                   
+                                   # Ensure HTTP-style keys are synced with MQTT-style keys
+                                   if 'md' in state_update:
+                                        state_update['Mode'] = state_update['md']
+                                   if 'sp' in state_update:
+                                        state_update['SetPoint'] = state_update['sp']
+                                   if 'dc' in state_update:
+                                        state_update['Duty'] = state_update['dc']
+                                   if 'rssi' in state_update:
+                                        state_update['Rssi'] = state_update['rssi']
+                                   if 'br' in state_update:
+                                        state_update['Brightness'] = state_update['br']
+                                   if 'lc' in state_update or 'lk' in state_update:
+                                        state_update['Lock'] = state_update.get('lc', state_update.get('lk'))
+
+                                   # Update our internal state cache for this device
+                                   if device_id not in self.states:
+                                        self.states[device_id] = state_update
+                                   else:
+                                        self.states[device_id].update(state_update)
+                                        
+                                   _LOGGER.debug("Updated state for %s from MQTT: %s", device_id, self.states[device_id])
+                    except asyncio.TimeoutError:
+                         _LOGGER.debug("Timed out waiting for device status response")
+                    except Exception as e:
+                         _LOGGER.debug("Error parsing device status response: %s", e)
+
+                    # Sleep briefly to ensure server processes it before we disconnect?
+                    await asyncio.sleep(0.5)
+            except TypeError as te:
+                # Fallback for older websockets versions that use extra_headers
+                if 'additional_headers' in str(te):
+                    _LOGGER.debug("Falling back to extra_headers for websockets compatibility")
+                    async with websockets.connect(
+                        ws_url,
+                        subprotocols=['mqtt'],
+                        ssl=ssl_context,
+                        extra_headers=headers
+                    ) as ws:
+                        connect_pkt = mqtt_packet.connect(str(uuid1()), 60)
+                        await ws.send(connect_pkt)
+                        resp = await ws.recv()
+                        
+                        sub_topics = [
+                            mqtt_packet.SubscriptionSpec(f'/v1/dev/{safe_device_id}/out', 0x01),
+                            mqtt_packet.SubscriptionSpec(f'/v1/dev/{safe_device_id}/in', 0x01),
+                            mqtt_packet.SubscriptionSpec(f'/v1/dev/{safe_device_id}/batch', 0x01)
+                        ]
+                        sub_pkt = mqtt_packet.subscribe(1, sub_topics)
+                        await ws.send(sub_pkt)
+                        resp = await ws.recv()
+                        
+                        _LOGGER.debug("Sending MQTT command to %s: %s", topic, json_payload)
+                        pub_pkt = mqtt_packet.publish(topic, False, 1, False, packet_id=2, payload=json_payload.encode())
+                        await ws.send(pub_pkt)
+                        resp = await ws.recv()
+                        _LOGGER.debug("Received response (likely PUBACK)")
+                        await asyncio.sleep(0.5)
+                else:
+                    raise
+        except Exception as e:
+            _LOGGER.error("Failed to send MQTT command: %s", e)
+
+    async def set_target_temperature(self, device_id, temperature):
+        """Set target temperature via MQTT."""
+        self._last_command_time[device_id] = time.time()
+        # Temperature as float for 0.5 degree precision
+        target_val = float(temperature)
+        
+        # Determine Payload Type based on Model
+        payload_type = self._get_payload_type(device_id)
+        _LOGGER.debug("Sending temp %s (type: %s) to device %s. Payload Type: %s", 
+                     target_val, type(target_val), device_id, payload_type)
+        # Proven payload structure from debug session
+        body = {"cmd": [{"sp": target_val, "stpt": target_val, "a_sp": target_val, "tm": -1}], "type": payload_type, "ver": 1}
+        await self._send_mqtt_command(device_id, body)
+        await self.notify_settings_changed(device_id)
+    
+    def _get_payload_type(self, device_id):
+        """Determine MQTT payload type based on device model."""
+        device = self.devices.get(device_id)
+        if not device:
+             return 1
+             
+        model = (device.get("Model") or device.get("ProductModel") or device.get("productModel") or "")
+        fw = device.get("FirmwareVersion", "")
+        
+        if "BB-V2" in model or "V2" in model:
+             if "Lite" in model or "-L" in model:
+                  return 5
+             return 4
+        if "INF-V1" in model or "Floor" in model:
+             return 3
+        if "BB-V1" in model or "Baseboard" in model:
+             return 1
+             
+        if "V2" in fw:
+             return 4
+        
+        return 1
+
+    async def set_hvac_mode(self, device_id, hvac_mode):
+        """Set HVAC mode via MQTT."""
+        self._last_command_time[device_id] = time.time()
+        # Handle both string and Enum values
+        mode_str = str(hvac_mode).lower()
+        # Mode per documentation: md=1 for off, md=3 for heat
+        mode_val = 1 if "off" in mode_str else 3
+        
+        payload_type = self._get_payload_type(device_id)
+        _LOGGER.debug("Using type %s for mode %s (val=%s)", payload_type, hvac_mode, mode_val)
+        body = {"cmd": [{"md": mode_val, "tm": -1}], "type": payload_type, "ver": 1}
+        await self._send_mqtt_command(device_id, body)
+        await self.notify_settings_changed(device_id)
+
+    async def notify_settings_changed(self, device_id):
+        """Notify the thermostat to check its settings via MQTT (MsgType 6)."""
+        timestamp = int(time.time())
+        body = {
+            "Device": device_id.upper(),
+            "EventType": 0,
+            "MsgType": 6,
+            "Timestamp": timestamp
+        }
+        await self._send_mqtt_command(device_id, body, msg_type=6, wrap=False)
+
+    async def start_mqtt_listener(self):
+        """Start the persistent MQTT listener for real-time device updates."""
+        if self._mqtt_listener_task is not None:
+            _LOGGER.debug("MQTT listener already running")
+            return
+        
+        self._mqtt_should_reconnect = True
+        self._mqtt_listener_task = asyncio.create_task(self._mqtt_listener_loop())
+        _LOGGER.info("Started MQTT listener task")
+
+    async def stop_mqtt_listener(self):
+        """Stop the persistent MQTT listener."""
+        self._mqtt_should_reconnect = False
+        
+        if self._mqtt_listener_task:
+            self._mqtt_listener_task.cancel()
+            try:
+                await self._mqtt_listener_task
+            except asyncio.CancelledError:
+                pass
+            self._mqtt_listener_task = None
+        
+        if self._mqtt_ws:
+            try:
+                # Send MQTT DISCONNECT packet before closing
+                disconnect_pkt = mqtt_packet.disconnect()
+                await self._mqtt_ws.send(disconnect_pkt)
+                await self._mqtt_ws.close()
+            except Exception:
+                pass
+            self._mqtt_ws = None
+        
+        self._mqtt_connected.clear()
+        _LOGGER.info("Stopped MQTT listener")
+
+    async def _mqtt_listener_loop(self):
+        """Main MQTT listener loop with automatic reconnection."""
+        reconnect_delay = self._mqtt_reconnect_delay
+        
+        while self._mqtt_should_reconnect:
+            try:
+                await self._mqtt_listen()
+                # If we get here, connection closed normally
+                _LOGGER.info("MQTT connection closed normally")
+                reconnect_delay = self._mqtt_reconnect_delay  # Reset delay
+            except asyncio.CancelledError:
+                _LOGGER.debug("MQTT listener task cancelled")
+                raise
+            except Exception as e:
+                # Expected disconnections (keepalive timeout) are normal - log at debug level
+                _LOGGER.debug("MQTT connection lost: %s, reconnecting in %ds", e, reconnect_delay)
+                self._mqtt_connected.clear()
+                await asyncio.sleep(reconnect_delay)
+                # Exponential backoff up to 60 seconds
+                reconnect_delay = min(reconnect_delay * 2, 60)
+
+    async def _mqtt_listen(self):
+        """Establish MQTT connection and listen for device updates."""
+        # Helper function to parse MQTT packets
+        def parse_mqtt_packet(data):
+            if not isinstance(data, bytearray):
+                data = bytearray(data)
+            msgs = []
+            mqtt_packet.parse(data, msgs)
+            return msgs[0] if msgs else None
+        
+        # Get signed URL
+        signed_url = await self._get_signed_mqtt_url()
+        url_parts = urlparse(signed_url)
+        ws_url = url_parts._replace(scheme='wss').geturl()
+        
+        _LOGGER.info("Connecting to MQTT for persistent listening...")
+        
+        # Create SSL context
+        ssl_context = await self.hass.async_add_executor_job(ssl.create_default_context)
+        headers = {'user-agent': 'okhttp/4.11.0'}
+        
+        # Connect with proper error handling for websockets version
+        # Disable websockets' built-in ping/pong since we handle keepalive via MQTT PINGREQ/PINGRESP
+        try:
+            ws = await websockets.connect(
+                ws_url,
+                subprotocols=['mqtt'],
+                ssl=ssl_context,
+                additional_headers=headers,
+                ping_interval=None,  # Disable WebSocket pings
+                ping_timeout=None    # Disable WebSocket ping timeout
+            )
+        except TypeError:
+            # Fallback for older websockets versions
+            ws = await websockets.connect(
+                ws_url,
+                subprotocols=['mqtt'],
+                ssl=ssl_context,
+                extra_headers=headers,
+                ping_interval=None,
+                ping_timeout=None
+            )
+        
+        self._mqtt_ws = ws
+        
+        try:
+            # MQTT Connect
+            connect_pkt = mqtt_packet.connect(str(uuid1()), 60)
+            await ws.send(connect_pkt)
+            
+            # Wait for Connack
+            resp = await ws.recv()
+            pkt = parse_mqtt_packet(resp)
+            if not isinstance(pkt, mqtt_packet.ConnackPacket):
+                raise RuntimeError(f"Expected CONNACK, got {pkt}")
+            
+            _LOGGER.info("MQTT connected successfully")
+            
+            # Subscribe to all device topics
+            if not self.devices:
+                await self.get_devices()
+            
+            sub_topics = []
+            for device_id in self.devices:
+                safe_device_id = device_id.replace(":", "").lower()
+                sub_topics.extend([
+                    mqtt_packet.SubscriptionSpec(f'/v1/dev/{safe_device_id}/out', 0x01),
+                    mqtt_packet.SubscriptionSpec(f'/v1/dev/{safe_device_id}/in', 0x01),
+                    mqtt_packet.SubscriptionSpec(f'/v1/dev/{safe_device_id}/batch', 0x01)
+                ])
+            
+            if sub_topics:
+                sub_pkt = mqtt_packet.subscribe(1, sub_topics)
+                await ws.send(sub_pkt)
+                
+                # Wait for Suback
+                resp = await ws.recv()
+                pkt = parse_mqtt_packet(resp)
+                if not isinstance(pkt, mqtt_packet.SubackPacket):
+                    raise RuntimeError(f"Expected SUBACK, got {pkt}")
+                
+                _LOGGER.info("Subscribed to %d device topics", len(self.devices))
+            
+            self._mqtt_connected.set()
+            
+            # Main message loop with proactive keepalive
+            last_ping = time.time()
+            ping_interval = 25  # Send ping every 25 seconds (less than 60s keepalive)
+            
+            _LOGGER.info("MQTT message loop started, waiting for updates...")
+            
+            while True:
+                try:
+                    # Calculate time until next ping
+                    elapsed = time.time() - last_ping
+                    time_until_ping = max(0.1, ping_interval - elapsed)
+                    
+                    # Wait for message with timeout set to next ping time
+                    msg = await asyncio.wait_for(ws.recv(), timeout=min(time_until_ping, 20.0))
+                    
+                    try:
+                        pkt = parse_mqtt_packet(msg)
+                        
+                        if isinstance(pkt, mqtt_packet.PublishPacket):
+                            # Process device state update
+                            await self._process_mqtt_publish(pkt)
+                        elif hasattr(pkt, 'pkt_type') and pkt.pkt_type == mqtt_packet.MQTT_PACKET_PINGRESP:
+                            _LOGGER.debug("Received PINGRESP")
+                        elif pkt:
+                            _LOGGER.debug("Received MQTT packet type: %s", type(pkt).__name__)
+                    except Exception as parse_error:
+                        _LOGGER.warning("Error parsing MQTT packet: %s", parse_error, exc_info=True)
+                        # Continue despite parse errors
+                    
+                except asyncio.TimeoutError:
+                    # Timeout is normal - we use it to check if ping is needed
+                    pass
+                except Exception as recv_error:
+                    _LOGGER.error("Error receiving MQTT message: %s", recv_error, exc_info=True)
+                    raise  # Re-raise to trigger reconnection
+                
+                # Send ping if needed (proactive keepalive)
+                if time.time() - last_ping >= ping_interval:
+                    try:
+                        await ws.send(mqtt_packet.pingreq())
+                        last_ping = time.time()
+                        _LOGGER.debug("Sent PINGREQ keepalive")
+                    except Exception as e:
+                        _LOGGER.error("Failed to send keepalive ping: %s", e, exc_info=True)
+                        raise  # Re-raise to trigger reconnection
+                        
+        except Exception as listen_error:
+            _LOGGER.error("MQTT listen error (will reconnect): %s", listen_error, exc_info=True)
+            raise
+        finally:
+            self._mqtt_ws = None
+            self._mqtt_connected.clear()
+            try:
+                await ws.close()
+            except Exception:
+                pass
+
+    async def _process_mqtt_publish(self, pkt):
+        """Process an MQTT publish packet containing device state update."""
+        try:
+            payload = json.loads(pkt.payload)
+            
+            # Extract device ID from topic: /v1/dev/{device_id}/out
+            topic_parts = pkt.topic.split('/')
+            if len(topic_parts) >= 4:
+                safe_device_id = topic_parts[3]
+                # Convert back to format with colons (find matching device)
+                device_id = None
+                for did in self.devices:
+                    if did.replace(":", "").lower() == safe_device_id:
+                        device_id = did
+                        break
+                
+                if not device_id:
+                    _LOGGER.debug("Received MQTT message for unknown device: %s", safe_device_id)
+                    return
+                
+                # Process message types 40 (state update) and 44 (command response)
+                msg_type = payload.get('msg')
+                if msg_type in [40, 44]:
+                    body = payload.get('body', {})
+                    state_update = body.get('state', body)
+                    
+                    if state_update:
+                        # Normalize the state data
+                        self._normalize_state(state_update)
+                        
+                        # Update internal state cache
+                        if device_id not in self.states:
+                            self.states[device_id] = state_update
+                        else:
+                            self.states[device_id].update(state_update)
+                        
+                        _LOGGER.info("MQTT state update for %s: %s", device_id, state_update)
+                        
+                        # Trigger coordinator refresh to update HA entities
+                        if self.coordinator_callback:
+                            await self.coordinator_callback()
+                
+        except Exception as e:
+            _LOGGER.error("Error processing MQTT publish: %s", e, exc_info=True)
+
+
+
+

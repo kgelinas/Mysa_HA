@@ -1,0 +1,33 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Autenticação Mysa",
+                "description": "Insira as credenciais da sua conta Mysa.",
+                "data": {
+                    "username": "Usuário (E-mail)",
+                    "password": "Senha"
+                }
+            },
+            "zones": {
+                "title": "Configurar nomes de zonas",
+                "description": "Defina um nome de zona personalizado para cada grupo de termostatos. Esses nomes serão usados para organizar seus dispositivos em áreas do Home Assistant."
+            }
+        },
+        "error": {
+            "invalid_auth": "Autenticação inválida",
+            "unknown": "Erro inesperado"
+        },
+        "abort": {
+            "single_instance_allowed": "Apenas uma configuração Mysa é permitida."
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Configurar nomes de zonas",
+                "description": "Atribua ou atualize o nome personalizado para suas zonas de termostatos. Esses nomes serão usados para atributos de entidade e áreas sugeridas."
+            }
+        }
+    }
+}

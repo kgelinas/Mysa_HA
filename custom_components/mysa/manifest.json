@@ -1,0 +1,19 @@
+{
+  "domain": "mysa",
+  "name": "Mysa",
+  "codeowners": [
+    "@kgelinas"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/kgelinas/Mysa_HA",
+  "integration_type": "hub",
+  "iot_class": "cloud_push",
+  "requirements": [
+    "requests>=2.0.0",
+    "pycognito>=2024.05.0",
+    "boto3",
+    "pytz>=2024.1",
+    "websockets>=14.0"
+  ],
+  "version": "0.5.0"
+}

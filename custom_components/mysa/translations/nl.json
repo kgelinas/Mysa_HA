@@ -1,0 +1,33 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Mysa Authenticatie",
+                "description": "Voer uw Mysa-accountgegevens in.",
+                "data": {
+                    "username": "Gebruikersnaam (E-mail)",
+                    "password": "Wachtwoord"
+                }
+            },
+            "zones": {
+                "title": "Zonenamen configureren",
+                "description": "Stel een aangepaste zonenaam in voor elke thermostaatgroep. Deze namen worden gebruikt om uw apparaten in Home Assistant-gebieden te organiseren."
+            }
+        },
+        "error": {
+            "invalid_auth": "Ongeldige authenticatie",
+            "unknown": "Onverwachte fout"
+        },
+        "abort": {
+            "single_instance_allowed": "Slechts één Mysa-configuratie is toegestaan."
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Zonenamen configureren",
+                "description": "Wijs de aangepaste naam voor uw thermostaatzones toe of werk deze bij. Deze namen worden gebruikt voor entiteitsattributen en voorgestelde gebieden."
+            }
+        }
+    }
+}
