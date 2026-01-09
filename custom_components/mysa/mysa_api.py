@@ -9,9 +9,13 @@ import ssl
 
 import requests
 import websockets
+import boto3
 from homeassistant.helpers.storage import Store
-from .lib.mysotherm import auth, mysa_stuff, aws
-from .lib.mysotherm.aws import Cognito
+from .mysa_auth import (
+    Cognito, login, auther, sigv4_sign_mqtt_url,
+    REGION, USER_POOL_ID, CLIENT_ID, JWKS, IDENTITY_POOL_ID,
+    CLIENT_HEADERS, BASE_URL,
+)
 from . import mqtt_packet
 from .const import (
     AC_MODE_OFF, AC_MODE_AUTO, AC_MODE_HEAT, AC_MODE_COOL, AC_MODE_FAN_ONLY, AC_MODE_DRY,
@@ -55,7 +59,7 @@ class MysaApi:
         cached_data = await self._store.async_load()
         
         def do_sync_login():
-            bsess = aws.boto3.session.Session(region_name=mysa_stuff.REGION)
+            bsess = boto3.session.Session(region_name=REGION)
             
             # Try to restore session
             if cached_data and isinstance(cached_data, dict):
@@ -64,13 +68,13 @@ class MysaApi:
                 if id_token and refresh_token:
                     try:
                         u = Cognito(
-                            user_pool_id=mysa_stuff.USER_POOL_ID,
-                            client_id=mysa_stuff.CLIENT_ID,
+                            user_pool_id=USER_POOL_ID,
+                            client_id=CLIENT_ID,
                             id_token=id_token,
                             refresh_token=refresh_token,
                             username=self.username,
                             session=bsess,
-                            pool_jwk=mysa_stuff.JWKS
+                            pool_jwk=JWKS
                         )
                         # Verify logic (similar to auth.load_credentials)
                         try:
@@ -86,7 +90,7 @@ class MysaApi:
             
             # Fallback to Password Login
             _LOGGER.debug("Logging in with password...")
-            return auth.login(self.username, self.password, bsess=bsess, cf=None)
+            return login(self.username, self.password, bsess=bsess)
 
         try:
             self._user_obj = await self.hass.async_add_executor_job(do_sync_login)
@@ -103,13 +107,13 @@ class MysaApi:
 
         # 3. Setup Requests Session
         self._session = requests.Session()
-        self._session.headers.update(mysa_stuff.CLIENT_HEADERS)
-        self._session.auth = mysa_stuff.auther(self._user_obj)
+        self._session.headers.update(CLIENT_HEADERS)
+        self._session.auth = auther(self._user_obj)
         
         # 4. Fetch User ID (needed for MQTT commands)
         try:
            r = await self.hass.async_add_executor_job(
-               lambda: self._session.get(f"{mysa_stuff.BASE_URL}/users")
+               lambda: self._session.get(f"{BASE_URL}/users")
            )
            r.raise_for_status()
            user_data = r.json()
@@ -129,7 +133,7 @@ class MysaApi:
         if not self._session:
             raise RuntimeError("Session not initialized")
             
-        url = f"{mysa_stuff.BASE_URL}/devices"
+        url = f"{BASE_URL}/devices"
         r = self._session.get(url)
         r.raise_for_status()
         
@@ -148,7 +152,7 @@ class MysaApi:
         if not self._session:
              raise RuntimeError("Session not initialized")
         
-        url = f"{mysa_stuff.BASE_URL}/devices/update_available/{device_id}"
+        url = f"{BASE_URL}/devices/update_available/{device_id}"
         try:
             r = self._session.get(url, timeout=10)
             r.raise_for_status()
@@ -168,7 +172,7 @@ class MysaApi:
             raise RuntimeError("Session not initialized")
             
         # 1. Fetch live metrics (temp, humidity, duty, etc.)
-        r_state = self._session.get(f"{mysa_stuff.BASE_URL}/devices/state")
+        r_state = self._session.get(f"{BASE_URL}/devices/state")
         r_state.raise_for_status()
         state_json = r_state.json()
         new_states_raw = state_json.get('DeviceStatesObj', state_json.get('DeviceStates', []))
@@ -178,7 +182,7 @@ class MysaApi:
             new_states = new_states_raw
 
         # 2. Fetch device settings (Lock, Brightness, AutoBrightness, Proximity, etc.)
-        r_devices = self._session.get(f"{mysa_stuff.BASE_URL}/devices")
+        r_devices = self._session.get(f"{BASE_URL}/devices")
         r_devices.raise_for_status()
         devices_json = r_devices.json()
         
@@ -381,8 +385,8 @@ class MysaApi:
             except Exception as e:
                 _LOGGER.debug("Token refresh failed or not needed: %s", e)
                 
-            cred = self._user_obj.get_credentials(identity_pool_id=mysa_stuff.IDENTITY_POOL_ID)
-            return mysa_stuff.sigv4_sign_mqtt_url(cred)
+            cred = self._user_obj.get_credentials(identity_pool_id=IDENTITY_POOL_ID)
+            return sigv4_sign_mqtt_url(cred)
         return await self.hass.async_add_executor_job(_sign)
 
     async def _send_mqtt_command(self, device_id, payload, msg_type=44, src_type=100, wrap=True):
@@ -814,7 +818,7 @@ class MysaApi:
     async def _set_device_setting_silent(self, device_id, settings: dict):
         """Set device settings via HTTP POST without triggering coordinator refresh."""
         def do_post():
-            url = f"{mysa_stuff.BASE_URL}/devices/{device_id}"
+            url = f"{BASE_URL}/devices/{device_id}"
             r = self._session.post(url, json=settings)
             r.raise_for_status()
             return r.json()
@@ -829,7 +833,7 @@ class MysaApi:
     async def _set_device_setting(self, device_id, settings: dict):
         """Set device settings via HTTP POST."""
         def do_post():
-            url = f"{mysa_stuff.BASE_URL}/devices/{device_id}"
+            url = f"{BASE_URL}/devices/{device_id}"
             r = self._session.post(url, json=settings)
             r.raise_for_status()
             return r.json()

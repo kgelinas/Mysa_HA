@@ -27,13 +27,15 @@ from uuid import uuid1
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 mysa_path = os.path.join(parent_dir, 'custom_components', 'mysa')
-lib_path = os.path.join(mysa_path, 'lib')
 sys.path.insert(0, mysa_path)
-sys.path.insert(0, lib_path)
 
 try:
-    from mysotherm import auth, mysa_stuff, aws
+    from mysa_auth import (
+        login, auther, sigv4_sign_mqtt_url,
+        REGION, IDENTITY_POOL_ID, CLIENT_HEADERS, BASE_URL,
+    )
     import mqtt_packet
+    import boto3
 except ImportError as e:
     print(f"\nCRITICAL: Could not import required modules: {e}")
     print("Make sure you're running from the tools/ directory")
@@ -90,7 +92,7 @@ class MysaDebugTool:
             pass
 
     async def authenticate(self):
-        bsess = aws.boto3.session.Session(region_name=mysa_stuff.REGION)
+        bsess = boto3.session.Session(region_name=REGION)
         
         # Try saved credentials
         if os.path.exists(self.auth_path):
@@ -98,13 +100,13 @@ class MysaDebugTool:
                 with open(self.auth_path, 'r') as f:
                     saved = json.load(f)
                 print(f"Using saved credentials from {self.auth_path}")
-                self._user_obj = auth.login(saved['username'], saved['password'], bsess, cf=None)
+                self._user_obj = login(saved['username'], saved['password'], bsess=bsess)
                 self.session = requests.Session()
-                self.session.auth = mysa_stuff.auther(self._user_obj)
-                self.session.headers.update(mysa_stuff.CLIENT_HEADERS)
+                self.session.auth = auther(self._user_obj)
+                self.session.headers.update(CLIENT_HEADERS)
                 
                 # Get user ID
-                r = self.session.get(f"{mysa_stuff.BASE_URL}/users")
+                r = self.session.get(f"{BASE_URL}/users")
                 r.raise_for_status()
                 self.user_id = r.json().get("User", {}).get("Id", self._user_obj.id_claims['cognito:username'])
                 print(f"✓ Authenticated as {self.user_id[:8]}...")
@@ -117,12 +119,12 @@ class MysaDebugTool:
         password = getpass.getpass("Mysa Password: ").strip()
         
         try:
-            self._user_obj = auth.login(username, password, bsess, cf=None)
+            self._user_obj = login(username, password, bsess=bsess)
             self.session = requests.Session()
-            self.session.auth = mysa_stuff.auther(self._user_obj)
-            self.session.headers.update(mysa_stuff.CLIENT_HEADERS)
+            self.session.auth = auther(self._user_obj)
+            self.session.headers.update(CLIENT_HEADERS)
             
-            r = self.session.get(f"{mysa_stuff.BASE_URL}/users")
+            r = self.session.get(f"{BASE_URL}/users")
             r.raise_for_status()
             self.user_id = r.json().get("User", {}).get("Id", self._user_obj.id_claims['cognito:username'])
             
@@ -138,7 +140,7 @@ class MysaDebugTool:
 
     async def fetch_devices(self):
         print("Fetching devices...")
-        r = self.session.get(f"{mysa_stuff.BASE_URL}/devices")
+        r = self.session.get(f"{BASE_URL}/devices")
         r.raise_for_status()
         data = r.json()
         dev_list = data.get('DevicesObj', data.get('Devices', []))
@@ -190,6 +192,8 @@ class MysaDebugTool:
                     self.show_examples()
                 elif cmd == 'help' or cmd == '?':
                     self.print_help()
+                elif cmd == 'advanced':
+                    await self.advanced_menu()
                 elif cmd == 'http' and len(parts) >= 3:
                     await self.send_http(parts[1], parts[2])
                 elif cmd == 'mqtt' and len(parts) >= 3:
@@ -210,8 +214,166 @@ class MysaDebugTool:
         print("  mqtt <DID> <JSON>      - Send MQTT command (wrapped)")
         print("  sniff                  - Toggle MQTT sniffer mode")
         print("  examples               - Show example payloads")
+        print("  advanced               - Advanced/dangerous operations")
         print("  q                      - Quit")
         print("-"*50)
+
+    async def advanced_menu(self):
+        """Show advanced operations menu."""
+        print("\n" + "="*60)
+        print("              ⚠️  ADVANCED OPERATIONS ⚠️")
+        print("="*60)
+        print("\n⚠️  WARNING: These operations modify device firmware settings.")
+        print("   They may void your warranty, brick your device, or cause")
+        print("   other unexpected behavior. We are NOT responsible for any")
+        print("   issues that may arise from using these features.")
+        print("\n   USE AT YOUR OWN RISK!\n")
+        print("-"*60)
+        print("Options:")
+        print("  1. Convert BB-V2-0-L to BB-V2-0 (Lite to Full)")
+        print("  2. Killer Ping - Restart device into pairing mode")
+        print("  0. Cancel / Go back")
+        print("-"*60)
+        
+        choice = input("\nSelect option: ").strip()
+        
+        if choice == '1':
+            await self.convert_lite_to_full()
+        elif choice == '2':
+            await self.killer_ping()
+        elif choice == '0':
+            print("Cancelled.")
+        else:
+            print("Invalid option.")
+
+    async def convert_lite_to_full(self):
+        """Convert a BB-V2-0-L (Lite) device to BB-V2-0 (Full) model."""
+        print("\n" + "="*60)
+        print("        BB-V2-0-L → BB-V2-0 CONVERSION")
+        print("="*60)
+        
+        # List Lite devices only
+        lite_devices = [(did, d) for did, d in self.devices.items() 
+                        if 'BB-V2-0-L' in d.get('Model', '') or 'V2-0-L' in d.get('Model', '')]
+        
+        if not lite_devices:
+            print("\n❌ No devices found compatible with the magic upgrade.")
+            print("   This feature only works with BB-V2-0-L (Lite) thermostats.")
+            return
+        
+        print("\nDetected BB-V2-0-L (Lite) devices:")
+        for i, (did, d) in enumerate(lite_devices, 1):
+            print(f"  {i}. {d.get('Name', 'Unnamed')} ({did}) - {d.get('Model')}")
+        
+        print("\n⚠️  This will change the device's Model to 'BB-V2-0'.")
+        print("   This unlocks V2 features but may cause issues.")
+        print("   You will need to power-cycle the thermostat after.\n")
+        
+        device_ref = input("Enter device number or ID (or 'cancel'): ").strip()
+        if device_ref.lower() in ('cancel', 'c', ''):
+            print("Cancelled.")
+            return
+        
+        did = self._resolve_device(device_ref)
+        if not did:
+            return
+        
+        device = self.devices.get(did, {})
+        old_model = device.get('Model', 'Unknown')
+        
+        print(f"\n🎯 Target: {device.get('Name', 'Unknown')} ({did})")
+        print(f"   Current Model: {old_model}")
+        print(f"   New Model: BB-V2-0")
+        
+        confirm = input("\n⚠️  Type 'YES I UNDERSTAND' to proceed: ").strip()
+        if confirm != 'YES I UNDERSTAND':
+            print("Confirmation failed. Cancelled.")
+            return
+        
+        # Send the conversion request
+        print("\nSending model change request...")
+        url = f"{BASE_URL}/devices/{did}"
+        try:
+            r = self.session.post(url, json={'Model': 'BB-V2-0'})
+            r.raise_for_status()
+            
+            print("\n" + "="*60)
+            print("           🔓 DEVICE UNLOCKED 🔓")
+            print("="*60)
+            print(f"\n   Your {old_model} now identifies as BB-V2-0.")
+            print("\n   \"With great power comes great heating bills.\"")
+            print("\n⚠️  Please power-cycle your thermostat to complete")
+            print("   the transformation.")
+            print("\n   No refunds. May void warranty. YOLO.")
+            print("="*60 + "\n")
+            
+            # Refresh devices
+            await self.fetch_devices()
+            
+        except Exception as e:
+            print(f"\n✗ Conversion failed: {e}")
+            print("  The device may not support this operation.")
+
+    async def killer_ping(self):
+        """Send killer ping to restart device into pairing mode."""
+        print("\n" + "="*60)
+        print("           💀 KILLER PING 💀")
+        print("="*60)
+        print("\n⚠️  WARNING: This will RESTART the device and put it")
+        print("   into PAIRING MODE. The device will disconnect from")
+        print("   your network and need to be re-paired!")
+        print("\n   Only use this if you need to re-pair a device.\n")
+        
+        self.list_devices()
+        
+        device_ref = input("\nEnter device number or ID (or 'cancel'): ").strip()
+        if device_ref.lower() in ('cancel', 'c', ''):
+            print("Cancelled.")
+            return
+        
+        did = self._resolve_device(device_ref)
+        if not did:
+            return
+        
+        device = self.devices.get(did, {})
+        print(f"\n🎯 Target: {device.get('Name', 'Unknown')} ({did})")
+        print(f"   Model: {device.get('Model', 'Unknown')}")
+        
+        confirm = input("\n⚠️  Type 'KILL' to send killer ping: ").strip()
+        if confirm != 'KILL':
+            print("Confirmation failed. Cancelled.")
+            return
+        
+        if not self.ws:
+            print("\n✗ MQTT not connected. Cannot send killer ping.")
+            return
+        
+        # Build killer ping payload
+        import time as time_module
+        payload = {
+            "Device": did,
+            "Timestamp": int(time_module.time()),
+            "MsgType": 5,
+            "EchoID": 1
+        }
+        
+        print("\nSending killer ping...")
+        topic = f"/v1/dev/{did.replace(':', '').lower()}/in"
+        
+        try:
+            pub_pkt = mqtt_packet.publish(topic, False, 1, False, packet_id=99, payload=json.dumps(payload).encode())
+            await self.ws.send(pub_pkt)
+            
+            print("\n" + "="*60)
+            print("           💀 KILLER PING SENT 💀")
+            print("="*60)
+            print(f"\n   Device {device.get('Name', did)} should restart shortly.")
+            print("   Look for the device in pairing mode on your network.")
+            print("\n   May the force be with you.")
+            print("="*60 + "\n")
+            
+        except Exception as e:
+            print(f"\n✗ Failed to send killer ping: {e}")
 
     def show_examples(self):
         did = list(self.devices.keys())[0] if self.devices else "DEVICE_ID"
@@ -275,11 +437,11 @@ class MysaDebugTool:
         print(f"\nFetching state for {did}...")
         
         # Device settings
-        r_dev = self.session.get(f"{mysa_stuff.BASE_URL}/devices/{did}")
+        r_dev = self.session.get(f"{BASE_URL}/devices/{did}")
         r_dev.raise_for_status()
         
         # Live state
-        r_state = self.session.get(f"{mysa_stuff.BASE_URL}/devices/state")
+        r_state = self.session.get(f"{BASE_URL}/devices/state")
         r_state.raise_for_status()
         states = r_state.json().get('DeviceStatesObj', r_state.json().get('DeviceStates', []))
         if isinstance(states, list):
@@ -302,7 +464,7 @@ class MysaDebugTool:
             print(f"Invalid JSON: {e}")
             return
         
-        url = f"{mysa_stuff.BASE_URL}/devices/{did}"
+        url = f"{BASE_URL}/devices/{did}"
         print(f"\nPOST {url}")
         print(f"Body: {json.dumps(payload)}")
         
@@ -404,8 +566,8 @@ class MysaDebugTool:
         while True:
             try:
                 self._user_obj.check_token()
-                cred = self._user_obj.get_credentials(identity_pool_id=mysa_stuff.IDENTITY_POOL_ID)
-                signed_url = mysa_stuff.sigv4_sign_mqtt_url(cred)
+                cred = self._user_obj.get_credentials(identity_pool_id=IDENTITY_POOL_ID)
+                signed_url = sigv4_sign_mqtt_url(cred)
                 ws_url = urlparse(signed_url)._replace(scheme='wss').geturl()
                 
                 ssl_context = ssl.create_default_context()

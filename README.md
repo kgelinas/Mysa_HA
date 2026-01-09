@@ -1,6 +1,6 @@
 # Mysa for Home Assistant
 
-[![Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](https://github.com/kgelinas/Mysa_HA)
+[![Version](https://img.shields.io/badge/version-0.7.0-blue.svg)](https://github.com/kgelinas/Mysa_HA)
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz/)
 
 A native cloud integration for Mysa devices in Home Assistant. Uses the official Mysa Cloud architecture (MQTT + HTTP) for real-time updates and instant command execution.
@@ -98,6 +98,8 @@ A command-line debug tool is included for development and troubleshooting:
 cd tools
 python mysa_debug.py
 ```
+
+Features include MQTT sniffing, HTTP/MQTT command testing, and advanced operations like Lite-to-Full conversion and device pairing mode reset.
 
 See [docs/MYSA_DEBUG.md](docs/MYSA_DEBUG.md) for usage details.
 

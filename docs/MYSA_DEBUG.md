@@ -33,6 +33,7 @@ On first run, you'll be prompted for your Mysa account credentials. These are sa
 | `mqtt <DID> <JSON>`      | Send MQTT command (auto-wrapped)         |
 | `sniff`                  | Toggle MQTT sniffer mode                 |
 | `examples`               | Show example commands                    |
+| `advanced`               | Advanced/dangerous operations            |
 | `help` or `?`            | Show command help                        |
 | `q` or `quit`            | Exit                                     |
 
@@ -184,6 +185,26 @@ CMD> state 1
   ...
 }
 ```
+
+## Advanced Menu
+
+> ⚠️ **WARNING**: These operations modify device firmware settings. They may void your warranty, brick your device, or cause unexpected behavior. **Use at your own risk!**
+
+Access via the `advanced` command. Available operations:
+
+### 1. Convert BB-V2-0-L to BB-V2-0 (Lite to Full)
+
+Upgrades a Mysa V2 Lite thermostat to the full V2 model, unlocking additional features. Only works on devices with model `BB-V2-0-L`.
+
+- Requires typing `YES I UNDERSTAND` to confirm
+- Device must be power-cycled after conversion
+
+### 2. Killer Ping
+
+Sends a MsgType 5 command to restart the device and put it into pairing mode. Useful if you need to re-pair a device to a different network.
+
+- Requires typing `KILL` to confirm
+- Device will disconnect and need re-pairing
 
 ## Tips
 
