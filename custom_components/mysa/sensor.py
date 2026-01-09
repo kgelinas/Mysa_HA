@@ -40,36 +40,47 @@ async def async_setup_entry(
 
     entities = []
     for device_id, device_data in devices.items():
-        # Zone Name Sensor
+        is_ac = api.is_ac_device(device_id)
+        
+        # Zone Name Sensor (all devices)
         entities.append(MysaZoneSensor(coordinator, device_id, device_data, entry))
         
-        # Duty Cycle
-        entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "Duty", "Duty Cycle", PERCENTAGE, SensorStateClass.MEASUREMENT, None, entry))
-        # RSSI
+        # RSSI (all devices)
         entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "Rssi", "RSSI", SIGNAL_STRENGTH_DECIBELS_MILLIWATT, SensorStateClass.MEASUREMENT, SensorDeviceClass.SIGNAL_STRENGTH, entry))
-        # Brightness
+        
+        # Brightness (all devices - current display brightness)
         entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "Brightness", "Brightness", PERCENTAGE, SensorStateClass.MEASUREMENT, None, entry))
         
-        state = coordinator.data.get(device_id, {})
-        # HeatSink
-        if "HeatSink" in state:
-            entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "HeatSink", "HeatSink Temperature", UnitOfTemperature.CELSIUS, SensorStateClass.MEASUREMENT, SensorDeviceClass.TEMPERATURE, entry))
-        # Infloor
-        if "Infloor" in state:
-            entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "Infloor", "Infloor Temperature", UnitOfTemperature.CELSIUS, SensorStateClass.MEASUREMENT, SensorDeviceClass.TEMPERATURE, entry))
-            
-        # Only add Voltage/Current if the device supports/reports it
-        if "Voltage" in state or "LineVoltage" in state:
-            entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "Voltage", "Voltage", UnitOfElectricPotential.VOLT, SensorStateClass.MEASUREMENT, SensorDeviceClass.VOLTAGE, entry))
-        if "Current" in state:
-            entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "Current", "Current", UnitOfElectricCurrent.AMPERE, SensorStateClass.MEASUREMENT, SensorDeviceClass.CURRENT, entry))
-
-        # Configuration Sensors (Diagnostic)
-        entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "MinBrightness", "Minimum Brightness", PERCENTAGE, None, None, entry))
-        entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "MaxBrightness", "Maximum Brightness", PERCENTAGE, None, None, entry))
-        entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "MaxCurrent", "Maximum Current", UnitOfElectricCurrent.AMPERE, None, SensorDeviceClass.CURRENT, entry))
-        entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "MaxSetpoint", "Maximum Setpoint", UnitOfTemperature.CELSIUS, None, SensorDeviceClass.TEMPERATURE, entry))
+        # TimeZone (all devices)
         entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "TimeZone", "Time Zone", None, None, None, entry))
+        
+        # Min/Max Setpoint (all devices)
+        entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "MinSetpoint", "Minimum Setpoint", UnitOfTemperature.CELSIUS, None, SensorDeviceClass.TEMPERATURE, entry))
+        entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "MaxSetpoint", "Maximum Setpoint", UnitOfTemperature.CELSIUS, None, SensorDeviceClass.TEMPERATURE, entry))
+        
+        # === Heating thermostat only sensors (skip for AC) ===
+        if not is_ac:
+            # Duty Cycle (heating only)
+            entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "Duty", "Duty Cycle", PERCENTAGE, SensorStateClass.MEASUREMENT, None, entry))
+            
+            # Maximum Current (heating only)
+            entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "MaxCurrent", "Maximum Current", UnitOfElectricCurrent.AMPERE, None, SensorDeviceClass.CURRENT, entry))
+            
+            state = coordinator.data.get(device_id, {})
+            
+            # HeatSink (heating only)
+            if "HeatSink" in state:
+                entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "HeatSink", "HeatSink Temperature", UnitOfTemperature.CELSIUS, SensorStateClass.MEASUREMENT, SensorDeviceClass.TEMPERATURE, entry))
+            
+            # Infloor (floor heating only)
+            if "Infloor" in state:
+                entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "Infloor", "Infloor Temperature", UnitOfTemperature.CELSIUS, SensorStateClass.MEASUREMENT, SensorDeviceClass.TEMPERATURE, entry))
+                
+            # Voltage/Current (heating only)
+            if "Voltage" in state or "LineVoltage" in state:
+                entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "Voltage", "Voltage", UnitOfElectricPotential.VOLT, SensorStateClass.MEASUREMENT, SensorDeviceClass.VOLTAGE, entry))
+            if "Current" in state:
+                entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "Current", "Current", UnitOfElectricCurrent.AMPERE, SensorStateClass.MEASUREMENT, SensorDeviceClass.CURRENT, entry))
 
     async_add_entities(entities)
 
@@ -91,7 +102,7 @@ class MysaDiagnosticSensor(CoordinatorEntity, SensorEntity):
         self._attr_extra_state_attributes = {}
 
         # Categorize as Diagnostic AND Disable by default
-        if sensor_key in ["Current", "Duty", "HeatSink", "Infloor", "MaxCurrent", "MaxSetpoint", "Rssi", "TimeZone", "Voltage"]:
+        if sensor_key in ["Current", "Duty", "HeatSink", "Infloor", "MaxCurrent", "MinSetpoint", "MaxSetpoint", "Rssi", "TimeZone", "Voltage"]:
              self._attr_entity_category = EntityCategory.DIAGNOSTIC
              self._attr_entity_registry_enabled_default = False
     @property
@@ -148,6 +159,8 @@ class MysaDiagnosticSensor(CoordinatorEntity, SensorEntity):
             keys = ["Infloor", "if"]
         elif self._sensor_key == "MaxSetpoint":
             keys = ["MaxSetpoint", "mxs"]
+        elif self._sensor_key == "MinSetpoint":
+            keys = ["MinSetpoint", "mns"]
         elif self._sensor_key == "MaxCurrent":
             keys = ["MaxCurrent", "mxc"]
         elif self._sensor_key == "MinBrightness":

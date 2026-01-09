@@ -35,6 +35,3 @@ mysa_auth.json
 # OS
 .DS_Store
 Thumbs.db
-
-# Development tools (not part of the integration)
-tools/

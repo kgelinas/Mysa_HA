@@ -1,27 +1,34 @@
 # Mysa for Home Assistant
 
-[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](https://github.com/kgelinas/Mysa_HA)
+[![Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](https://github.com/kgelinas/Mysa_HA)
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz/)
 
-A native cloud integration for Mysa Thermostats in Home Assistant. Uses the official Mysa Cloud architecture (MQTT + HTTP) for real-time updates and instant command execution.
+A native cloud integration for Mysa devices in Home Assistant. Uses the official Mysa Cloud architecture (MQTT + HTTP) for real-time updates and instant command execution.
 
 ## Features
 
-| Feature | Description |
-|:--------|:------------|
-| 🌡️ **Climate Control** | Temperature and HVAC mode (Heat/Off) |
-| 📊 **Sensors** | Brightness, Min/Max Brightness, Zone |
-| 🔒 **Binary Sensors** | Lock, Proximity, Auto Brightness, Eco Mode |
-| 🔄 **Firmware Updates** | Automatic check every 4 hours |
-| 🏠 **Zone Naming** | Group thermostats into Home Assistant areas |
-| ⚡ **Real-time Sync** | Persistent MQTT connection for instant updates |
+| Feature | Thermostats | AC Controller |
+|:--------|:-----------:|:-------------:|
+| 🌡️ Temperature Control | ✓ | ✓ |
+| 🔥 HVAC Mode (Heat/Off) | ✓ | - |
+| ❄️ HVAC Mode (Cool/Heat/Auto/Fan/Dry) | - | ✓ |
+| � Fan Speed Control | - | ✓ |
+| 🔄 Swing Control (Vertical/Horizontal) | - | ✓ |
+| 🌡️ Climate+ (Thermostatic Mode) | - | ✓ |
+| 🔒 Button Lock | ✓ | ✓ |
+| 💡 Brightness Control | ✓ | - |
+| � Wake on Approach | ✓ | - |
+| 📊 Diagnostic Sensors | ✓ | ✓ |
+| 🔄 Firmware Updates | ✓ | ✓ |
+| ⚡ Real-time MQTT Sync | ✓ | ✓ |
 
 ## Supported Devices
 
-- Mysa Baseboard V1 (BB-V1)
-- Mysa Baseboard V2 (BB-V2)
-- Mysa Baseboard V2 Lite (BB-V2-L)
-- Mysa In-Floor (INF-V1)
+- **Mysa Baseboard V1** (BB-V1)
+- **Mysa Baseboard V2** (BB-V2)
+- **Mysa Baseboard V2 Lite** (BB-V2-L)
+- **Mysa In-Floor** (INF-V1)
+- **Mysa AC Controller** (AC-V1) ✨ *New*
 
 ## Installation
 
@@ -47,14 +54,56 @@ Or manually:
 2. (Optional) Configure zone names for your thermostat groups
 3. Devices will appear automatically
 
-## Entity Visibility
+## Entities
 
-| Type | Default | Category |
-|:-----|:--------|:---------|
-| Climate, Brightness, Zone, Lock | **Enabled** | Standard |
-| Voltage, Current, RSSI, Duty Cycle | Disabled | Diagnostic |
+### Climate
+- Temperature control with 0.5°C precision
+- HVAC modes appropriate to device type
+- AC devices include fan mode and swing controls
 
-Diagnostic sensors are hidden by default but can be enabled in **Settings → Entities**.
+### Switches
+| Switch | Thermostats | AC |
+|:-------|:-----------:|:--:|
+| Button Lock | ✓ | ✓ |
+| Auto Brightness | ✓ | - |
+| Wake on Approach | ✓ | - |
+| Climate+ | - | ✓ |
+
+### Number Controls
+| Control | Thermostats | AC |
+|:--------|:-----------:|:--:|
+| Min Brightness | ✓ | - |
+| Max Brightness | ✓ | - |
+
+### Select Controls
+| Control | Thermostats | AC |
+|:--------|:-----------:|:--:|
+| Horizontal Swing | - | ✓ |
+
+### Sensors
+| Sensor | Default | Category |
+|:-------|:--------|:---------|
+| Zone | Enabled | Standard |
+| Voltage | Hidden | Diagnostic |
+| Current | Hidden | Diagnostic |
+| Max Current | Hidden | Diagnostic |
+| RSSI | Hidden | Diagnostic |
+| Duty Cycle | Hidden | Diagnostic |
+
+## Debug Tool
+
+A command-line debug tool is included for development and troubleshooting:
+
+```bash
+cd tools
+python mysa_debug.py
+```
+
+See [docs/MYSA_DEBUG.md](docs/MYSA_DEBUG.md) for usage details.
+
+## Protocol Documentation
+
+For developers interested in the Mysa API, see [docs/MYSA_PROTOCOL.md](docs/MYSA_PROTOCOL.md).
 
 ## Requirements
 

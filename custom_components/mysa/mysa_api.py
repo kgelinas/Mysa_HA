@@ -13,6 +13,12 @@ from homeassistant.helpers.storage import Store
 from .lib.mysotherm import auth, mysa_stuff, aws
 from .lib.mysotherm.aws import Cognito
 from . import mqtt_packet
+from .const import (
+    AC_MODE_OFF, AC_MODE_AUTO, AC_MODE_HEAT, AC_MODE_COOL, AC_MODE_FAN_ONLY, AC_MODE_DRY,
+    AC_FAN_MODES, AC_FAN_MODES_REVERSE,
+    AC_SWING_MODES, AC_SWING_MODES_REVERSE,
+    AC_PAYLOAD_TYPE,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -206,9 +212,14 @@ class MysaApi:
                 self.states[device_id] = new_data
             else:
                 # If we recently sent a command, ignore stale cloud status for a bit
-                if now - self._last_command_time.get(device_id, 0) < 15:
+                if now - self._last_command_time.get(device_id, 0) < 90:  # Extended to 90 seconds
                     _LOGGER.debug("Ignoring potentially stale HTTP state for %s", device_id)
-                    stale_keys = ['Mode', 'md', 'TstatMode', 'SetPoint', 'sp', 'stpt', 'Lock', 'lc', 'lk', 'Brightness', 'br', 'MinBrightness', 'MaxBrightness']
+                    stale_keys = [
+                        'Mode', 'md', 'TstatMode', 'SetPoint', 'sp', 'stpt',
+                        'Lock', 'lc', 'lk', 'ButtonState',
+                        'Brightness', 'br', 'MinBrightness', 'MaxBrightness',
+                        'AutoBrightness', 'ab', 'ProximityMode', 'pr', 'Proximity'
+                    ]
                     filtered_data = {k: v for k, v in new_data.items() if k not in stale_keys}
                     self.states[device_id].update(filtered_data)
                 else:
@@ -238,16 +249,31 @@ class MysaApi:
                     return val
             return None
 
-        # Basic mappings
+        # Basic mappings - only set if value exists
         # For V2, sp and md are often more reliable than the long names
-        state['Mode'] = get_v(['md', 'TstatMode', 'Mode'])
-        state['SetPoint'] = get_v(['sp', 'stpt', 'SetPoint'])
-        state['Duty'] = get_v(['dc', 'Duty', 'DutyCycle'])
-        state['Rssi'] = get_v(['rssi', 'Rssi', 'RSSI'])
-        state['Voltage'] = get_v(['volts', 'Voltage', 'LineVoltage'])
-        state['Current'] = get_v(['amps', 'Current'])
-        state['HeatSink'] = get_v(['hs', 'HeatSink'])
-        if 'if' in state: state['Infloor'] = get_v(['if', 'Infloor'])
+        mode_val = get_v(['md', 'TstatMode', 'Mode'])
+        if mode_val is not None:
+            state['Mode'] = mode_val
+        sp_val = get_v(['sp', 'stpt', 'SetPoint'])
+        if sp_val is not None:
+            state['SetPoint'] = sp_val
+        duty_val = get_v(['dc', 'Duty', 'DutyCycle'])
+        if duty_val is not None:
+            state['Duty'] = duty_val
+        rssi_val = get_v(['rssi', 'Rssi', 'RSSI'])
+        if rssi_val is not None:
+            state['Rssi'] = rssi_val
+        voltage_val = get_v(['volts', 'Voltage', 'LineVoltage'])
+        if voltage_val is not None:
+            state['Voltage'] = voltage_val
+        current_val = get_v(['amps', 'Current'])
+        if current_val is not None:
+            state['Current'] = current_val
+        hs_val = get_v(['hs', 'HeatSink'])
+        if hs_val is not None:
+            state['HeatSink'] = hs_val
+        if 'if' in state: 
+            state['Infloor'] = get_v(['if', 'Infloor'])
             
         # Brightness variants
         # prefer 'br' then 'MaxBrightness' then complex 'Brightness' dict
@@ -281,12 +307,70 @@ class MysaApi:
         if eco_val is not None:
              state['EcoMode'] = (str(eco_val) == '0')
              
-        # New Diagnostic mappings
-        state['MinBrightness'] = get_v(['MinBrightness', 'mnbr'])
-        state['MaxBrightness'] = get_v(['MaxBrightness', 'mxbr'])
-        state['MaxCurrent'] = get_v(['MaxCurrent', 'mxc'])
-        state['MaxSetpoint'] = get_v(['MaxSetpoint', 'mxs'])
-        state['TimeZone'] = get_v(['TimeZone', 'tz'])
+        # New Diagnostic mappings - only set if value exists
+        min_br = get_v(['MinBrightness', 'mnbr'])
+        if min_br is not None:
+            state['MinBrightness'] = min_br
+        max_br = get_v(['MaxBrightness', 'mxbr'])
+        if max_br is not None:
+            state['MaxBrightness'] = max_br
+        max_current = get_v(['MaxCurrent', 'mxc'])
+        if max_current is not None:
+            state['MaxCurrent'] = max_current
+        max_setpoint = get_v(['MaxSetpoint', 'mxs'])
+        if max_setpoint is not None:
+            state['MaxSetpoint'] = max_setpoint
+        timezone = get_v(['TimeZone', 'tz'])
+        if timezone is not None:
+            state['TimeZone'] = timezone
+
+        # =================================================================
+        # AC Controller specific mappings
+        # =================================================================
+        
+        # Fan Speed (AC)
+        fan_val = get_v(['fn', 'FanSpeed'])
+        if fan_val is not None:
+            state['FanSpeed'] = int(fan_val)
+            # Also store the HA-friendly name
+            state['FanMode'] = AC_FAN_MODES.get(int(fan_val), 'unknown')
+        
+        # Vertical Swing (AC)
+        swing_val = get_v(['ss', 'SwingState'])
+        if swing_val is not None:
+            state['SwingState'] = int(swing_val)
+            state['SwingMode'] = AC_SWING_MODES.get(int(swing_val), 'unknown')
+        
+        # Horizontal Swing (AC)
+        hswing_val = get_v(['ssh', 'SwingStateHorizontal'])
+        if hswing_val is not None:
+            state['SwingStateHorizontal'] = int(hswing_val)
+        
+        # TstatMode for AC (maps to HVAC mode)
+        tstat_val = get_v(['TstatMode'])
+        if tstat_val is not None:
+            state['TstatMode'] = int(tstat_val) if isinstance(tstat_val, (int, float)) else tstat_val
+        
+        # ACState object (contains mode, temp, fan, swing as numbered keys)
+        acstate = state.get('ACState')
+        if isinstance(acstate, dict):
+            acstate_v = acstate.get('v', acstate)
+            if isinstance(acstate_v, dict):
+                # Extract values from ACState numbered keys
+                if '1' in acstate_v:  # Power state
+                    state['ACPower'] = int(acstate_v['1'])
+                if '2' in acstate_v:  # Mode
+                    state['ACMode'] = int(acstate_v['2'])
+                if '3' in acstate_v:  # Temperature
+                    state['ACTemp'] = float(acstate_v['3'])
+                if '4' in acstate_v:  # Fan speed
+                    if 'FanSpeed' not in state:
+                        state['FanSpeed'] = int(acstate_v['4'])
+                        state['FanMode'] = AC_FAN_MODES.get(int(acstate_v['4']), 'unknown')
+                if '5' in acstate_v:  # Vertical swing
+                    if 'SwingState' not in state:
+                        state['SwingState'] = int(acstate_v['5'])
+                        state['SwingMode'] = AC_SWING_MODES.get(int(acstate_v['5']), 'unknown')
 
     async def _get_signed_mqtt_url(self):
         """Get signed MQTT URL."""
@@ -489,6 +573,10 @@ class MysaApi:
         model = (device.get("Model") or device.get("ProductModel") or device.get("productModel") or "")
         fw = device.get("FirmwareVersion", "")
         
+        # AC controllers use payload type 2
+        if model.startswith("AC-"):
+             return AC_PAYLOAD_TYPE
+        
         if "BB-V2" in model or "V2" in model:
              if "Lite" in model or "-L" in model:
                   return 5
@@ -503,19 +591,261 @@ class MysaApi:
         
         return 1
 
+    def is_ac_device(self, device_id) -> bool:
+        """Check if device is an AC controller."""
+        device = self.devices.get(device_id, {})
+        model = device.get("Model", "")
+        return model.startswith("AC-")
+
+    def get_ac_supported_caps(self, device_id) -> dict:
+        """Get SupportedCaps for an AC device."""
+        device = self.devices.get(device_id, {})
+        return device.get("SupportedCaps", {})
+
     async def set_hvac_mode(self, device_id, hvac_mode):
         """Set HVAC mode via MQTT."""
         self._last_command_time[device_id] = time.time()
-        # Handle both string and Enum values
         mode_str = str(hvac_mode).lower()
-        # Mode per documentation: md=1 for off, md=3 for heat
-        mode_val = 1 if "off" in mode_str else 3
+        
+        # Map Home Assistant HVAC mode to Mysa mode value
+        if self.is_ac_device(device_id):
+            # AC mode mapping
+            if "off" in mode_str:
+                mode_val = AC_MODE_OFF
+            elif "cool" in mode_str:
+                mode_val = AC_MODE_COOL
+            elif "heat_cool" in mode_str or "auto" in mode_str:
+                mode_val = AC_MODE_AUTO
+            elif "heat" in mode_str:
+                mode_val = AC_MODE_HEAT
+            elif "dry" in mode_str:
+                mode_val = AC_MODE_DRY
+            elif "fan" in mode_str:
+                mode_val = AC_MODE_FAN_ONLY
+            else:
+                mode_val = AC_MODE_OFF
+        else:
+            # Heating thermostat: only heat (3) or off (1)
+            mode_val = 1 if "off" in mode_str else 3
         
         payload_type = self._get_payload_type(device_id)
         _LOGGER.debug("Using type %s for mode %s (val=%s)", payload_type, hvac_mode, mode_val)
         body = {"cmd": [{"md": mode_val, "tm": -1}], "type": payload_type, "ver": 1}
         await self._send_mqtt_command(device_id, body)
         await self.notify_settings_changed(device_id)
+
+    async def set_ac_climate_plus(self, device_id, enabled: bool):
+        """Set AC Climate+ (IsThermostatic) mode via MQTT.
+        
+        When enabled, Mysa uses its temperature sensor to control the AC.
+        When disabled, it acts as a simple IR remote.
+        """
+        self._last_command_time[device_id] = time.time()
+        it_val = 1 if enabled else 0
+        
+        payload_type = self._get_payload_type(device_id)
+        _LOGGER.debug("Setting AC Climate+ to %s (val=%s)", enabled, it_val)
+        body = {"cmd": [{"it": it_val, "tm": -1}], "type": payload_type, "ver": 1}
+        await self._send_mqtt_command(device_id, body)
+        
+        # Optimistic update
+        self._update_state_cache(device_id, {"IsThermostatic": {"v": it_val}, "it": it_val})
+        await self.notify_settings_changed(device_id)
+
+
+    async def set_ac_fan_speed(self, device_id, fan_mode: str):
+        """Set AC fan speed via MQTT."""
+        self._last_command_time[device_id] = time.time()
+        
+        # Convert HA fan mode name to Mysa value
+        fan_val = AC_FAN_MODES_REVERSE.get(fan_mode.lower())
+        if fan_val is None:
+            _LOGGER.error("Unknown fan mode: %s", fan_mode)
+            return
+        
+        payload_type = self._get_payload_type(device_id)
+        _LOGGER.debug("Setting AC fan speed to %s (val=%s)", fan_mode, fan_val)
+        body = {"cmd": [{"fn": fan_val, "tm": -1}], "type": payload_type, "ver": 1}
+        await self._send_mqtt_command(device_id, body)
+        
+        # Optimistic update
+        self._update_state_cache(device_id, {"FanSpeed": {"v": fan_val}, "fn": fan_val})
+        await self.notify_settings_changed(device_id)
+
+    async def set_ac_swing_mode(self, device_id, swing_mode: str):
+        """Set AC vertical swing mode via MQTT."""
+        self._last_command_time[device_id] = time.time()
+        
+        # Convert HA swing mode name to Mysa value
+        swing_val = AC_SWING_MODES_REVERSE.get(swing_mode.lower())
+        if swing_val is None:
+            _LOGGER.error("Unknown swing mode: %s", swing_mode)
+            return
+        
+        payload_type = self._get_payload_type(device_id)
+        _LOGGER.debug("Setting AC vertical swing to %s (val=%s)", swing_mode, swing_val)
+        body = {"cmd": [{"ss": swing_val, "tm": -1}], "type": payload_type, "ver": 1}
+        await self._send_mqtt_command(device_id, body)
+        
+        # Optimistic update
+        self._update_state_cache(device_id, {"SwingState": {"v": swing_val}, "ss": swing_val})
+        await self.notify_settings_changed(device_id)
+
+    async def set_ac_horizontal_swing(self, device_id, position: int):
+        """Set AC horizontal swing position via MQTT."""
+        self._last_command_time[device_id] = time.time()
+        
+        payload_type = self._get_payload_type(device_id)
+        _LOGGER.debug("Setting AC horizontal swing to position %s", position)
+        body = {"cmd": [{"ssh": position, "tm": -1}], "type": payload_type, "ver": 1}
+        await self._send_mqtt_command(device_id, body)
+        
+        # Optimistic update
+        self._update_state_cache(device_id, {"SwingStateHorizontal": {"v": position}, "ssh": position})
+        await self.notify_settings_changed(device_id)
+
+    async def set_lock(self, device_id, locked: bool):
+        """Set thermostat button lock via MQTT + HTTP."""
+        self._last_command_time[device_id] = time.time()
+        lock_val = 1 if locked else 0
+        payload_type = self._get_payload_type(device_id)
+        # MQTT - instant device update
+        body = {"cmd": [{"lk": lock_val, "tm": -1}], "type": payload_type, "ver": 1}
+        await self._send_mqtt_command(device_id, body)
+        # HTTP - sync cloud/app
+        await self._set_device_setting_silent(device_id, {"Lock": lock_val})
+        # Optimistic update
+        self._update_state_cache(device_id, {"Lock": {"v": lock_val}})
+        await self.notify_settings_changed(device_id)
+
+    async def set_proximity(self, device_id, enabled: bool):
+        """Set proximity mode (wake on approach) via MQTT + HTTP."""
+        self._last_command_time[device_id] = time.time()
+        pr_val = 1 if enabled else 0
+        payload_type = self._get_payload_type(device_id)
+        # MQTT - instant device update
+        body = {"cmd": [{"pr": pr_val, "tm": -1}], "type": payload_type, "ver": 1}
+        await self._send_mqtt_command(device_id, body)
+        # HTTP - sync cloud/app
+        await self._set_device_setting_silent(device_id, {"ProximityMode": enabled})
+        # Optimistic update
+        self._update_state_cache(device_id, {"ProximityMode": enabled})
+        await self.notify_settings_changed(device_id)
+
+    async def set_auto_brightness(self, device_id, enabled: bool):
+        """Set auto brightness via MQTT + HTTP (V2)."""
+        self._last_command_time[device_id] = time.time()
+        payload_type = self._get_payload_type(device_id)
+        br_obj = self._get_brightness_object(device_id)
+        br_obj["a_b"] = 1 if enabled else 0
+        # MQTT - instant device update
+        body = {"cmd": [{"tm": -1, "br": br_obj}], "type": payload_type, "ver": 1}
+        await self._send_mqtt_command(device_id, body)
+        # HTTP - sync cloud/app
+        await self._set_device_setting_silent(device_id, {"AutoBrightness": enabled})
+        # Optimistic update
+        self._update_state_cache(device_id, {"AutoBrightness": enabled})
+        await self.notify_settings_changed(device_id)
+
+    async def set_min_brightness(self, device_id, value: int):
+        """Set idle (min) brightness via MQTT + HTTP (V2)."""
+        self._last_command_time[device_id] = time.time()
+        payload_type = self._get_payload_type(device_id)
+        br_obj = self._get_brightness_object(device_id)
+        br_obj["i_br"] = value
+        # MQTT - instant device update
+        body = {"cmd": [{"tm": -1, "br": br_obj}], "type": payload_type, "ver": 1}
+        await self._send_mqtt_command(device_id, body)
+        # HTTP - sync cloud/app
+        await self._set_device_setting_silent(device_id, {"MinBrightness": value})
+        # Optimistic update - update both top-level AND nested Brightness object
+        self._update_brightness_cache(device_id, "i_br", value)
+        self._update_state_cache(device_id, {"MinBrightness": value})
+        await self.notify_settings_changed(device_id)
+
+    async def set_max_brightness(self, device_id, value: int):
+        """Set active (max) brightness via MQTT + HTTP (V2)."""
+        self._last_command_time[device_id] = time.time()
+        payload_type = self._get_payload_type(device_id)
+        br_obj = self._get_brightness_object(device_id)
+        br_obj["a_br"] = value
+        # MQTT - instant device update
+        body = {"cmd": [{"tm": -1, "br": br_obj}], "type": payload_type, "ver": 1}
+        await self._send_mqtt_command(device_id, body)
+        # HTTP - sync cloud/app
+        await self._set_device_setting_silent(device_id, {"MaxBrightness": value})
+        # Optimistic update - update both top-level AND nested Brightness object
+        self._update_brightness_cache(device_id, "a_br", value)
+        self._update_state_cache(device_id, {"MaxBrightness": value})
+        await self.notify_settings_changed(device_id)
+
+    def _get_brightness_object(self, device_id):
+        """Build brightness object from current state, or defaults."""
+        state = self.states.get(device_id, {})
+        br = state.get("Brightness", {})
+        if isinstance(br, dict):
+            return {
+                "a_b": br.get("a_b", 1),       # Auto brightness
+                "a_br": br.get("a_br", 100),   # Active brightness
+                "i_br": br.get("i_br", 50),    # Idle brightness
+                "a_dr": br.get("a_dr", 60),    # Active duration
+                "i_dr": br.get("i_dr", 30),    # Idle duration
+            }
+        # Fallback defaults for V1 or unknown structure
+        return {"a_b": 1, "a_br": 100, "i_br": 50, "a_dr": 60, "i_dr": 30}
+
+    def _update_state_cache(self, device_id, updates: dict):
+        """Optimistically update local state cache after MQTT command."""
+        if device_id not in self.states:
+            self.states[device_id] = {}
+        self.states[device_id].update(updates)
+        _LOGGER.debug("Optimistic state update for %s: %s", device_id, updates)
+
+    def _update_brightness_cache(self, device_id, key, value):
+        """Update nested Brightness object in state cache."""
+        if device_id not in self.states:
+            self.states[device_id] = {}
+        if "Brightness" not in self.states[device_id]:
+            self.states[device_id]["Brightness"] = self._get_brightness_object(device_id)
+        if isinstance(self.states[device_id]["Brightness"], dict):
+            self.states[device_id]["Brightness"][key] = value
+        _LOGGER.debug("Brightness cache update for %s: %s=%s", device_id, key, value)
+
+    async def _set_device_setting_silent(self, device_id, settings: dict):
+        """Set device settings via HTTP POST without triggering coordinator refresh."""
+        def do_post():
+            url = f"{mysa_stuff.BASE_URL}/devices/{device_id}"
+            r = self._session.post(url, json=settings)
+            r.raise_for_status()
+            return r.json()
+        
+        try:
+            result = await self.hass.async_add_executor_job(do_post)
+            _LOGGER.debug("HTTP sync for %s: %s -> %s", device_id, settings, result)
+        except Exception as e:
+            _LOGGER.warning("HTTP sync failed for %s: %s (MQTT already sent)", device_id, e)
+            # Don't raise - MQTT already handled the device update
+
+    async def _set_device_setting(self, device_id, settings: dict):
+        """Set device settings via HTTP POST."""
+        def do_post():
+            url = f"{mysa_stuff.BASE_URL}/devices/{device_id}"
+            r = self._session.post(url, json=settings)
+            r.raise_for_status()
+            return r.json()
+        
+        try:
+            result = await self.hass.async_add_executor_job(do_post)
+            _LOGGER.debug("Set device %s settings %s: %s", device_id, settings, result)
+            # Update local state cache
+            if device_id in self.states:
+                self.states[device_id].update(settings)
+            # Trigger coordinator refresh
+            if self.coordinator_callback:
+                await self.coordinator_callback()
+        except Exception as e:
+            _LOGGER.error("Failed to set device %s settings: %s", device_id, e)
+            raise
 
     async def notify_settings_changed(self, device_id):
         """Notify the thermostat to check its settings via MQTT (MsgType 6)."""
@@ -716,7 +1046,7 @@ class MysaApi:
                         raise  # Re-raise to trigger reconnection
                         
         except Exception as listen_error:
-            _LOGGER.error("MQTT listen error (will reconnect): %s", listen_error, exc_info=True)
+            _LOGGER.debug("MQTT listen error (will reconnect): %s", listen_error, exc_info=True)
             raise
         finally:
             self._mqtt_ws = None
@@ -770,7 +1100,5 @@ class MysaApi:
                 
         except Exception as e:
             _LOGGER.error("Error processing MQTT publish: %s", e, exc_info=True)
-
-
 
 
