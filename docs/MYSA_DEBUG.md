@@ -139,6 +139,10 @@ Enable sniff mode to see all MQTT messages in real-time:
 ```
 CMD> sniff
 Sniff Mode: ON
+
+# Or filter for a specific device:
+CMD> sniff 1
+Sniff Mode: ON (Filtered to bb-v2-0-...)
 ```
 
 Output shows:

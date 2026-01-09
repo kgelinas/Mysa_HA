@@ -16,7 +16,7 @@ from .mysa_auth import (
     REGION, USER_POOL_ID, CLIENT_ID, JWKS, IDENTITY_POOL_ID,
     CLIENT_HEADERS, BASE_URL,
 )
-from . import mqtt_packet
+from . import mqtt
 from .const import (
     AC_MODE_OFF, AC_MODE_AUTO, AC_MODE_HEAT, AC_MODE_COOL, AC_MODE_FAN_ONLY, AC_MODE_DRY,
     AC_FAN_MODES, AC_FAN_MODES_REVERSE,
@@ -42,6 +42,8 @@ class MysaApi:
         self._session = None
         self._user_id = None # Mysa User UUID
         self.devices = {}
+        self.homes = []
+        self.zones = {} # zone_id -> zone_name
         self.states = {}
         self._last_command_time = {}  # device_id: timestamp
         self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
@@ -145,7 +147,45 @@ class MysaApi:
         else:
              self.devices = devices_raw
              
+        # Auto-fetch homes/zones to populate mapping
+        try:
+             self._fetch_homes_sync()
+        except Exception as e:
+             _LOGGER.warning("Failed to fetch homes/zones: %s", e)
+
         return self.devices
+
+    async def fetch_homes(self):
+        """Fetch homes and zones."""
+        return await self.hass.async_add_executor_job(self._fetch_homes_sync)
+
+    def _fetch_homes_sync(self):
+        """Fetch homes synchronously from HTTP API."""
+        if not self._session:
+             raise RuntimeError("Session not initialized")
+        
+        url = f"{BASE_URL}/homes"
+        r = self._session.get(url)
+        r.raise_for_status()
+        
+        
+        data = r.json()
+        self.homes = data.get('Homes', data.get('homes', []))
+        
+        # Populate zone mapping
+        self.zones = {}
+        for home in self.homes:
+             for zone in home.get('Zones', []):
+                 z_id = zone.get('Id')
+                 z_name = zone.get('Name')
+                 if z_id and z_name:
+                     self.zones[z_id] = z_name
+                     
+        return self.homes
+
+    def get_zone_name(self, zone_id):
+        """Get friendly name for a zone ID."""
+        return self.zones.get(zone_id)
 
     def fetch_firmware_info(self, device_id):
         """Fetch firmware update info (Sync)."""
@@ -447,7 +487,7 @@ class MysaApi:
                     additional_headers=headers
                 ) as ws:
                     # MQTT Connect
-                    connect_pkt = mqtt_packet.connect(str(uuid1()), 60)
+                    connect_pkt = mqtt.connect(str(uuid1()), 60)
                     await ws.send(connect_pkt)
                     
                     # Wait for Connack
@@ -457,11 +497,11 @@ class MysaApi:
                     # liten_up subscribes to /out, /in, /batch
                     # Packet ID 1 for subscribe
                     sub_topics = [
-                        mqtt_packet.SubscriptionSpec(f'/v1/dev/{safe_device_id}/out', 0x01),
-                        mqtt_packet.SubscriptionSpec(f'/v1/dev/{safe_device_id}/in', 0x01),
-                        mqtt_packet.SubscriptionSpec(f'/v1/dev/{safe_device_id}/batch', 0x01)
+                        mqtt.SubscriptionSpec(f'/v1/dev/{safe_device_id}/out', 0x01),
+                        mqtt.SubscriptionSpec(f'/v1/dev/{safe_device_id}/in', 0x01),
+                        mqtt.SubscriptionSpec(f'/v1/dev/{safe_device_id}/batch', 0x01)
                     ]
-                    sub_pkt = mqtt_packet.subscribe(1, sub_topics)
+                    sub_pkt = mqtt.subscribe(1, sub_topics)
                     await ws.send(sub_pkt)
                     
                     # Wait for Suback
@@ -470,7 +510,7 @@ class MysaApi:
                     # Publish
                     _LOGGER.debug("Sending MQTT command to %s: %s", topic, json_payload)
                     # Packet ID 2 for publish
-                    pub_pkt = mqtt_packet.publish(topic, False, 1, False, packet_id=2, payload=json_payload.encode())
+                    pub_pkt = mqtt.publish(topic, False, 1, False, packet_id=2, payload=json_payload.encode())
                     await ws.send(pub_pkt)
                     
                     # Wait for Puback
@@ -482,8 +522,8 @@ class MysaApi:
                     try:
                          # Wait for up to 2 seconds for a response from the device
                          resp = await asyncio.wait_for(ws.recv(), timeout=2.0)
-                         pkt = mqtt_packet.parse_one(resp)
-                         if isinstance(pkt, mqtt_packet.PublishPacket):
+                         pkt = mqtt.parse_one(resp)
+                         if isinstance(pkt, mqtt.PublishPacket):
                               _LOGGER.debug("Received status update from device: %s", pkt.payload)
                               payload = json.loads(pkt.payload)
                               # If it's a response to our command (msg 44) or a state update (msg 40)
@@ -529,21 +569,21 @@ class MysaApi:
                         ssl=ssl_context,
                         extra_headers=headers
                     ) as ws:
-                        connect_pkt = mqtt_packet.connect(str(uuid1()), 60)
+                        connect_pkt = mqtt.connect(str(uuid1()), 60)
                         await ws.send(connect_pkt)
                         resp = await ws.recv()
                         
                         sub_topics = [
-                            mqtt_packet.SubscriptionSpec(f'/v1/dev/{safe_device_id}/out', 0x01),
-                            mqtt_packet.SubscriptionSpec(f'/v1/dev/{safe_device_id}/in', 0x01),
-                            mqtt_packet.SubscriptionSpec(f'/v1/dev/{safe_device_id}/batch', 0x01)
+                            mqtt.SubscriptionSpec(f'/v1/dev/{safe_device_id}/out', 0x01),
+                            mqtt.SubscriptionSpec(f'/v1/dev/{safe_device_id}/in', 0x01),
+                            mqtt.SubscriptionSpec(f'/v1/dev/{safe_device_id}/batch', 0x01)
                         ]
-                        sub_pkt = mqtt_packet.subscribe(1, sub_topics)
+                        sub_pkt = mqtt.subscribe(1, sub_topics)
                         await ws.send(sub_pkt)
                         resp = await ws.recv()
                         
                         _LOGGER.debug("Sending MQTT command to %s: %s", topic, json_payload)
-                        pub_pkt = mqtt_packet.publish(topic, False, 1, False, packet_id=2, payload=json_payload.encode())
+                        pub_pkt = mqtt.publish(topic, False, 1, False, packet_id=2, payload=json_payload.encode())
                         await ws.send(pub_pkt)
                         resp = await ws.recv()
                         _LOGGER.debug("Received response (likely PUBACK)")
@@ -887,7 +927,7 @@ class MysaApi:
         if self._mqtt_ws:
             try:
                 # Send MQTT DISCONNECT packet before closing
-                disconnect_pkt = mqtt_packet.disconnect()
+                disconnect_pkt = mqtt.disconnect()
                 await self._mqtt_ws.send(disconnect_pkt)
                 await self._mqtt_ws.close()
             except Exception:
@@ -925,7 +965,7 @@ class MysaApi:
             if not isinstance(data, bytearray):
                 data = bytearray(data)
             msgs = []
-            mqtt_packet.parse(data, msgs)
+            mqtt.parse(data, msgs)
             return msgs[0] if msgs else None
         
         # Get signed URL
@@ -965,13 +1005,13 @@ class MysaApi:
         
         try:
             # MQTT Connect
-            connect_pkt = mqtt_packet.connect(str(uuid1()), 60)
+            connect_pkt = mqtt.connect(str(uuid1()), 60)
             await ws.send(connect_pkt)
             
             # Wait for Connack
             resp = await ws.recv()
             pkt = parse_mqtt_packet(resp)
-            if not isinstance(pkt, mqtt_packet.ConnackPacket):
+            if not isinstance(pkt, mqtt.ConnackPacket):
                 raise RuntimeError(f"Expected CONNACK, got {pkt}")
             
             _LOGGER.info("MQTT connected successfully")
@@ -984,19 +1024,19 @@ class MysaApi:
             for device_id in self.devices:
                 safe_device_id = device_id.replace(":", "").lower()
                 sub_topics.extend([
-                    mqtt_packet.SubscriptionSpec(f'/v1/dev/{safe_device_id}/out', 0x01),
-                    mqtt_packet.SubscriptionSpec(f'/v1/dev/{safe_device_id}/in', 0x01),
-                    mqtt_packet.SubscriptionSpec(f'/v1/dev/{safe_device_id}/batch', 0x01)
+                    mqtt.SubscriptionSpec(f'/v1/dev/{safe_device_id}/out', 0x01),
+                    mqtt.SubscriptionSpec(f'/v1/dev/{safe_device_id}/in', 0x01),
+                    mqtt.SubscriptionSpec(f'/v1/dev/{safe_device_id}/batch', 0x01)
                 ])
             
             if sub_topics:
-                sub_pkt = mqtt_packet.subscribe(1, sub_topics)
+                sub_pkt = mqtt.subscribe(1, sub_topics)
                 await ws.send(sub_pkt)
                 
                 # Wait for Suback
                 resp = await ws.recv()
                 pkt = parse_mqtt_packet(resp)
-                if not isinstance(pkt, mqtt_packet.SubackPacket):
+                if not isinstance(pkt, mqtt.SubackPacket):
                     raise RuntimeError(f"Expected SUBACK, got {pkt}")
                 
                 _LOGGER.info("Subscribed to %d device topics", len(self.devices))
@@ -1021,10 +1061,10 @@ class MysaApi:
                     try:
                         pkt = parse_mqtt_packet(msg)
                         
-                        if isinstance(pkt, mqtt_packet.PublishPacket):
+                        if isinstance(pkt, mqtt.PublishPacket):
                             # Process device state update
                             await self._process_mqtt_publish(pkt)
-                        elif hasattr(pkt, 'pkt_type') and pkt.pkt_type == mqtt_packet.MQTT_PACKET_PINGRESP:
+                        elif hasattr(pkt, 'pkt_type') and pkt.pkt_type == mqtt.MQTT_PACKET_PINGRESP:
                             _LOGGER.debug("Received PINGRESP")
                         elif pkt:
                             _LOGGER.debug("Received MQTT packet type: %s", type(pkt).__name__)
@@ -1042,7 +1082,7 @@ class MysaApi:
                 # Send ping if needed (proactive keepalive)
                 if time.time() - last_ping >= ping_interval:
                     try:
-                        await ws.send(mqtt_packet.pingreq())
+                        await ws.send(mqtt.pingreq())
                         last_ping = time.time()
                         _LOGGER.debug("Sent PINGREQ keepalive")
                     except Exception as e:

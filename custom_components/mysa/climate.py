@@ -89,7 +89,7 @@ class MysaClimate(CoordinatorEntity, ClimateEntity):
         """Return device info."""
         state = self._get_state_data()
         zone_id = state.get("Zone") if state else None
-        zone_name = self._entry.options.get(f"zone_name_{zone_id}") if zone_id else None
+        zone_name = self._api.get_zone_name(zone_id) if zone_id else None
         
         info = {
             "identifiers": {(DOMAIN, self._device_id)},
@@ -217,10 +217,10 @@ class MysaClimate(CoordinatorEntity, ClimateEntity):
         state = self._get_state_data()
         zone_id = state.get("Zone") if state else None
         
-        # Get friendly name from options if mapped
+        # Get friendly name from API mapping
         zone_name = None
         if zone_id:
-            zone_name = self._entry.options.get(f"zone_name_{zone_id}")
+            zone_name = self._api.get_zone_name(zone_id)
         
         return {
             "model": self._device_data.get("Model"),

@@ -1,6 +1,6 @@
 # Mysa for Home Assistant
 
-[![Version](https://img.shields.io/badge/version-0.7.0-blue.svg)](https://github.com/kgelinas/Mysa_HA)
+[![Version](https://img.shields.io/badge/version-0.7.1-blue.svg)](https://github.com/kgelinas/Mysa_HA)
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz/)
 
 A native cloud integration for Mysa devices in Home Assistant. Uses the official Mysa Cloud architecture (MQTT + HTTP) for real-time updates and instant command execution.

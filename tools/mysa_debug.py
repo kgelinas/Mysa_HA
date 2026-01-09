@@ -34,7 +34,7 @@ try:
         login, auther, sigv4_sign_mqtt_url,
         REGION, IDENTITY_POOL_ID, CLIENT_HEADERS, BASE_URL,
     )
-    import mqtt_packet
+    import mqtt
     import boto3
 except ImportError as e:
     print(f"\nCRITICAL: Could not import required modules: {e}")
@@ -64,7 +64,9 @@ class MysaDebugTool:
         self.ws = None
         self.user_id = None
         self.session = None
+        self.session = None
         self.sniff_mode = False
+        self.sniff_filter = None  # Filter by device ID (None = all)
 
     async def run(self):
         print("\n" + "="*60)
@@ -183,17 +185,40 @@ class MysaDebugTool:
                 if cmd in ('q', 'quit', 'exit'):
                     print("Goodbye!")
                     return
-                elif cmd == 'ls':
+                elif cmd in ('ls', 'list'):
                     self.list_devices()
                 elif cmd == 'sniff':
-                    self.sniff_mode = not self.sniff_mode
-                    print(f"Sniff Mode: {'ON' if self.sniff_mode else 'OFF'}")
-                elif cmd == 'examples':
+                    if len(parts) > 1:
+                         # Filter mode
+                         target = self._resolve_device(parts[1])
+                         if target:
+                             self.sniff_mode = True
+                             self.sniff_filter = target
+                             print(f"Sniff Mode: ON (Filtered to {target})")
+                         else:
+                             print(f"Invalid device ref: {parts[1]}")
+                    else:
+                        # Toggle global
+                        if self.sniff_mode and self.sniff_filter:
+                            # If filtered, clear filter but keep sniff on (or toggle off? context dependent)
+                            # User expectation: 'sniff' toggles.
+                            self.sniff_mode = False
+                            self.sniff_filter = None
+                            print("Sniff Mode: OFF")
+                        else:
+                            self.sniff_mode = not self.sniff_mode
+                            self.sniff_filter = None
+                            print(f"Sniff Mode: {'ON' if self.sniff_mode else 'OFF'}")
+                elif cmd in ('examples', 'ex'):
                     self.show_examples()
-                elif cmd == 'help' or cmd == '?':
+                elif cmd in ('help', '?'):
                     self.print_help()
                 elif cmd == 'advanced':
                     await self.advanced_menu()
+                elif cmd == 'homes':
+                    await self.show_homes()
+                elif cmd == 'users':
+                    await self.show_users()
                 elif cmd == 'http' and len(parts) >= 3:
                     await self.send_http(parts[1], parts[2])
                 elif cmd == 'mqtt' and len(parts) >= 3:
@@ -201,22 +226,104 @@ class MysaDebugTool:
                 elif cmd == 'state' and len(parts) >= 2:
                     await self.show_state(parts[1])
                 else:
-                    print("Unknown command. Type 'help' or 'examples' for help.")
+                    print("Unknown command. Type 'help' or 'ex' for available commands.")
             except Exception as e:
                 print(f"Error: {e}")
 
     def print_help(self):
-        print("\n" + "-"*50)
-        print("Commands:")
-        print("  ls                     - List devices")
-        print("  state <DID>            - Show raw device state")
-        print("  http <DID> <JSON>      - Send HTTP POST to /devices/<DID>")
-        print("  mqtt <DID> <JSON>      - Send MQTT command (wrapped)")
-        print("  sniff                  - Toggle MQTT sniffer mode")
-        print("  examples               - Show example payloads")
-        print("  advanced               - Advanced/dangerous operations")
-        print("  q                      - Quit")
-        print("-"*50)
+        """Print available commands."""
+        print("\n--- Mysa Debug Tool Help ---")
+        
+        print("\n[ Basic Commands ]")
+        print("  list, ls          List devices")
+        print("  help, ?           Show this help")
+        print("  examples, ex      Show command examples")
+        print("  quit, exit        Exit tool")
+        
+        print("\n[ Device Information ]")
+        print("  state <ID>        Show full device state (HTTP + MQTT)")
+        print("  homes             Show /homes API response (Zones, ERate)")
+        print("  users             Show /users API response (User Info, Devices)")
+        print("  sniff [ID]        Toggle MQTT sniffing (Optional: Filter by ID)")
+
+        print("\n[ Device Control ]")
+        print("  http <ID> <JSON>  Send HTTP command directly")
+        print("  mqtt <ID> <JSON>  Send MQTT command directly")
+        
+        print("\n[ Advanced ]")
+        print("  advanced          Open advanced menu (Conversions, Dangerous Ops)")
+        print("    ↳ Convert BB-V2-0-L (Lite) -> BB-V2-0 (Full)")
+        print("    ↳ Killer Ping (Reboot to pairing)")
+        print()
+
+    async def show_homes(self):
+        """Fetch and display /homes API response."""
+        print("\nFetching /homes...")
+        try:
+            r = self.session.get(f"{BASE_URL}/homes")
+            r.raise_for_status()
+            data = r.json()
+            print("\n--- /homes Response ---")
+            print(json.dumps(data, indent=2))
+            
+            # Extract and highlight HOME_UUIDs and Zones
+            homes = data.get('Homes', data.get('homes', []))
+            if homes:
+                print("\n--- Homes & Zones ---")
+                for i, home in enumerate(homes, 1):
+                    home_id = home.get('Id', home.get('id', home.get('HomeId', 'Unknown')))
+                    home_name = home.get('Name', home.get('name', 'Unnamed'))
+                    erate = home.get('ERate', 'N/A')
+                    print(f"\n  {i}. 🏠 {home_name}")
+                    print(f"     Home UUID: {home_id}")
+                    print(f"     ERate: ${erate}/kWh")
+                    
+                    # Display zones
+                    zones = home.get('Zones', [])
+                    if zones:
+                        print("     Zones:")
+                        for zone in zones:
+                            zone_id = zone.get('Id', 'Unknown')
+                            zone_name = zone.get('Name', 'Unnamed')
+                            print(f"       • {zone_name}: {zone_id}")
+        except Exception as e:
+            print(f"Failed to fetch /homes: {e}")
+
+    async def show_users(self):
+        """Fetch and display /users API response."""
+        print("\nFetching /users...")
+        try:
+            r = self.session.get(f"{BASE_URL}/users")
+            r.raise_for_status()
+            data = r.json()
+            print("\n--- /users Response ---")
+            print(json.dumps(data, indent=2))
+            
+            # Extract key user info
+            user = data.get('User', data.get('user', {}))
+            if user:
+                cognito = user.get('CognitoAttrs', {})
+                print("\n--- User Info ---")
+                print(f"  User ID: {user.get('Id', 'Unknown')}")
+                print(f"  Email: {cognito.get('email', 'Unknown')}")
+                print(f"  Name: {cognito.get('name', cognito.get('given_name', '') + ' ' + cognito.get('family_name', ''))}")
+                print(f"  Language: {user.get('LanguagePreference', 'Unknown')}")
+                print(f"  Primary Home: {user.get('PrimaryHome', 'Unknown')}")
+                print(f"  ERate: ${user.get('ERate', 'N/A')}/kWh")
+                print(f"  App Version: {user.get('LastAppVersion', 'Unknown')}")
+                
+                # DevicesPaired summary
+                paired = user.get('DevicesPaired', {}).get('State', {})
+                if paired:
+                    print("\n--- Paired Devices ---")
+                    for category, devices in paired.items():
+                        if devices:
+                            print(f"  {category}:")
+                            for did, info in devices.items():
+                                dtype = info.get('deviceType', 'Unknown')
+                                print(f"    • {did}: {dtype}")
+        except Exception as e:
+            print(f"Failed to fetch /users: {e}")
 
     async def advanced_menu(self):
         """Show advanced operations menu."""
@@ -361,7 +468,7 @@ class MysaDebugTool:
         topic = f"/v1/dev/{did.replace(':', '').lower()}/in"
         
         try:
-            pub_pkt = mqtt_packet.publish(topic, False, 1, False, packet_id=99, payload=json.dumps(payload).encode())
+            pub_pkt = mqtt.publish(topic, False, 1, False, packet_id=99, payload=json.dumps(payload).encode())
             await self.ws.send(pub_pkt)
             
             print("\n" + "="*60)
@@ -511,7 +618,7 @@ class MysaDebugTool:
         print(f"Body: {json.dumps(body, indent=2)}")
         
         try:
-            pub_pkt = mqtt_packet.publish(topic, False, 1, False, packet_id=2, payload=json_payload.encode())
+            pub_pkt = mqtt.publish(topic, False, 1, False, packet_id=2, payload=json_payload.encode())
             await self.ws.send(pub_pkt)
             print("✓ Sent!")
         except Exception as e:
@@ -532,7 +639,7 @@ class MysaDebugTool:
         safe_did = did.replace(":", "").lower()
         topic = f"/v1/dev/{safe_did}/in"
         try:
-            pub_pkt = mqtt_packet.publish(topic, False, 1, False, packet_id=3, payload=json.dumps(body).encode())
+            pub_pkt = mqtt.publish(topic, False, 1, False, packet_id=3, payload=json.dumps(body).encode())
             await self.ws.send(pub_pkt)
         except Exception:
             pass  # Notification is best-effort
@@ -560,7 +667,7 @@ class MysaDebugTool:
             if not isinstance(data, bytearray):
                 data = bytearray(data)
             msgs = []
-            mqtt_packet.parse(data, msgs)
+            mqtt.parse(data, msgs)
             return msgs[0] if msgs else None
 
         while True:
@@ -579,18 +686,18 @@ class MysaDebugTool:
                     self.ws = ws
                     print("⚡ MQTT Connected!")
                     
-                    await ws.send(mqtt_packet.connect(str(uuid1()), 60))
+                    await ws.send(mqtt.connect(str(uuid1()), 60))
                     await ws.recv()  # Connack
                     
                     # Subscribe to all devices
                     subs = []
                     for did in self.devices:
                         safe_did = did.replace(":", "").lower()
-                        subs.append(mqtt_packet.SubscriptionSpec(f'/v1/dev/{safe_did}/out', 0x01))
-                        subs.append(mqtt_packet.SubscriptionSpec(f'/v1/dev/{safe_did}/in', 0x01))
+                        subs.append(mqtt.SubscriptionSpec(f'/v1/dev/{safe_did}/out', 0x01))
+                        subs.append(mqtt.SubscriptionSpec(f'/v1/dev/{safe_did}/in', 0x01))
                     
                     if subs:
-                        await ws.send(mqtt_packet.subscribe(1, subs))
+                        await ws.send(mqtt.subscribe(1, subs))
                         await ws.recv()  # Suback
                     
                     while True:
@@ -598,12 +705,12 @@ class MysaDebugTool:
                             msg = await asyncio.wait_for(ws.recv(), timeout=30.0)
                             pkt = parse_one(msg)
                             
-                            if isinstance(pkt, mqtt_packet.PublishPacket) and self.sniff_mode:
+                            if isinstance(pkt, mqtt.PublishPacket) and self.sniff_mode:
                                 self._print_sniff(pkt)
-                            elif hasattr(pkt, 'pkt_type') and pkt.pkt_type == mqtt_packet.MQTT_PACKET_PINGRESP:
+                            elif hasattr(pkt, 'pkt_type') and pkt.pkt_type == mqtt.MQTT_PACKET_PINGRESP:
                                 pass
                         except asyncio.TimeoutError:
-                            await ws.send(mqtt_packet.pingreq())
+                            await ws.send(mqtt.pingreq())
                             
             except Exception as e:
                 print(f"⚠ MQTT Error: {e}")
@@ -612,6 +719,15 @@ class MysaDebugTool:
 
     def _print_sniff(self, pkt):
         topic_parts = pkt.topic.split('/')
+        
+        # Filter logic
+        if self.sniff_filter:
+            did = "unknown"
+            if len(topic_parts) >= 4:
+                did = topic_parts[3]
+            if did.lower() != self.sniff_filter.replace(":", "").lower():
+                return
+
         direction = topic_parts[-1] if topic_parts else "?"
         arrow = "→" if direction == "in" else "←"
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
@@ -621,7 +737,7 @@ class MysaDebugTool:
             msg_type = payload.get('msg') or payload.get('MsgType')
             print(f"\n[{timestamp}] [SNIFF {arrow}] MsgType {msg_type}: {json.dumps(payload, indent=2)}")
         except:
-            print(f"\n[{timestamp}] [SNIFF {arrow}] {pkt.payload.decode()}")
+            print(f"\n[{timestamp}] [SNIFF {arrow}] {pkt.payload.decode(errors='ignore')}")
 
 
 if __name__ == "__main__":

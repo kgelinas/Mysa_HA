@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.1] - 2026-01-09
+### Added
+- **Auto-Zone Configuration**: Zones are now automatically fetched from the Mysa API and synced to Home Assistant areas. Manual zone configuration has been removed.
+- **Debug Tool Improvements**: 
+  - Added device filtering to `sniff` command (e.g., `sniff 1` or `sniff <ID>`).
+  - Added short aliases for commands (`ls`, `ex`, `?`).
+  - Refactored help menu for better readability.
+
 ## [0.7.0] - 2026-01-09
 
 ### Added
@@ -21,15 +29,16 @@ All notable changes to this project will be documented in this file.
 ## [0.6.0] - 2026-01-09
 
 ### Added
-- **AC Controller Support** (AC-V1): Full support for Mysa AC controllers
-  - HVAC modes: Cool, Heat, Auto, Fan Only, Dry
-  - Fan speed control (Auto, Low, Medium-Low, Medium, High, Sleep)
-  - Vertical swing control
-  - Horizontal swing control (Select entity)
-  - Climate+ thermostatic mode (Switch entity)
-- **New Switch Entities**: Button Lock, Auto Brightness, Wake on Approach, Climate+
-- **New Number Entities**: Min/Max Brightness controls
-- **New Select Entity**: Horizontal Swing position (AC only)
+- **AC Controller Support** (AC-V1):
+  - 🌡️ Temperature control
+  - ❄️ Full HVAC modes: Cool, Heat, Auto, Fan Only, Dry
+  - 💨 Fan speed control (Auto, Low, Medium-Low, Medium, High, Sleep)
+  - 🔄 Vertical and Horizontal swing control
+  - 🌡️ Climate+ thermostatic mode
+- **New Entities for All Devices**:
+  - Switch: Button Lock, Auto Brightness, Wake on Approach, Climate+
+  - Number: Min/Max Brightness controls
+  - Select: Horizontal Swing position (AC)
 
 ### Changed
 - Refactored climate.py with dedicated `MysaACClimate` class
