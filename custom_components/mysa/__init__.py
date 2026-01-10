@@ -49,7 +49,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     
     # Pass coordinator callback to API for MQTT updates
-    api = MysaApi(username, password, hass, coordinator_callback=coordinator.async_request_refresh)
+    # Get upgraded lite devices from options
+    upgraded_lite_devices = entry.options.get("upgraded_lite_devices", [])
+    
+    api = MysaApi(
+        username, 
+        password, 
+        hass, 
+        coordinator_callback=coordinator.async_request_refresh,
+        upgraded_lite_devices=upgraded_lite_devices
+    )
     
     try:
         await api.authenticate()
@@ -69,7 +78,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     
+    # Listen for options updates (no reload required)
+    entry.async_on_unload(entry.add_update_listener(async_options_updated))
+    
     return True
+
+
+async def async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Handle options update."""
+    api = hass.data[DOMAIN][entry.entry_id]["api"]
+    api.upgraded_lite_devices = entry.options.get("upgraded_lite_devices", [])
+    _LOGGER.info("Options updated: upgraded_lite_devices = %s", api.upgraded_lite_devices)
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""

@@ -8,10 +8,6 @@
                     "username": "Nom d'utilisateur (Courriel)",
                     "password": "Mot de passe"
                 }
-            },
-            "zones": {
-                "title": "Configurer les noms de zones",
-                "description": "Définissez un nom de zone personnalisé pour chaque groupe de thermostats. Ces noms seront utilisés pour organiser vos appareils en zones dans Home Assistant."
             }
         },
         "error": {
@@ -25,8 +21,11 @@
     "options": {
         "step": {
             "init": {
-                "title": "Configurer les noms de zones",
-                "description": "Attribuez ou mettez à jour le nom personnalisé de vos zones de thermostats. Ces noms seront utilisés pour les attributs d'entité et les zones suggérées."
+                "title": "Options Mysa",
+                "description": "Configurer les paramètres avancés des appareils.",
+                "data": {
+                    "upgraded_lite_devices": "Appareils Lite mis à niveau (Forcer Type 5)"
+                }
             }
         }
     }

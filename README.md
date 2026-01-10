@@ -1,6 +1,6 @@
 # Mysa for Home Assistant
 
-[![Version](https://img.shields.io/badge/version-0.7.1-blue.svg)](https://github.com/kgelinas/Mysa_HA)
+[![Version](https://img.shields.io/badge/version-0.7.2-blue.svg)](https://github.com/kgelinas/Mysa_HA)
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz/)
 
 A native cloud integration for Mysa devices in Home Assistant. Uses the official Mysa Cloud architecture (MQTT + HTTP) for real-time updates and instant command execution.
@@ -89,6 +89,18 @@ Or manually:
 | Max Current | Hidden | Diagnostic |
 | RSSI | Hidden | Diagnostic |
 | Duty Cycle | Hidden | Diagnostic |
+
+## Upgraded Lite Devices
+
+If you have a Mysa Lite thermostat (BB-V2-0-L) that has been "magic upgraded" to full functionality using the debug tool's Lite-to-Full conversion, you need to configure it in Home Assistant:
+
+1. Go to **Settings → Devices & Services → Mysa → Configure**
+2. Select the upgraded device(s) in "Upgraded Lite Devices"
+3. Click Submit
+
+This ensures commands are sent with the correct protocol type (Type 5) for your hardware.
+
+> **Note**: The debug tool's `advanced` menu includes the Lite-to-Full conversion feature. See [docs/MYSA_DEBUG.md](docs/MYSA_DEBUG.md) for details on this experimental operation.
 
 ## Debug Tool
 

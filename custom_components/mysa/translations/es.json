@@ -3,15 +3,11 @@
         "step": {
             "user": {
                 "title": "Autenticación Mysa",
-                "description": "Ingrese sus credenciales de cuenta Mysa.",
+                "description": "Ingrese las credenciales de su cuenta Mysa.",
                 "data": {
                     "username": "Usuario (Correo electrónico)",
                     "password": "Contraseña"
                 }
-            },
-            "zones": {
-                "title": "Configurar nombres de zonas",
-                "description": "Establezca un nombre de zona personalizado para cada grupo de termostatos. Estos nombres se utilizarán para organizar sus dispositivos en áreas de Home Assistant."
             }
         },
         "error": {
@@ -25,8 +21,11 @@
     "options": {
         "step": {
             "init": {
-                "title": "Configurar nombres de zonas",
-                "description": "Asigne o actualice el nombre personalizado para sus zonas de termostatos. Estos nombres se utilizarán para atributos de entidad y áreas sugeridas."
+                "title": "Opciones de Mysa",
+                "description": "Configurar ajustes avanzados del dispositivo.",
+                "data": {
+                    "upgraded_lite_devices": "Dispositivos Lite actualizados (Forzar Tipo 5)"
+                }
             }
         }
     }

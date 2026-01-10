@@ -3,15 +3,11 @@
         "step": {
             "user": {
                 "title": "Mysa Authentifizierung",
-                "description": "Geben Sie Ihre Mysa-Kontodaten ein.",
+                "description": "Geben Sie Ihre Mysa-Kontoanmeldedaten ein.",
                 "data": {
                     "username": "Benutzername (E-Mail)",
                     "password": "Passwort"
                 }
-            },
-            "zones": {
-                "title": "Zonennamen konfigurieren",
-                "description": "Legen Sie einen benutzerdefinierten Zonennamen für jede Thermostatgruppe fest. Diese Namen werden verwendet, um Ihre Geräte in Home Assistant-Bereiche zu organisieren."
             }
         },
         "error": {
@@ -25,8 +21,11 @@
     "options": {
         "step": {
             "init": {
-                "title": "Zonennamen konfigurieren",
-                "description": "Weisen Sie den benutzerdefinierten Namen für Ihre Thermostat-Zonen zu oder aktualisieren Sie ihn. Diese Namen werden für Entitätsattribute und vorgeschlagene Bereiche verwendet."
+                "title": "Mysa Optionen",
+                "description": "Erweiterte Geräteeinstellungen konfigurieren.",
+                "data": {
+                    "upgraded_lite_devices": "Aufgerüstete Lite-Geräte (Typ 5 erzwingen)"
+                }
             }
         }
     }

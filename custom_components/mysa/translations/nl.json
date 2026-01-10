@@ -8,10 +8,6 @@
                     "username": "Gebruikersnaam (E-mail)",
                     "password": "Wachtwoord"
                 }
-            },
-            "zones": {
-                "title": "Zonenamen configureren",
-                "description": "Stel een aangepaste zonenaam in voor elke thermostaatgroep. Deze namen worden gebruikt om uw apparaten in Home Assistant-gebieden te organiseren."
             }
         },
         "error": {
@@ -25,8 +21,11 @@
     "options": {
         "step": {
             "init": {
-                "title": "Zonenamen configureren",
-                "description": "Wijs de aangepaste naam voor uw thermostaatzones toe of werk deze bij. Deze namen worden gebruikt voor entiteitsattributen en voorgestelde gebieden."
+                "title": "Mysa Opties",
+                "description": "Geavanceerde apparaatinstellingen configureren.",
+                "data": {
+                    "upgraded_lite_devices": "Geüpgradede Lite-apparaten (Type 5 forceren)"
+                }
             }
         }
     }

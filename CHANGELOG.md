@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.2] - 2026-01-09
+### Added
+- **Upgraded Lite Device Support**: New Options Flow setting to mark devices that have been "magic upgraded" from Lite to Full firmware. These devices require `type: 5` commands despite having full features.
+- **Live Options Updates**: Options changes (like Upgraded Lite selection) now take effect immediately without requiring a reload.
+- **Translations**: Full translations for German, Spanish, Italian, Dutch, and Portuguese.
+
+### Changed
+- Options Flow updated with new title and descriptions for Upgraded Lite feature.
+
 ## [0.7.1] - 2026-01-09
 ### Added
 - **Auto-Zone Configuration**: Zones are now automatically fetched from the Mysa API and synced to Home Assistant areas. Manual zone configuration has been removed.

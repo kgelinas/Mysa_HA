@@ -9,6 +9,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.data_entry_flow import FlowResult
+import homeassistant.helpers.config_validation as cv
 
 from .const import DOMAIN
 from .mysa_api import MysaApi
@@ -23,10 +24,20 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 )
 
 
+from homeassistant.core import callback
+
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Mysa."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> MysaOptionsFlowHandler:
+        """Get the options flow for this handler."""
+        return MysaOptionsFlowHandler(config_entry)
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -61,3 +72,40 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await api.authenticate()
         return api
 
+
+class MysaOptionsFlowHandler(config_entries.OptionsFlow):
+    """Handle options flow for Mysa."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        """Initialize options flow."""
+        self._config_entry = config_entry
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Manage the options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        # Get the API instance to find current devices
+        # This assumes the integration is already setup and running
+        try:
+            api = self.hass.data[DOMAIN][self._config_entry.entry_id]["api"]
+            device_options = {
+                d_id: f"{d_data.get('Name', d_id)} ({d_id})"
+                for d_id, d_data in api.devices.items()
+            }
+        except KeyError:
+            # Fallback if API not loaded (should generally process)
+            device_options = {}
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema({
+                vol.Optional(
+                    "upgraded_lite_devices", 
+                    default=self._config_entry.options.get("upgraded_lite_devices", [])
+                ): cv.multi_select(device_options)
+            }),
+            description_placeholders={}
+        )

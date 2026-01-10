@@ -8,10 +8,6 @@
                     "username": "Nome utente (Email)",
                     "password": "Password"
                 }
-            },
-            "zones": {
-                "title": "Configura nomi zone",
-                "description": "Imposta un nome zona personalizzato per ogni gruppo di termostati. Questi nomi verranno utilizzati per organizzare i tuoi dispositivi nelle aree di Home Assistant."
             }
         },
         "error": {
@@ -25,8 +21,11 @@
     "options": {
         "step": {
             "init": {
-                "title": "Configura nomi zone",
-                "description": "Assegna o aggiorna il nome personalizzato per le zone dei tuoi termostati. Questi nomi verranno utilizzati per gli attributi delle entità e le aree suggerite."
+                "title": "Opzioni Mysa",
+                "description": "Configura impostazioni avanzate del dispositivo.",
+                "data": {
+                    "upgraded_lite_devices": "Dispositivi Lite aggiornati (Forza Tipo 5)"
+                }
             }
         }
     }

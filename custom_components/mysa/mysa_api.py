@@ -32,7 +32,7 @@ STORAGE_VERSION = 1
 class MysaApi:
     """Mysa API Client."""
 
-    def __init__(self, username, password, hass, coordinator_callback=None):
+    def __init__(self, username, password, hass, coordinator_callback=None, upgraded_lite_devices=None):
         """Initialize the API."""
         self.username = username
         self.password = password
@@ -42,6 +42,7 @@ class MysaApi:
         self._session = None
         self._user_id = None # Mysa User UUID
         self.devices = {}
+        self.upgraded_lite_devices = upgraded_lite_devices or []
         self.homes = []
         self.zones = {} # zone_id -> zone_name
         self.states = {}
@@ -610,6 +611,14 @@ class MysaApi:
     
     def _get_payload_type(self, device_id):
         """Determine MQTT payload type based on device model."""
+        # Force Type 5 for Manually Upgraded Lite Devices
+        # Normalize for comparison (remove colons, lowercase)
+        normalized_id = device_id.replace(":", "").lower()
+        for upgraded_id in self.upgraded_lite_devices:
+            if upgraded_id.replace(":", "").lower() == normalized_id:
+                _LOGGER.info("Device %s is marked as Upgraded Lite - forcing type 5", device_id)
+                return 5
+            
         device = self.devices.get(device_id)
         if not device:
              return 1
