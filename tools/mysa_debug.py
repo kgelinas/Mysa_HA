@@ -17,11 +17,8 @@ import logging
 import sys
 import os
 import time
-import ssl
 import getpass
 from datetime import datetime
-from urllib.parse import urlparse
-from uuid import uuid1
 
 # Add custom_components directory to path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -31,9 +28,13 @@ sys.path.insert(0, mysa_path)
 
 try:
     from mysa_auth import (
-        login, auther, sigv4_sign_mqtt_url,
+        login, auther,
         REGION, IDENTITY_POOL_ID, CLIENT_HEADERS, BASE_URL,
     )
+    from mysa_mqtt import (
+        refresh_and_sign_url, MqttConnection,
+    )
+    from const import MQTT_PING_INTERVAL
     import mqtt
     import boto3
 except ImportError as e:
@@ -49,7 +50,6 @@ except ImportError:
     HAS_PROMPT_TOOLKIT = False
     print("Note: Install prompt_toolkit for better input experience: pip install prompt_toolkit")
 
-import websockets
 import requests
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -64,7 +64,8 @@ class MysaDebugTool:
         self.ws = None
         self.user_id = None
         self.session = None
-        self.session = None
+        self.username = None
+        self.password = None
         self.sniff_mode = False
         self.sniff_filter = None  # Filter by device ID (None = all)
 
@@ -102,7 +103,9 @@ class MysaDebugTool:
                 with open(self.auth_path, 'r') as f:
                     saved = json.load(f)
                 print(f"Using saved credentials from {self.auth_path}")
-                self._user_obj = login(saved['username'], saved['password'], bsess=bsess)
+                self.username = saved['username']
+                self.password = saved['password']
+                self._user_obj = login(self.username, self.password, bsess=bsess)
                 self.session = requests.Session()
                 self.session.auth = auther(self._user_obj)
                 self.session.headers.update(CLIENT_HEADERS)
@@ -117,11 +120,11 @@ class MysaDebugTool:
                 print(f"Saved auth failed: {e}")
         
         # Manual login
-        username = input("Mysa Email: ").strip()
-        password = getpass.getpass("Mysa Password: ").strip()
+        self.username = input("Mysa Email: ").strip()
+        self.password = getpass.getpass("Mysa Password: ").strip()
         
         try:
-            self._user_obj = login(username, password, bsess=bsess)
+            self._user_obj = login(self.username, self.password, bsess=bsess)
             self.session = requests.Session()
             self.session.auth = auther(self._user_obj)
             self.session.headers.update(CLIENT_HEADERS)
@@ -132,7 +135,7 @@ class MysaDebugTool:
             
             # Save credentials
             with open(self.auth_path, 'w') as f:
-                json.dump({'username': username, 'password': password}, f)
+                json.dump({'username': self.username, 'password': self.password}, f)
             os.chmod(self.auth_path, 0o600)
             print(f"✓ Authenticated and saved to {self.auth_path}")
             return True
@@ -663,54 +666,37 @@ class MysaDebugTool:
         return None
 
     async def mqtt_loop(self):
-        def parse_one(data):
-            if not isinstance(data, bytearray):
-                data = bytearray(data)
-            msgs = []
-            mqtt.parse(data, msgs)
-            return msgs[0] if msgs else None
-
+        """MQTT listener loop using MqttConnection context manager."""
         while True:
             try:
-                self._user_obj.check_token()
-                cred = self._user_obj.get_credentials(identity_pool_id=IDENTITY_POOL_ID)
-                signed_url = sigv4_sign_mqtt_url(cred)
-                ws_url = urlparse(signed_url)._replace(scheme='wss').geturl()
+                # Use shared token refresh logic
+                try:
+                    signed_url, new_user_obj = refresh_and_sign_url(
+                        self._user_obj, self.username, self.password
+                    )
+                    if new_user_obj is not self._user_obj:
+                        self._user_obj = new_user_obj
+                        print("✓ Re-authenticated successfully")
+                except Exception as e:
+                    print(f"⚠ Auth failed: {e}")
+                    await asyncio.sleep(5)
+                    continue
                 
-                ssl_context = ssl.create_default_context()
-                headers = {'user-agent': 'okhttp/4.11.0'}
-                
-                async with websockets.connect(ws_url, subprotocols=['mqtt'],
-                                              ssl=ssl_context, additional_headers=headers,
-                                              ping_interval=None) as ws:
-                    self.ws = ws
+                # Use MqttConnection context manager
+                async with MqttConnection(signed_url, list(self.devices.keys())) as conn:
+                    self.ws = conn.websocket
                     print("⚡ MQTT Connected!")
                     
-                    await ws.send(mqtt.connect(str(uuid1()), 60))
-                    await ws.recv()  # Connack
-                    
-                    # Subscribe to all devices
-                    subs = []
-                    for did in self.devices:
-                        safe_did = did.replace(":", "").lower()
-                        subs.append(mqtt.SubscriptionSpec(f'/v1/dev/{safe_did}/out', 0x01))
-                        subs.append(mqtt.SubscriptionSpec(f'/v1/dev/{safe_did}/in', 0x01))
-                    
-                    if subs:
-                        await ws.send(mqtt.subscribe(1, subs))
-                        await ws.recv()  # Suback
-                    
-                    while True:
-                        try:
-                            msg = await asyncio.wait_for(ws.recv(), timeout=30.0)
-                            pkt = parse_one(msg)
-                            
-                            if isinstance(pkt, mqtt.PublishPacket) and self.sniff_mode:
-                                self._print_sniff(pkt)
-                            elif hasattr(pkt, 'pkt_type') and pkt.pkt_type == mqtt.MQTT_PACKET_PINGRESP:
-                                pass
-                        except asyncio.TimeoutError:
-                            await ws.send(mqtt.pingreq())
+                    while conn.connected:
+                        pkt = await conn.receive(timeout=MQTT_PING_INTERVAL + 5)
+                        
+                        if pkt is None:
+                            # Timeout - send ping
+                            await conn.send_ping()
+                        elif isinstance(pkt, mqtt.PublishPacket) and self.sniff_mode:
+                            self._print_sniff(pkt)
+                        elif hasattr(pkt, 'pkt_type') and pkt.pkt_type == mqtt.MQTT_PACKET_PINGRESP:
+                            pass
                             
             except Exception as e:
                 print(f"⚠ MQTT Error: {e}")

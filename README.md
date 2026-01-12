@@ -1,6 +1,6 @@
 # Mysa for Home Assistant
 
-[![Version](https://img.shields.io/badge/version-0.7.2-blue.svg)](https://github.com/kgelinas/Mysa_HA)
+[![Version](https://img.shields.io/badge/version-0.8.0-blue.svg)](https://github.com/kgelinas/Mysa_HA)
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz/)
 
 A native cloud integration for Mysa devices in Home Assistant. Uses the official Mysa Cloud architecture (MQTT + HTTP) for real-time updates and instant command execution.
@@ -92,15 +92,38 @@ Or manually:
 
 ## Upgraded Lite Devices
 
-If you have a Mysa Lite thermostat (BB-V2-0-L) that has been "magic upgraded" to full functionality using the debug tool's Lite-to-Full conversion, you need to configure it in Home Assistant:
+> **Note**: If you only use Home Assistant to control your Mysa devices, you do NOT need to perform any upgrade. The Lite thermostat works perfectly with this integration as-is. The "magic upgrade" is only useful if you also use the official Mysa mobile app.
+
+### Why Upgrade?
+
+The Lite-to-Full conversion unlocks features in the **Mysa mobile app** (not Home Assistant):
+- Zone control
+- Usage graphs
+- Humidity display in app
+- Per-zone schedules
+
+### If You've Already Upgraded
+
+If you've performed the Lite-to-Full conversion using the debug tool's `advanced` menu, configure Home Assistant to send the correct command type:
 
 1. Go to **Settings → Devices & Services → Mysa → Configure**
 2. Select the upgraded device(s) in "Upgraded Lite Devices"
 3. Click Submit
 
-This ensures commands are sent with the correct protocol type (Type 5) for your hardware.
+This ensures commands use Type 5 (Lite hardware) instead of Type 4 (Full hardware).
 
-> **Note**: The debug tool's `advanced` menu includes the Lite-to-Full conversion feature. See [docs/MYSA_DEBUG.md](docs/MYSA_DEBUG.md) for details on this experimental operation.
+### Simulated Energy Sensors (All Lite Devices)
+
+Since Lite hardware (BB-V2-0-L) lacks a current sensor, you can configure an **estimated max current** to enable simulated power/energy tracking. This works for **any Lite device**, whether upgraded or not.
+
+1. Go to **Settings → Devices & Services → Mysa → Configure**
+2. Enter your heater's rated current in "Estimated Max Current (Amps)"
+   - Check your heater's nameplate or manual (e.g., 10A for a 2400W baseboard at 240V)
+3. This creates two new sensors for each Lite device:
+   - **Estimated Current**: `max_current × duty_cycle`
+   - **Estimated Power**: `voltage × estimated_current`
+
+> **Note**: These are estimates based on duty cycle, not actual measurements. Use for approximate energy tracking only.
 
 ## Debug Tool
 
@@ -118,6 +141,41 @@ See [docs/MYSA_DEBUG.md](docs/MYSA_DEBUG.md) for usage details.
 ## Protocol Documentation
 
 For developers interested in the Mysa API, see [docs/MYSA_PROTOCOL.md](docs/MYSA_PROTOCOL.md).
+
+## Development
+
+### Testing
+
+The integration includes a comprehensive test suite with **750+ tests** and **85%+ code coverage**.
+
+```bash
+# Run all tests
+pytest tests/ -v
+
+# Run with coverage report
+pytest tests/ --cov=custom_components/mysa --cov-report=term-missing
+
+# Run specific test file
+pytest tests/test_climate.py -v
+```
+
+**Coverage by module:**
+| Module | Coverage |
+|:-------|:--------:|
+| `climate.py` | 100% |
+| `sensor.py` | 100% |
+| `switch.py` | 100% |
+| `config_flow.py` | 100% |
+| `mqtt.py` | 100% |
+| `mysa_auth.py` | 94% |
+| `mysa_mqtt.py` | 96% |
+| `mysa_api.py` | 56%* |
+
+_*API coverage limited by network-dependent methods_
+
+### Dev Container
+
+A Dev Container configuration is included for VS Code. Open the project in VS Code and select "Reopen in Container" to get a pre-configured development environment with all dependencies.
 
 ## Requirements
 

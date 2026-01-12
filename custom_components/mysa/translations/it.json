@@ -24,7 +24,8 @@
                 "title": "Opzioni Mysa",
                 "description": "Configura impostazioni avanzate del dispositivo.",
                 "data": {
-                    "upgraded_lite_devices": "Dispositivi Lite aggiornati (Forza Tipo 5)"
+                    "upgraded_lite_devices": "Dispositivi Lite aggiornati (Forza Tipo 5)",
+                    "estimated_max_current": "Corrente massima stimata (Ampere)"
                 }
             }
         }

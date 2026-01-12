@@ -409,7 +409,6 @@ class MysaACClimate(MysaClimate):
                     elif float(current) < float(target):
                         return HVACAction.HEATING
             return HVACAction.IDLE
-        return HVACAction.IDLE
 
     @property
     def fan_modes(self):

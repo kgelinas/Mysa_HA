@@ -105,7 +105,11 @@ class MysaOptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Optional(
                     "upgraded_lite_devices", 
                     default=self._config_entry.options.get("upgraded_lite_devices", [])
-                ): cv.multi_select(device_options)
+                ): cv.multi_select(device_options),
+                vol.Optional(
+                    "estimated_max_current",
+                    default=self._config_entry.options.get("estimated_max_current", 0)
+                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=30)),
             }),
             description_placeholders={}
         )

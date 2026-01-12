@@ -3,21 +3,26 @@ import logging
 import asyncio
 import json
 import time
+import ssl
 from urllib.parse import urlparse
 from uuid import uuid1
-import ssl
 
 import requests
 import websockets
 import boto3
 from homeassistant.helpers.storage import Store
 from .mysa_auth import (
-    Cognito, login, auther, sigv4_sign_mqtt_url,
+    Cognito, login, auther,
     REGION, USER_POOL_ID, CLIENT_ID, JWKS, IDENTITY_POOL_ID,
     CLIENT_HEADERS, BASE_URL,
 )
 from . import mqtt
+from .mysa_mqtt import (
+    refresh_and_sign_url, build_subscription_topics, parse_mqtt_packet,
+    connect_websocket, create_connect_packet,
+)
 from .const import (
+    MQTT_PING_INTERVAL,
     AC_MODE_OFF, AC_MODE_AUTO, AC_MODE_HEAT, AC_MODE_COOL, AC_MODE_FAN_ONLY, AC_MODE_DRY,
     AC_FAN_MODES, AC_FAN_MODES_REVERSE,
     AC_SWING_MODES, AC_SWING_MODES_REVERSE,
@@ -32,7 +37,7 @@ STORAGE_VERSION = 1
 class MysaApi:
     """Mysa API Client."""
 
-    def __init__(self, username, password, hass, coordinator_callback=None, upgraded_lite_devices=None):
+    def __init__(self, username, password, hass, coordinator_callback=None, upgraded_lite_devices=None, estimated_max_current=0):
         """Initialize the API."""
         self.username = username
         self.password = password
@@ -43,6 +48,7 @@ class MysaApi:
         self._user_id = None # Mysa User UUID
         self.devices = {}
         self.upgraded_lite_devices = upgraded_lite_devices or []
+        self.estimated_max_current = estimated_max_current
         self.homes = []
         self.zones = {} # zone_id -> zone_name
         self.states = {}
@@ -418,16 +424,15 @@ class MysaApi:
                         state['SwingMode'] = AC_SWING_MODES.get(int(acstate_v['5']), 'unknown')
 
     async def _get_signed_mqtt_url(self):
-        """Get signed MQTT URL."""
+        """Get signed MQTT URL with fresh credentials."""
         def _sign():
-            # Proactively check and refresh Cognito tokens if expired
-            try:
-                self._user_obj.check_token()
-            except Exception as e:
-                _LOGGER.debug("Token refresh failed or not needed: %s", e)
-                
-            cred = self._user_obj.get_credentials(identity_pool_id=IDENTITY_POOL_ID)
-            return sigv4_sign_mqtt_url(cred)
+            nonlocal self
+            signed_url, new_user_obj = refresh_and_sign_url(
+                self._user_obj, self.username, self.password
+            )
+            if new_user_obj is not self._user_obj:
+                self._user_obj = new_user_obj
+            return signed_url
         return await self.hass.async_add_executor_job(_sign)
 
     async def _send_mqtt_command(self, device_id, payload, msg_type=44, src_type=100, wrap=True):
@@ -969,52 +974,18 @@ class MysaApi:
 
     async def _mqtt_listen(self):
         """Establish MQTT connection and listen for device updates."""
-        # Helper function to parse MQTT packets
-        def parse_mqtt_packet(data):
-            if not isinstance(data, bytearray):
-                data = bytearray(data)
-            msgs = []
-            mqtt.parse(data, msgs)
-            return msgs[0] if msgs else None
-        
         # Get signed URL
         signed_url = await self._get_signed_mqtt_url()
-        url_parts = urlparse(signed_url)
-        ws_url = url_parts._replace(scheme='wss').geturl()
         
         _LOGGER.info("Connecting to MQTT for persistent listening...")
         
-        # Create SSL context
-        ssl_context = await self.hass.async_add_executor_job(ssl.create_default_context)
-        headers = {'user-agent': 'okhttp/4.11.0'}
-        
-        # Connect with proper error handling for websockets version
-        # Disable websockets' built-in ping/pong since we handle keepalive via MQTT PINGREQ/PINGRESP
-        try:
-            ws = await websockets.connect(
-                ws_url,
-                subprotocols=['mqtt'],
-                ssl=ssl_context,
-                additional_headers=headers,
-                ping_interval=None,  # Disable WebSocket pings
-                ping_timeout=None    # Disable WebSocket ping timeout
-            )
-        except TypeError:
-            # Fallback for older websockets versions
-            ws = await websockets.connect(
-                ws_url,
-                subprotocols=['mqtt'],
-                ssl=ssl_context,
-                extra_headers=headers,
-                ping_interval=None,
-                ping_timeout=None
-            )
-        
+        # Connect using shared module
+        ws = await connect_websocket(signed_url)
         self._mqtt_ws = ws
         
         try:
             # MQTT Connect
-            connect_pkt = mqtt.connect(str(uuid1()), 60)
+            connect_pkt = create_connect_packet()
             await ws.send(connect_pkt)
             
             # Wait for Connack
@@ -1029,14 +1000,7 @@ class MysaApi:
             if not self.devices:
                 await self.get_devices()
             
-            sub_topics = []
-            for device_id in self.devices:
-                safe_device_id = device_id.replace(":", "").lower()
-                sub_topics.extend([
-                    mqtt.SubscriptionSpec(f'/v1/dev/{safe_device_id}/out', 0x01),
-                    mqtt.SubscriptionSpec(f'/v1/dev/{safe_device_id}/in', 0x01),
-                    mqtt.SubscriptionSpec(f'/v1/dev/{safe_device_id}/batch', 0x01)
-                ])
+            sub_topics = build_subscription_topics(list(self.devices.keys()))
             
             if sub_topics:
                 sub_pkt = mqtt.subscribe(1, sub_topics)
@@ -1054,7 +1018,7 @@ class MysaApi:
             
             # Main message loop with proactive keepalive
             last_ping = time.time()
-            ping_interval = 25  # Send ping every 25 seconds (less than 60s keepalive)
+            ping_interval = MQTT_PING_INTERVAL
             
             _LOGGER.info("MQTT message loop started, waiting for updates...")
             
@@ -1133,7 +1097,20 @@ class MysaApi:
                 msg_type = payload.get('msg')
                 if msg_type in [40, 44]:
                     body = payload.get('body', {})
-                    state_update = body.get('state', body)
+                    state_update = body.get('state', {})
+                    
+                    # If state is empty but cmd exists, extract values from cmd array
+                    # cmd format: [{'sp': 20.0, 'stpt': 20.0, ...}]
+                    if not state_update and 'cmd' in body:
+                        cmd_list = body.get('cmd', [])
+                        if cmd_list and isinstance(cmd_list, list):
+                            for cmd_item in cmd_list:
+                                if isinstance(cmd_item, dict):
+                                    state_update.update(cmd_item)
+                    
+                    # If still empty, use body directly (for backward compat)
+                    if not state_update:
+                        state_update = body
                     
                     if state_update:
                         # Normalize the state data
@@ -1149,7 +1126,11 @@ class MysaApi:
                         
                         # Trigger coordinator refresh to update HA entities
                         if self.coordinator_callback:
+                            _LOGGER.debug("Triggering coordinator refresh for %s", device_id)
                             await self.coordinator_callback()
+                            _LOGGER.debug("Coordinator refresh complete")
+                        else:
+                            _LOGGER.warning("No coordinator_callback set - entities won't update!")
                 
         except Exception as e:
             _LOGGER.error("Error processing MQTT publish: %s", e, exc_info=True)

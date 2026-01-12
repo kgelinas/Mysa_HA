@@ -5,6 +5,19 @@ DOMAIN = "mysa"
 PLATFORMS = ["climate", "sensor", "update", "switch", "number", "select"]
 
 # =============================================================================
+# MQTT Connection Constants
+# =============================================================================
+
+MQTT_KEEPALIVE: int = 60
+"""MQTT keepalive interval in seconds"""
+
+MQTT_PING_INTERVAL: int = 25
+"""Interval between MQTT PINGREQ packets (less than keepalive)"""
+
+MQTT_USER_AGENT: str = 'okhttp/4.11.0'
+"""User-Agent header matching Mysa Android app"""
+
+# =============================================================================
 # AC Controller Constants (Model: AC-V1-*)
 # =============================================================================
 

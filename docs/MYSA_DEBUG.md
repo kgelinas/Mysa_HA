@@ -198,10 +198,19 @@ Access via the `advanced` command. Available operations:
 
 ### 1. Convert BB-V2-0-L to BB-V2-0 (Lite to Full)
 
-Upgrades a Mysa V2 Lite thermostat to the full V2 model, unlocking additional features. Only works on devices with model `BB-V2-0-L`.
+Upgrades a Mysa V2 Lite thermostat to the full V2 model.
 
+> **Do you need this?** If you only use Home Assistant, **NO**. The Lite works perfectly with this integration. This upgrade unlocks features in the **Mysa mobile app** only (zone control, usage graphs, humidity display).
+
+**What it does:**
+- Changes the device model in Mysa's cloud from `BB-V2-0-L` to `BB-V2-0`
+- Unlocks app features, but does NOT add hardware sensors (current/voltage remain unavailable)
+
+**Requirements:**
+- Only works on devices with model `BB-V2-0-L`
 - Requires typing `YES I UNDERSTAND` to confirm
 - Device must be power-cycled after conversion
+- Must configure "Upgraded Lite Devices" in Home Assistant options afterward
 
 ### 2. Killer Ping
 

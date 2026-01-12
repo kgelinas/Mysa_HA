@@ -24,7 +24,8 @@
                 "title": "Mysa Optionen",
                 "description": "Erweiterte Geräteeinstellungen konfigurieren.",
                 "data": {
-                    "upgraded_lite_devices": "Aufgerüstete Lite-Geräte (Typ 5 erzwingen)"
+                    "upgraded_lite_devices": "Aufgerüstete Lite-Geräte (Typ 5 erzwingen)",
+                    "estimated_max_current": "Geschätzter maximaler Strom (Ampere)"
                 }
             }
         }

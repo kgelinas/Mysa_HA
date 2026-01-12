@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.0] - 2026-01-11
+### Added
+- **Simulated Current/Power Sensors**: For all Lite devices (BB-V2-0-L), configure an estimated max current to enable simulated energy tracking based on duty cycle. Works for both upgraded and non-upgraded Lite devices.
+- **Test Coverage**: Massive expansion of test suite to ~85% total coverage (up from ~77%). 10 modules now at 100% coverage.
+- **Developer Docs**: Updated README with testing commands and coverage stats.
+- **Token Refresh Test Script**: New `tools/test_token_refresh.py` for validating token expiration and re-authentication without waiting 10 hours.
+- **Async Context Manager**: Added `MqttConnection` class for cleaner MQTT connection handling with automatic connect/subscribe/cleanup.
+
+### Fixed
+- **MQTT Connection Stability**: Fixed connection drops after ~10 hours by adding automatic re-authentication when tokens expire.
+- **MQTT Subscription Error**: Removed problematic `/batch` topic subscription that caused immediate disconnection with 1005 error.
+- **Token Refresh**: Changed from passive `check_token()` to active `renew_access_token()` with full re-login fallback.
+- **MQTT State Parsing**: Fixed parsing of command echo messages by extracting state values from nested `cmd` array structure.
+- **Device ID Anonymization Bug**: Fixed potentially incorrect assertions in tests where generic device IDs were used instead of real MAC addresses.
+- **Test Fixtures**: Corrected `hass.data` keys in test fixtures to ensure reliable testing of config entries.
+- **Zone Name Display**: Zone sensors now show friendly names (e.g., "Basement") from the `/homes` API instead of UUIDs. Updates dynamically when changed in Mysa app.
+- **Missing Imports**: Restored `ssl`, `urlparse`, `uuid1`, and `websockets` imports that were accidentally removed during cleanup.
+- **Code Cleanup**: Removed thousands of lines of redundant, orphaned, and dead code from the test suite. Conslidated 41 test files into 15 maintained modules.
+
+### Changed
+- **Documentation**: Clarified that the "magic upgrade" is only needed for Mysa app users, not Home Assistant-only users.
+- **Code Refactoring**: Created shared `mysa_mqtt.py` module to prevent code drift between integration and debug tool. Both now use identical MQTT connection, authentication, and subscription logic.
+- **Type Hints**: Added comprehensive type annotations to `mysa_mqtt.py` and `mysa_auth.py` for better IDE support and code clarity.
+- **Constants Consolidation**: Moved MQTT constants (`MQTT_KEEPALIVE`, `MQTT_PING_INTERVAL`, `MQTT_USER_AGENT`) to central `const.py`.
+- **Debug Tool**: Refactored to use `MqttConnection` async context manager, reducing MQTT loop code from 38 to 22 lines.
+
 ## [0.7.2] - 2026-01-09
 ### Added
 - **Upgraded Lite Device Support**: New Options Flow setting to mark devices that have been "magic upgraded" from Lite to Full firmware. These devices require `type: 5` commands despite having full features.

@@ -6,6 +6,7 @@ Handles Cognito authentication, token management, and MQTT URL signing.
 
 Based on mysotherm (https://github.com/dlenski/mysotherm) by @dlenski
 """
+from __future__ import annotations
 import os
 import logging
 from functools import wraps

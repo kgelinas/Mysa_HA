@@ -24,7 +24,8 @@
                 "title": "Mysa Opties",
                 "description": "Geavanceerde apparaatinstellingen configureren.",
                 "data": {
-                    "upgraded_lite_devices": "Geüpgradede Lite-apparaten (Type 5 forceren)"
+                    "upgraded_lite_devices": "Geüpgradede Lite-apparaten (Type 5 forceren)",
+                    "estimated_max_current": "Geschatte maximale stroom (Ampère)"
                 }
             }
         }

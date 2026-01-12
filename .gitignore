@@ -29,9 +29,15 @@ mysa_auth.json
 # IDEs
 .vscode/
 .idea/
+.devcontainer/
 *.swp
 *.swo
 
 # OS
 .DS_Store
-Thumbs.db
+
+# Testing
+.coverage
+htmlcov/
+coverage.xml
+.pytest_cache/

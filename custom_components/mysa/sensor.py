@@ -43,7 +43,7 @@ async def async_setup_entry(
         is_ac = api.is_ac_device(device_id)
         
         # Zone Name Sensor (all devices)
-        entities.append(MysaZoneSensor(coordinator, device_id, device_data, entry))
+        entities.append(MysaZoneSensor(coordinator, device_id, device_data, api))
         
         # RSSI (all devices)
         entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "Rssi", "RSSI", SIGNAL_STRENGTH_DECIBELS_MILLIWATT, SensorStateClass.MEASUREMENT, SensorDeviceClass.SIGNAL_STRENGTH, entry))
@@ -81,6 +81,25 @@ async def async_setup_entry(
                 entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "Voltage", "Voltage", UnitOfElectricPotential.VOLT, SensorStateClass.MEASUREMENT, SensorDeviceClass.VOLTAGE, entry))
             if "Current" in state:
                 entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "Current", "Current", UnitOfElectricCurrent.AMPERE, SensorStateClass.MEASUREMENT, SensorDeviceClass.CURRENT, entry))
+        
+        # Simulated sensors for Lite devices (upgraded or not)
+        upgraded_lite_devices = entry.options.get("upgraded_lite_devices", [])
+        estimated_max_current = entry.options.get("estimated_max_current", 0)
+        
+        # Check if this device is a Lite model OR manually marked as upgraded Lite
+        model = device_data.get("Model", "")
+        is_lite_model = "BB-V2-0-L" in model or "-L" in model
+        
+        normalized_id = device_id.replace(":", "").lower()
+        is_upgraded_lite = any(
+            uid.replace(":", "").lower() == normalized_id 
+            for uid in upgraded_lite_devices
+        )
+        
+        # Show simulated sensors for any Lite device if estimated current is configured
+        if (is_lite_model or is_upgraded_lite) and estimated_max_current > 0:
+            entities.append(MysaSimulatedCurrentSensor(coordinator, device_id, device_data, estimated_max_current, entry))
+            entities.append(MysaSimulatedPowerSensor(coordinator, device_id, device_data, estimated_max_current, entry))
 
     async_add_entities(entities)
 
@@ -202,11 +221,11 @@ class MysaDiagnosticSensor(CoordinatorEntity, SensorEntity):
 class MysaZoneSensor(CoordinatorEntity, SensorEntity):
     """Representation of a Mysa Zone Sensor."""
 
-    def __init__(self, coordinator, device_id, device_data, entry):
+    def __init__(self, coordinator, device_id, device_data, api):
         """Initialize."""
         super().__init__(coordinator)
         self._device_id = device_id
-        self._entry = entry
+        self._api = api
         self._device_data = device_data
         self._attr_name = f"{device_data.get('Name', 'Mysa')} Zone"
         self._attr_unique_id = f"{device_id}_zone"
@@ -216,7 +235,7 @@ class MysaZoneSensor(CoordinatorEntity, SensorEntity):
         """Return device info."""
         state = self.coordinator.data.get(self._device_id)
         zone_id = state.get("Zone") if state else None
-        zone_name = self._entry.options.get(f"zone_name_{zone_id}") if zone_id else None
+        zone_name = self._api.get_zone_name(zone_id) if zone_id else None
         
         info = {
             "identifiers": {(DOMAIN, self._device_id)},
@@ -237,7 +256,8 @@ class MysaZoneSensor(CoordinatorEntity, SensorEntity):
         if not zone_id:
             return "Unassigned"
         
-        return self._entry.options.get(f"zone_name_{zone_id}", zone_id)
+        zone_name = self._api.get_zone_name(zone_id)
+        return zone_name if zone_name else zone_id
 
     @property
     def extra_state_attributes(self):
@@ -247,4 +267,141 @@ class MysaZoneSensor(CoordinatorEntity, SensorEntity):
         
         return {
             "zone_id": zone_id,
+        }
+
+
+class MysaSimulatedCurrentSensor(CoordinatorEntity, SensorEntity):
+    """Simulated current sensor for upgraded Lite devices."""
+
+    def __init__(self, coordinator, device_id, device_data, estimated_max_current, entry):
+        """Initialize."""
+        super().__init__(coordinator)
+        self._device_id = device_id
+        self._estimated_max_current = estimated_max_current
+        self._entry = entry
+        self._device_data = device_data
+        self._attr_name = f"{device_data.get('Name', 'Mysa')} Estimated Current"
+        self._attr_unique_id = f"{device_id}_estimated_current"
+        self._attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_device_class = SensorDeviceClass.CURRENT
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    @property
+    def device_info(self):
+        """Return device info."""
+        return {
+            "identifiers": {(DOMAIN, self._device_id)},
+            "manufacturer": "Mysa",
+            "model": self._device_data.get("Model"),
+        }
+
+    @property
+    def native_value(self):
+        """Calculate current from duty cycle and estimated max current."""
+        state = self.coordinator.data.get(self._device_id)
+        if not state:
+            return None
+        
+        # Get duty cycle (0-1 or 0-100)
+        duty = None
+        for key in ["dc", "Duty", "dtyCycle", "DutyCycle"]:
+            val = state.get(key)
+            if val is not None:
+                if isinstance(val, dict):
+                    duty = val.get('v')
+                else:
+                    duty = val
+                break
+        
+        if duty is None:
+            return 0.0
+        
+        # Normalize to 0-1 range
+        if duty > 1:
+            duty = duty / 100.0
+        
+        return round(self._estimated_max_current * duty, 2)
+
+    @property
+    def extra_state_attributes(self):
+        """Return extra state attributes."""
+        return {
+            "estimated_max_current": self._estimated_max_current,
+            "note": "Simulated based on duty cycle - Lite hardware has no current sensor",
+        }
+
+
+class MysaSimulatedPowerSensor(CoordinatorEntity, SensorEntity):
+    """Simulated power sensor for upgraded Lite devices."""
+
+    def __init__(self, coordinator, device_id, device_data, estimated_max_current, entry):
+        """Initialize."""
+        super().__init__(coordinator)
+        self._device_id = device_id
+        self._estimated_max_current = estimated_max_current
+        self._entry = entry
+        self._device_data = device_data
+        self._attr_name = f"{device_data.get('Name', 'Mysa')} Estimated Power"
+        self._attr_unique_id = f"{device_id}_estimated_power"
+        self._attr_native_unit_of_measurement = "W"
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_device_class = SensorDeviceClass.POWER
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    @property
+    def device_info(self):
+        """Return device info."""
+        return {
+            "identifiers": {(DOMAIN, self._device_id)},
+            "manufacturer": "Mysa",
+            "model": self._device_data.get("Model"),
+        }
+
+    @property
+    def native_value(self):
+        """Calculate power from duty cycle, estimated current, and assumed voltage."""
+        state = self.coordinator.data.get(self._device_id)
+        if not state:
+            return None
+        
+        # Get duty cycle
+        duty = None
+        for key in ["dc", "Duty", "dtyCycle", "DutyCycle"]:
+            val = state.get(key)
+            if val is not None:
+                if isinstance(val, dict):
+                    duty = val.get('v')
+                else:
+                    duty = val
+                break
+        
+        if duty is None:
+            return 0.0
+        
+        # Normalize to 0-1 range
+        if duty > 1:
+            duty = duty / 100.0
+        
+        # Get voltage (default 240V if not available)
+        voltage = 240
+        for key in ["volts", "Voltage", "LineVoltage"]:
+            val = state.get(key)
+            if val is not None:
+                if isinstance(val, dict):
+                    voltage = val.get('v', 240)
+                else:
+                    voltage = val
+                break
+        
+        current = self._estimated_max_current * duty
+        return round(voltage * current, 1)
+
+    @property
+    def extra_state_attributes(self):
+        """Return extra state attributes."""
+        return {
+            "estimated_max_current": self._estimated_max_current,
+            "assumed_voltage": 240,
+            "note": "Simulated based on duty cycle - Lite hardware has no current sensor",
         }
