@@ -8,7 +8,8 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.config_entries import ConfigFlowResult
+from homeassistant.core import callback
 import homeassistant.helpers.config_validation as cv
 
 from .const import DOMAIN
@@ -24,12 +25,11 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 )
 
 
-from homeassistant.core import callback
-
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Mysa."""
 
     VERSION = 1
+    entry: config_entries.ConfigEntry | None = None
 
     @staticmethod
     @callback
@@ -41,7 +41,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle the initial step."""
         if self._async_current_entries():
             return self.async_abort(reason="single_instance_allowed")
@@ -51,14 +51,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             try:
                 # Validate credentials
                 await self._validate_credentials(
-                    user_input[CONF_USERNAME], 
+                    user_input[CONF_USERNAME],
                     user_input[CONF_PASSWORD]
                 )
-                
+
                 return self.async_create_entry(
                     title=user_input[CONF_USERNAME], data=user_input
                 )
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception:  # TODO: Catch specific exceptions instead of Exception
                 _LOGGER.exception("Unexpected exception")
                 errors["base"] = "invalid_auth"
 
@@ -72,8 +72,58 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await api.authenticate()
         return api
 
+    async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:  # TODO: Use or remove unused argument
+        """Handle configuration by re-auth."""
+        self.entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        return await self.async_step_reauth_confirm()
 
-class MysaOptionsFlowHandler(config_entries.OptionsFlow):
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Dialog that informs the user that reauth is required."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            try:
+                # Validate new credentials
+                await self._validate_credentials(
+                    user_input[CONF_USERNAME],
+                    user_input[CONF_PASSWORD]
+                )
+
+                # Verify account match (email)
+                if self.entry is None:
+                    errors["base"] = "unknown"
+                elif user_input[CONF_USERNAME].lower() != self.entry.data[CONF_USERNAME].lower():
+                    errors["base"] = "reauth_account_mismatch"
+                else:
+                    self.hass.config_entries.async_update_entry(
+                        self.entry,
+                        data={
+                            **self.entry.data,
+                            CONF_PASSWORD: user_input[CONF_PASSWORD],
+                        },
+                    )
+                    await self.hass.config_entries.async_reload(self.entry.entry_id)
+                    return self.async_abort(reason="reauth_successful")
+
+            except Exception:  # TODO: Catch specific exceptions instead of Exception
+                errors["base"] = "invalid_auth"
+
+        default_username = self.entry.data[CONF_USERNAME] if self.entry else ""
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_USERNAME, default=default_username): str,
+                    vol.Required(CONF_PASSWORD): str,
+                }
+            ),
+            errors=errors,
+        )
+
+
+class MysaOptionsFlowHandler(config_entries.OptionsFlow):  # TODO: Add more public methods or refactor
     """Handle options flow for Mysa."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
@@ -82,7 +132,7 @@ class MysaOptionsFlowHandler(config_entries.OptionsFlow):
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Manage the options."""
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
@@ -103,7 +153,7 @@ class MysaOptionsFlowHandler(config_entries.OptionsFlow):
             step_id="init",
             data_schema=vol.Schema({
                 vol.Optional(
-                    "upgraded_lite_devices", 
+                    "upgraded_lite_devices",
                     default=self._config_entry.options.get("upgraded_lite_devices", [])
                 ): cv.multi_select(device_options),
                 vol.Optional(

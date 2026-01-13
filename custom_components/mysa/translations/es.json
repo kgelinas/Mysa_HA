@@ -8,14 +8,24 @@
                     "username": "Usuario (Correo electrónico)",
                     "password": "Contraseña"
                 }
+            },
+            "reauth_confirm": {
+                "title": "Reautenticar Mysa",
+                "description": "La contraseña para {username} no es válida. Por favor, introduza la nueva contraseña.",
+                "data": {
+                    "username": "Usuario (Correo electrónico)",
+                    "password": "Contraseña"
+                }
             }
         },
         "error": {
             "invalid_auth": "Autenticación inválida",
-            "unknown": "Error inesperado"
+            "unknown": "Error inesperado",
+            "reauth_account_mismatch": "El correo electrónico proporcionado no coincide con la configuración existente."
         },
         "abort": {
-            "single_instance_allowed": "Solo se permite una configuración de Mysa."
+            "single_instance_allowed": "Solo se permite una configuración de Mysa.",
+            "reauth_successful": "La reautenticación se realizó correctamente."
         }
     },
     "options": {

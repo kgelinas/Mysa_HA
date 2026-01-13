@@ -8,14 +8,24 @@
                     "username": "Gebruikersnaam (E-mail)",
                     "password": "Wachtwoord"
                 }
+            },
+            "reauth_confirm": {
+                "title": "Mysa opnieuw verifiëren",
+                "description": "Het wachtwoord voor {username} is ongeldig. Voer het nieuwe wachtwoord in.",
+                "data": {
+                    "username": "Gebruikersnaam (E-mail)",
+                    "password": "Wachtwoord"
+                }
             }
         },
         "error": {
             "invalid_auth": "Ongeldige authenticatie",
-            "unknown": "Onverwachte fout"
+            "unknown": "Onverwachte fout",
+            "reauth_account_mismatch": "Het opgegeven e-mailadres komt niet overeen met de bestaande configuratie."
         },
         "abort": {
-            "single_instance_allowed": "Slechts één Mysa-configuratie is toegestaan."
+            "single_instance_allowed": "Slechts één Mysa-configuratie is toegestaan.",
+            "reauth_successful": "Herauthenticatie was succesvol."
         }
     },
     "options": {

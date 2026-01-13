@@ -1,6 +1,6 @@
 # Mysa for Home Assistant
 
-[![Version](https://img.shields.io/badge/version-0.8.0-blue.svg)](https://github.com/kgelinas/Mysa_HA)
+[![Version](https://img.shields.io/badge/version-0.8.1-blue.svg)](https://github.com/kgelinas/Mysa_HA)
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz/)
 
 A native cloud integration for Mysa devices in Home Assistant. Uses the official Mysa Cloud architecture (MQTT + HTTP) for real-time updates and instant command execution.
@@ -19,6 +19,7 @@ A native cloud integration for Mysa devices in Home Assistant. Uses the official
 | 💡 Brightness Control | ✓ | - |
 | � Wake on Approach | ✓ | - |
 | 📊 Diagnostic Sensors | ✓ | ✓ |
+| 🔍 Diagnostics Download | ✓ | ✓ |
 | 🔄 Firmware Updates | ✓ | ✓ |
 | ⚡ Real-time MQTT Sync | ✓ | ✓ |
 
@@ -146,7 +147,7 @@ For developers interested in the Mysa API, see [docs/MYSA_PROTOCOL.md](docs/MYSA
 
 ### Testing
 
-The integration includes a comprehensive test suite with **750+ tests** and **85%+ code coverage**.
+The integration includes a comprehensive test suite with **785 tests** and **85% code coverage**.
 
 ```bash
 # Run all tests
@@ -169,7 +170,7 @@ pytest tests/test_climate.py -v
 | `mqtt.py` | 100% |
 | `mysa_auth.py` | 94% |
 | `mysa_mqtt.py` | 96% |
-| `mysa_api.py` | 56%* |
+| `mysa_api.py` | 57%* |
 
 _*API coverage limited by network-dependent methods_
 

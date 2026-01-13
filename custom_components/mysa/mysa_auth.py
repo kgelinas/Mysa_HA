@@ -13,10 +13,11 @@ from functools import wraps
 from time import time
 from typing import Optional
 
-import requests
+import requests  # type: ignore[import-untyped]
 
 # boto3 wastes 1 second trying to connect to EC2 metadata unless disabled
 os.environ['AWS_EC2_METADATA_DISABLED'] = 'true'
+# TODO: Refactor imports to standard position
 import boto3
 import botocore
 import botocore.credentials
@@ -24,7 +25,6 @@ import botocore.auth
 import botocore.awsrequest
 import pycognito
 import pycognito.exceptions
-import jwt
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ _LOGGER = logging.getLogger(__name__)
 REGION = 'us-east-1'
 """Region for Mysa AWS infrastructure"""
 
-JWKS = {"keys":[{"alg":"RS256","e":"AQAB","kid":"udQ2TtD4g3Jc3dORobozGYu/T3qqcCtJonq0dwcrF8g=","kty":"RSA","n":"pwNwcNWr0CWijS_RlmooyzRq5Ud5GBDXKiTtS_4TV9MkXmxctKwiLFa_wnWsPw2B_RyQ6aY06de1qzylabuGcDQBpWFjmSWBoMiAFa2Facbhr4RnElLrs5MZTI3KZPVQlQaL0vvOERWC-3qe3HIG3EeaPyciSXS4aB2ldZCdLd2vtVJNwlzroqKiptXay9AeyQwiF6Tk2CXq4XZ3bcC5sFl53XjofoXXyZCrkBDjHBppE9Rhm0aw7u3DSozPbkiAEK-x92xQZ-Ymrl1eTLL4J08KiBdog2gVWYJqM9DdJ1T0rTBNXxNKgpnP9M83KnN8ViRgayBfLlyLpOOFaFK5lw","use":"sig"},{"alg":"RS256","e":"AQAB","kid":"f5vP7g+ehnb4PP+90i1WVsnUNfccQZVReBmaRvrHga0=","kty":"RSA","n":"nKGdPVq3wzz8Cy8tLwZ7OP44avSrNf-fcvqLV-lRG-9ziZavn4L7an2KZy_MDmdxBSekVDUoERAJNhNRlLFVRt_ialnUwkuZw0hkzeVyRT50-jE1bieF4I_zjOm7t_QhJTMoLG2KuDZcaGZa5RpDXZJGwPGKxcFjpH_VwgxFDwlTYPc2BjofuW8OwKNdm1CMNstG94pxGZoRuak_wd3Sg20DXH1c43kmHCiy4Ish-3oVHYMhVNv-pra02HXr-fJv8Rd7E0nVfw_Iki8MfWE6C5NunMCx74rigHbMMKZrzQtnB4EdxlcqZWjkC_5Qd1AhM6-gYchXMCKq18COrPPR1w","use":"sig"}]}
+JWKS = {"keys":[{"alg":"RS256","e":"AQAB","kid":"udQ2TtD4g3Jc3dORobozGYu/T3qqcCtJonq0dwcrF8g=","kty":"RSA","n":"pwNwcNWr0CWijS_RlmooyzRq5Ud5GBDXKiTtS_4TV9MkXmxctKwiLFa_wnWsPw2B_RyQ6aY06de1qzylabuGcDQBpWFjmSWBoMiAFa2Facbhr4RnElLrs5MZTI3KZPVQlQaL0vvOERWC-3qe3HIG3EeaPyciSXS4aB2ldZCdLd2vtVJNwlzroqKiptXay9AeyQwiF6Tk2CXq4XZ3bcC5sFl53XjofoXXyZCrkBDjHBppE9Rhm0aw7u3DSozPbkiAEK-x92xQZ-Ymrl1eTLL4J08KiBdog2gVWYJqM9DdJ1T0rTBNXxNKgpnP9M83KnN8ViRgayBfLlyLpOOFaFK5lw","use":"sig"},{"alg":"RS256","e":"AQAB","kid":"f5vP7g+ehnb4PP+90i1WVsnUNfccQZVReBmaRvrHga0=","kty":"RSA","n":"nKGdPVq3wzz8Cy8tLwZ7OP44avSrNf-fcvqLV-lRG-9ziZavn4L7an2KZy_MDmdxBSekVDUoERAJNhNRlLFVRt_ialnUwkuZw0hkzeVyRT50-jE1bieF4I_zjOm7t_QhJTMoLG2KuDZcaGZa5RpDXZJGwPGKxcFjpH_VwgxFDwlTYPc2BjofuW8OwKNdm1CMNstG94pxGZoRuak_wd3Sg20DXH1c43kmHCiy4Ish-3oVHYMhVNv-pra02HXr-fJv8Rd7E0nVfw_Iki8MfWE6C5NunMCx74rigHbMMKZrzQtnB4EdxlcqZWjkC_5Qd1AhM6-gYchXMCKq18COrPPR1w","use":"sig"}]}  # TODO: Break long line
 """Well-known JWKs for Mysa's Cognito IDP user pool (cached)"""
 
 USER_POOL_ID = "us-east-1_GUFWfhI7g"
@@ -75,8 +75,8 @@ class Cognito(pycognito.Cognito):
     cognito-identity (AWS credentials) sides of authentication.
     """
 
-    @wraps(pycognito.Cognito.__init__)
-    def __init__(self,
+    @wraps(pycognito.Cognito.__init__)  # type: ignore[misc]
+    def __init__(self,  # TODO: Refactor arguments to correct order
         session: Optional[botocore.session.Session] = None,
         pool_jwk: Optional[dict] = None,
         *args, **kwargs
@@ -86,8 +86,8 @@ class Cognito(pycognito.Cognito):
         self.pool_jwk = pool_jwk
 
     def get_credentials(self,
-        identity_pool_id: str = None,
-        identity_id: str = None,
+        identity_pool_id: Optional[str] = None,
+        identity_id: Optional[str] = None,
         region: Optional[str] = None,
     ) -> botocore.credentials.Credentials:
         """Get AWS credentials from Cognito Identity pool."""
@@ -102,6 +102,7 @@ class Cognito(pycognito.Cognito):
         else:
             client = boto3.client('cognito-identity', region_name=region)
 
+        # TODO: Fix unsubscriptable object pylint error properly
         assert self.id_claims['iss'].startswith('https://')
         logins = {self.id_claims['iss'][8:]: self.id_token}
 
@@ -165,6 +166,7 @@ def auther(u: Cognito):
         Auth callable for requests.Session
     """
     def f(request: requests.Request) -> requests.Request:
+        # TODO: Fix unsubscriptable object pylint error properly
         if time() > u.id_claims['exp'] - 5:
             u.renew_access_token()
         request.headers['authorization'] = u.id_token

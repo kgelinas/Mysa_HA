@@ -8,14 +8,24 @@
                     "username": "Benutzername (E-Mail)",
                     "password": "Passwort"
                 }
+            },
+            "reauth_confirm": {
+                "title": "Mysa erneut authentifizieren",
+                "description": "Das Passwort für {username} ist ungültig. Bitte geben Sie das neue Passwort ein.",
+                "data": {
+                    "username": "Benutzername (E-Mail)",
+                    "password": "Passwort"
+                }
             }
         },
         "error": {
             "invalid_auth": "Ungültige Authentifizierung",
-            "unknown": "Unerwarteter Fehler"
+            "unknown": "Unerwarteter Fehler",
+            "reauth_account_mismatch": "Die angegebene E-Mail-Adresse stimmt nicht mit der vorhandenen Konfiguration überein."
         },
         "abort": {
-            "single_instance_allowed": "Nur eine einzige Mysa-Konfiguration ist erlaubt."
+            "single_instance_allowed": "Nur eine einzige Mysa-Konfiguration ist erlaubt.",
+            "reauth_successful": "Die erneute Authentifizierung war erfolgreich."
         }
     },
     "options": {

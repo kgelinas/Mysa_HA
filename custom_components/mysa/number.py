@@ -1,6 +1,6 @@
 """Number platform for Mysa."""
+import time
 import logging
-from typing import Any
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
@@ -25,7 +25,7 @@ async def async_setup_entry(
     api = data["api"]
     devices = await api.get_devices()
 
-    entities = []
+    entities: list[NumberEntity] = []
     for device_id, device_data in devices.items():
         # Min/Max Brightness are settable configuration values
         entities.append(MysaMinBrightnessNumber(coordinator, device_id, device_data, api, entry))
@@ -34,7 +34,7 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class MysaNumber(CoordinatorEntity, NumberEntity):
+class MysaNumber(CoordinatorEntity, NumberEntity):  # TODO: Refactor MysaNumber to reduce instance attributes, duplicate code, and implement abstract methods
     """Base class for Mysa number entities."""
 
     _attr_native_min_value = 0
@@ -43,7 +43,9 @@ class MysaNumber(CoordinatorEntity, NumberEntity):
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_mode = NumberMode.SLIDER
 
-    def __init__(self, coordinator, device_id, device_data, api, entry, sensor_key, name_suffix):
+    def __init__(  # TODO: Refactor __init__ to reduce arguments
+        self, coordinator, device_id, device_data, api, entry, sensor_key, name_suffix
+    ):
         """Initialize."""
         super().__init__(coordinator)
         self._device_id = device_id
@@ -62,7 +64,7 @@ class MysaNumber(CoordinatorEntity, NumberEntity):
         state = self.coordinator.data.get(self._device_id)
         zone_id = state.get("Zone") if state else None
         zone_name = self._entry.options.get(f"zone_name_{zone_id}") if zone_id else None
-        
+
         info = {
             "identifiers": {(DOMAIN, self._device_id)},
             "manufacturer": "Mysa",
@@ -87,16 +89,15 @@ class MysaNumber(CoordinatorEntity, NumberEntity):
 
     def _get_value_with_pending(self, keys):
         """Get value from state or pending value if state is not yet updated."""
-        import time
         # If we have a pending value that's less than 60 seconds old, use it
         if self._pending_value is not None and self._pending_time is not None:
             if time.time() - self._pending_time < 60:
                 return self._pending_value
-            else:
-                # Pending expired, clear it
-                self._pending_value = None
-                self._pending_time = None
-        
+
+            # Pending expired, clear it
+            self._pending_value = None
+            self._pending_time = None
+
         # Get from coordinator
         state = self.coordinator.data.get(self._device_id)
         if not state:
@@ -105,14 +106,16 @@ class MysaNumber(CoordinatorEntity, NumberEntity):
         return float(val) if val is not None else None
 
 
-class MysaMinBrightnessNumber(MysaNumber):
+class MysaMinBrightnessNumber(MysaNumber):  # TODO: Implement abstract methods
     """Number entity for minimum brightness."""
 
     _attr_icon = "mdi:brightness-5"
 
-    def __init__(self, coordinator, device_id, device_data, api, entry):
+    def __init__(self, coordinator, device_id, device_data, api, entry):  # TODO: Refactor __init__ to reduce arguments
         """Initialize."""
-        super().__init__(coordinator, device_id, device_data, api, entry, "MinBrightness", "Minimum Brightness")
+        super().__init__(
+            coordinator, device_id, device_data, api, entry, "MinBrightness", "Minimum Brightness"
+        )
 
     @property
     def native_value(self):
@@ -121,7 +124,6 @@ class MysaMinBrightnessNumber(MysaNumber):
 
     async def async_set_native_value(self, value: float) -> None:
         """Set minimum brightness."""
-        import time
         self._pending_value = float(value)
         self._pending_time = time.time()
         self.async_write_ha_state()  # Update UI immediately
@@ -129,14 +131,16 @@ class MysaMinBrightnessNumber(MysaNumber):
         # Don't clear pending - let it expire after 60 seconds
 
 
-class MysaMaxBrightnessNumber(MysaNumber):
+class MysaMaxBrightnessNumber(MysaNumber):  # TODO: Implement abstract methods
     """Number entity for maximum brightness."""
 
     _attr_icon = "mdi:brightness-7"
 
-    def __init__(self, coordinator, device_id, device_data, api, entry):
+    def __init__(self, coordinator, device_id, device_data, api, entry):  # TODO: Refactor __init__ to reduce arguments
         """Initialize."""
-        super().__init__(coordinator, device_id, device_data, api, entry, "MaxBrightness", "Maximum Brightness")
+        super().__init__(
+            coordinator, device_id, device_data, api, entry, "MaxBrightness", "Maximum Brightness"
+        )
 
     @property
     def native_value(self):
@@ -145,7 +149,6 @@ class MysaMaxBrightnessNumber(MysaNumber):
 
     async def async_set_native_value(self, value: float) -> None:
         """Set maximum brightness."""
-        import time
         self._pending_value = float(value)
         self._pending_time = time.time()
         self.async_write_ha_state()  # Update UI immediately

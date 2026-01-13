@@ -25,6 +25,7 @@ wheels/
 .storage/
 .config/
 mysa_auth.json
+.mysa_debug_auth.json
 
 # IDEs
 .vscode/

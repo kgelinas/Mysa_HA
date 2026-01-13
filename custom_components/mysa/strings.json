@@ -8,14 +8,24 @@
                     "username": "Username (Email)",
                     "password": "Password"
                 }
+            },
+            "reauth_confirm": {
+                "title": "Re-authenticate Mysa",
+                "description": "The password for {username} is invalid. Please enter the new password.",
+                "data": {
+                    "username": "Username (Email)",
+                    "password": "Password"
+                }
             }
         },
         "error": {
             "invalid_auth": "Invalid authentication",
-            "unknown": "Unexpected error"
+            "unknown": "Unexpected error",
+            "reauth_account_mismatch": "The email provided does not match the existing configuration."
         },
         "abort": {
-            "single_instance_allowed": "Only a single configuration of Mysa is allowed."
+            "single_instance_allowed": "Only a single configuration of Mysa is allowed.",
+            "reauth_successful": "Re-authentication was successful."
         }
     },
     "options": {

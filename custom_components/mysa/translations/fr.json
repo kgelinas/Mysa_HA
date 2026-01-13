@@ -8,14 +8,24 @@
                     "username": "Nom d'utilisateur (Courriel)",
                     "password": "Mot de passe"
                 }
+            },
+            "reauth_confirm": {
+                "title": "Ré-authentifier Mysa",
+                "description": "Le mot de passe pour {username} est invalide. Veuillez entrer le nouveau mot de passe.",
+                "data": {
+                    "username": "Nom d'utilisateur (Courriel)",
+                    "password": "Mot de passe"
+                }
             }
         },
         "error": {
             "invalid_auth": "Authentification invalide",
-            "unknown": "Erreur inattendue"
+            "unknown": "Erreur inattendue",
+            "reauth_account_mismatch": "L'adresse courriel fournie ne correspond pas à la configuration existante."
         },
         "abort": {
-            "single_instance_allowed": "Une seule configuration de Mysa est autorisée."
+            "single_instance_allowed": "Une seule configuration de Mysa est autorisée.",
+            "reauth_successful": "La ré-authentification a réussi."
         }
     },
     "options": {

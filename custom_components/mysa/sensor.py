@@ -19,10 +19,11 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
-from .mysa_api import MysaApi
+
 
 _LOGGER = logging.getLogger(__name__)
 
+# TODO: Refactor async_setup_entry to reduce number of locals
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -38,75 +39,145 @@ async def async_setup_entry(
     api = data["api"]
     devices = await api.get_devices()
 
-    entities = []
+    entities: list[SensorEntity] = []
     for device_id, device_data in devices.items():
         is_ac = api.is_ac_device(device_id)
-        
+
         # Zone Name Sensor (all devices)
         entities.append(MysaZoneSensor(coordinator, device_id, device_data, api))
-        
         # RSSI (all devices)
-        entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "Rssi", "RSSI", SIGNAL_STRENGTH_DECIBELS_MILLIWATT, SensorStateClass.MEASUREMENT, SensorDeviceClass.SIGNAL_STRENGTH, entry))
-        
+        entities.append(
+            MysaDiagnosticSensor(
+                coordinator, device_id, device_data, "Rssi", "RSSI",
+                SIGNAL_STRENGTH_DECIBELS_MILLIWATT, SensorStateClass.MEASUREMENT,
+                SensorDeviceClass.SIGNAL_STRENGTH, entry
+            )
+        )
+
         # Brightness (all devices - current display brightness)
-        entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "Brightness", "Brightness", PERCENTAGE, SensorStateClass.MEASUREMENT, None, entry))
-        
+        entities.append(
+            MysaDiagnosticSensor(
+                coordinator, device_id, device_data, "Brightness", "Brightness",
+                PERCENTAGE, SensorStateClass.MEASUREMENT, None, entry
+            )
+        )
+
         # TimeZone (all devices)
-        entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "TimeZone", "Time Zone", None, None, None, entry))
-        
+        entities.append(
+            MysaDiagnosticSensor(
+                coordinator, device_id, device_data, "TimeZone", "Time Zone",
+                None, None, None, entry
+            )
+        )
+
         # Min/Max Setpoint (all devices)
-        entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "MinSetpoint", "Minimum Setpoint", UnitOfTemperature.CELSIUS, None, SensorDeviceClass.TEMPERATURE, entry))
-        entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "MaxSetpoint", "Maximum Setpoint", UnitOfTemperature.CELSIUS, None, SensorDeviceClass.TEMPERATURE, entry))
-        
+        entities.append(
+            MysaDiagnosticSensor(
+                coordinator, device_id, device_data, "MinSetpoint", "Minimum Setpoint",
+                UnitOfTemperature.CELSIUS, None, SensorDeviceClass.TEMPERATURE, entry
+            )
+        )
+        entities.append(
+            MysaDiagnosticSensor(
+                coordinator, device_id, device_data, "MaxSetpoint", "Maximum Setpoint",
+                UnitOfTemperature.CELSIUS, None, SensorDeviceClass.TEMPERATURE, entry
+            )
+        )
         # === Heating thermostat only sensors (skip for AC) ===
         if not is_ac:
             # Duty Cycle (heating only)
-            entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "Duty", "Duty Cycle", PERCENTAGE, SensorStateClass.MEASUREMENT, None, entry))
-            
+            entities.append(
+                MysaDiagnosticSensor(
+                    coordinator, device_id, device_data, "Duty", "Duty Cycle",
+                    PERCENTAGE, SensorStateClass.MEASUREMENT, None, entry
+                )
+            )
+
             # Maximum Current (heating only)
-            entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "MaxCurrent", "Maximum Current", UnitOfElectricCurrent.AMPERE, None, SensorDeviceClass.CURRENT, entry))
-            
+            entities.append(
+                MysaDiagnosticSensor(
+                    coordinator, device_id, device_data, "MaxCurrent", "Maximum Current",
+                    UnitOfElectricCurrent.AMPERE, None, SensorDeviceClass.CURRENT, entry
+                )
+            )
             state = coordinator.data.get(device_id, {})
-            
+            state = coordinator.data.get(device_id, {})
+
             # HeatSink (heating only)
             if "HeatSink" in state:
-                entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "HeatSink", "HeatSink Temperature", UnitOfTemperature.CELSIUS, SensorStateClass.MEASUREMENT, SensorDeviceClass.TEMPERATURE, entry))
-            
+                entities.append(
+                    MysaDiagnosticSensor(
+                        coordinator, device_id, device_data, "HeatSink", "HeatSink Temperature",
+                        UnitOfTemperature.CELSIUS, SensorStateClass.MEASUREMENT,
+                        SensorDeviceClass.TEMPERATURE, entry
+                    )
+                )
+
             # Infloor (floor heating only)
             if "Infloor" in state:
-                entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "Infloor", "Infloor Temperature", UnitOfTemperature.CELSIUS, SensorStateClass.MEASUREMENT, SensorDeviceClass.TEMPERATURE, entry))
-                
+                entities.append(
+                    MysaDiagnosticSensor(
+                        coordinator, device_id, device_data, "Infloor", "Infloor Temperature",
+                        UnitOfTemperature.CELSIUS, SensorStateClass.MEASUREMENT,
+                        SensorDeviceClass.TEMPERATURE, entry
+                    )
+                )
+
             # Voltage/Current (heating only)
             if "Voltage" in state or "LineVoltage" in state:
-                entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "Voltage", "Voltage", UnitOfElectricPotential.VOLT, SensorStateClass.MEASUREMENT, SensorDeviceClass.VOLTAGE, entry))
+                entities.append(
+                    MysaDiagnosticSensor(
+                        coordinator, device_id, device_data, "Voltage", "Voltage",
+                        UnitOfElectricPotential.VOLT, SensorStateClass.MEASUREMENT,
+                        SensorDeviceClass.VOLTAGE, entry
+                    )
+                )
             if "Current" in state:
-                entities.append(MysaDiagnosticSensor(coordinator, device_id, device_data, "Current", "Current", UnitOfElectricCurrent.AMPERE, SensorStateClass.MEASUREMENT, SensorDeviceClass.CURRENT, entry))
-        
+                entities.append(
+                    MysaDiagnosticSensor(
+                        coordinator, device_id, device_data, "Current", "Current",
+                        UnitOfElectricCurrent.AMPERE, SensorStateClass.MEASUREMENT,
+                        SensorDeviceClass.CURRENT, entry
+                    )
+                )
         # Simulated sensors for Lite devices (upgraded or not)
         upgraded_lite_devices = entry.options.get("upgraded_lite_devices", [])
         estimated_max_current = entry.options.get("estimated_max_current", 0)
-        
+
         # Check if this device is a Lite model OR manually marked as upgraded Lite
         model = device_data.get("Model", "")
         is_lite_model = "BB-V2-0-L" in model or "-L" in model
-        
+
         normalized_id = device_id.replace(":", "").lower()
         is_upgraded_lite = any(
-            uid.replace(":", "").lower() == normalized_id 
+            uid.replace(":", "").lower() == normalized_id
             for uid in upgraded_lite_devices
         )
-        
+
         # Show simulated sensors for any Lite device if estimated current is configured
         if (is_lite_model or is_upgraded_lite) and estimated_max_current > 0:
-            entities.append(MysaSimulatedCurrentSensor(coordinator, device_id, device_data, estimated_max_current, entry))
-            entities.append(MysaSimulatedPowerSensor(coordinator, device_id, device_data, estimated_max_current, entry))
+            entities.append(
+                MysaSimulatedCurrentSensor(
+                    coordinator, device_id, device_data, estimated_max_current, entry
+                )
+            )
+            entities.append(
+                MysaSimulatedPowerSensor(
+                    coordinator, device_id, device_data, estimated_max_current, entry
+                )
+            )
 
     async_add_entities(entities)
 
-class MysaDiagnosticSensor(CoordinatorEntity, SensorEntity):
+class MysaDiagnosticSensor(
+    CoordinatorEntity, SensorEntity
+):  # TODO: Refactor MysaDiagnosticSensor to reduce instance attributes and duplicate code
     """Representation of a Mysa Diagnostic Sensor."""
 
-    def __init__(self, coordinator, device_id, device_data, sensor_key, name_suffix, unit, state_class, device_class, entry):
+    def __init__(  # TODO: Refactor __init__ to reduce arguments
+        self, coordinator, device_id, device_data, sensor_key, name_suffix,
+        unit, state_class, device_class, entry
+    ):
         """Initialize."""
         super().__init__(coordinator)
         self._device_id = device_id
@@ -121,16 +192,18 @@ class MysaDiagnosticSensor(CoordinatorEntity, SensorEntity):
         self._attr_extra_state_attributes = {}
 
         # Categorize as Diagnostic AND Disable by default
-        if sensor_key in ["Current", "Duty", "HeatSink", "Infloor", "MaxCurrent", "MinSetpoint", "MaxSetpoint", "Rssi", "TimeZone", "Voltage"]:
-             self._attr_entity_category = EntityCategory.DIAGNOSTIC
-             self._attr_entity_registry_enabled_default = False
+        if sensor_key in [
+            "Current", "Duty", "HeatSink", "Infloor", "MaxCurrent",
+            "MinSetpoint", "MaxSetpoint", "Rssi", "TimeZone", "Voltage"
+        ]:
+            self._attr_entity_category = EntityCategory.DIAGNOSTIC
+            self._attr_entity_registry_enabled_default = False
     @property
     def device_info(self):
         """Return device info."""
         state = self.coordinator.data.get(self._device_id)
         zone_id = state.get("Zone") if state else None
         zone_name = self._entry.options.get(f"zone_name_{zone_id}") if zone_id else None
-        
         info = {
             "identifiers": {(DOMAIN, self._device_id)},
             "manufacturer": "Mysa",
@@ -146,7 +219,6 @@ class MysaDiagnosticSensor(CoordinatorEntity, SensorEntity):
         state = self.coordinator.data.get(self._device_id)
         zone_id = state.get("Zone") if state else None
         zone_name = self._entry.options.get(f"zone_name_{zone_id}") if zone_id else None
-        
         return {
             "device_id": self._device_id,
             "zone_id": zone_id,
@@ -155,11 +227,10 @@ class MysaDiagnosticSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        """Return the state of the sensor."""
+        """Return the state of the sensor."""  # TODO: Refactor to reduce branches
         state = self.coordinator.data.get(self._device_id)
         if not state:
             return None
-            
         # Mapping variants
         keys = [self._sensor_key]
         if self._sensor_key == "Duty":
@@ -194,11 +265,9 @@ class MysaDiagnosticSensor(CoordinatorEntity, SensorEntity):
             # TimeZone is a string
             if self._sensor_key == "TimeZone":
                 return str(val)
-                
             # Handle percentage conversion if 0-1 range
-            if self._sensor_key == "Duty" and float(val) <= 1.0 and float(val) >= 0:
-                 return float(val) * 100.0
-            
+            if self._sensor_key == "Duty" and 0 <= float(val) <= 1.0:
+                return float(val) * 100.0
             try:
                 return float(val)
             except (ValueError, TypeError):
@@ -236,7 +305,7 @@ class MysaZoneSensor(CoordinatorEntity, SensorEntity):
         state = self.coordinator.data.get(self._device_id)
         zone_id = state.get("Zone") if state else None
         zone_name = self._api.get_zone_name(zone_id) if zone_id else None
-        
+
         info = {
             "identifiers": {(DOMAIN, self._device_id)},
             "manufacturer": "Mysa",
@@ -255,7 +324,6 @@ class MysaZoneSensor(CoordinatorEntity, SensorEntity):
         zone_id = state.get("Zone")
         if not zone_id:
             return "Unassigned"
-        
         zone_name = self._api.get_zone_name(zone_id)
         return zone_name if zone_name else zone_id
 
@@ -264,16 +332,20 @@ class MysaZoneSensor(CoordinatorEntity, SensorEntity):
         """Return extra state attributes."""
         state = self.coordinator.data.get(self._device_id)
         zone_id = state.get("Zone") if state else None
-        
+
         return {
             "zone_id": zone_id,
         }
 
 
-class MysaSimulatedCurrentSensor(CoordinatorEntity, SensorEntity):
+class MysaSimulatedCurrentSensor(
+    CoordinatorEntity, SensorEntity
+):  # TODO: Refactor MysaSimulatedCurrentSensor to reduce instance attributes
     """Simulated current sensor for upgraded Lite devices."""
 
-    def __init__(self, coordinator, device_id, device_data, estimated_max_current, entry):
+    def __init__(
+        self, coordinator, device_id, device_data, estimated_max_current, entry
+    ):  # TODO: Refactor __init__ to reduce arguments
         """Initialize."""
         super().__init__(coordinator)
         self._device_id = device_id
@@ -302,7 +374,7 @@ class MysaSimulatedCurrentSensor(CoordinatorEntity, SensorEntity):
         state = self.coordinator.data.get(self._device_id)
         if not state:
             return None
-        
+
         # Get duty cycle (0-1 or 0-100)
         duty = None
         for key in ["dc", "Duty", "dtyCycle", "DutyCycle"]:
@@ -313,14 +385,14 @@ class MysaSimulatedCurrentSensor(CoordinatorEntity, SensorEntity):
                 else:
                     duty = val
                 break
-        
+
         if duty is None:
             return 0.0
-        
+
         # Normalize to 0-1 range
         if duty > 1:
             duty = duty / 100.0
-        
+
         return round(self._estimated_max_current * duty, 2)
 
     @property
@@ -332,10 +404,14 @@ class MysaSimulatedCurrentSensor(CoordinatorEntity, SensorEntity):
         }
 
 
-class MysaSimulatedPowerSensor(CoordinatorEntity, SensorEntity):
+class MysaSimulatedPowerSensor(
+    CoordinatorEntity, SensorEntity
+):  # TODO: Refactor MysaSimulatedPowerSensor to reduce instance attributes
     """Simulated power sensor for upgraded Lite devices."""
 
-    def __init__(self, coordinator, device_id, device_data, estimated_max_current, entry):
+    def __init__(
+        self, coordinator, device_id, device_data, estimated_max_current, entry
+    ):  # TODO: Refactor __init__ to reduce arguments
         """Initialize."""
         super().__init__(coordinator)
         self._device_id = device_id
@@ -364,7 +440,7 @@ class MysaSimulatedPowerSensor(CoordinatorEntity, SensorEntity):
         state = self.coordinator.data.get(self._device_id)
         if not state:
             return None
-        
+
         # Get duty cycle
         duty = None
         for key in ["dc", "Duty", "dtyCycle", "DutyCycle"]:
@@ -375,14 +451,14 @@ class MysaSimulatedPowerSensor(CoordinatorEntity, SensorEntity):
                 else:
                     duty = val
                 break
-        
+
         if duty is None:
             return 0.0
-        
+
         # Normalize to 0-1 range
         if duty > 1:
             duty = duty / 100.0
-        
+
         # Get voltage (default 240V if not available)
         voltage = 240
         for key in ["volts", "Voltage", "LineVoltage"]:
@@ -393,7 +469,7 @@ class MysaSimulatedPowerSensor(CoordinatorEntity, SensorEntity):
                 else:
                     voltage = val
                 break
-        
+
         current = self._estimated_max_current * duty
         return round(voltage * current, 1)
 

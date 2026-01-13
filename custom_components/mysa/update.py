@@ -28,7 +28,8 @@ async def async_setup_entry(
     data = hass.data[DOMAIN][entry.entry_id]
     api: MysaApi = data["api"]
     await api.get_devices()
-    
+
+
     entities = []
     for device_id, device_data in api.devices.items():
         entities.append(MysaUpdate(api, device_id, device_data))
@@ -36,25 +37,29 @@ async def async_setup_entry(
     async_add_entities(entities, update_before_add=True)
 
 
-class MysaUpdate(UpdateEntity):
+class MysaUpdate(UpdateEntity):  # TODO: Refactor MysaUpdate to implement abstract methods, reduce instance attributes and duplicate code
     """Mysa Firmware Update Entity."""
 
     _attr_device_class = UpdateDeviceClass.FIRMWARE
     _attr_supported_features = UpdateEntityFeature(0)
-    
+
+
     def __init__(self, api: MysaApi, device_id: str, device_data: dict) -> None:
         """Initialize."""
         self._api = api
         self._device_id = device_id
         self._device_data = device_data
-        
+
+
         self._attr_name = f"{device_data.get('Name', 'Mysa')} Firmware"
         self._attr_unique_id = f"{device_id}_firmware"
-        
+
+
         self._attr_installed_version = device_data.get("FirmwareVersion")
         self._attr_latest_version = self._attr_installed_version  # Default to current until check
         self._attr_in_progress = False
-        
+
+
         # Link to Device
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, device_id)},
@@ -70,11 +75,13 @@ class MysaUpdate(UpdateEntity):
             info = await self._api.hass.async_add_executor_job(
                 self._api.fetch_firmware_info, self._device_id
             )
-            
+
+
             if info:
                 self._attr_installed_version = info.get("installedVersion")
                 self._attr_latest_version = info.get("allowedVersion")
-                
+
+
                 _LOGGER.debug(
                     "Firmware check for %s: installed=%s, latest=%s, update_avail=%s",
                     self._device_id,
@@ -82,6 +89,7 @@ class MysaUpdate(UpdateEntity):
                     self._attr_latest_version,
                     info.get("update")
                 )
-                
-        except Exception as e:
+
+
+        except Exception as e:  # TODO: Catch specific exceptions instead of Exception
             _LOGGER.warning("Error fetching firmware info: %s", e)

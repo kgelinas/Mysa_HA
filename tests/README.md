@@ -2,7 +2,7 @@
 
 This directory contains the comprehensive test suite for the Mysa Home Assistant integration.
 
-## Test Count: 456+ tests
+## Test Count: 785 tests
 
 ## Running Tests
 
@@ -22,12 +22,11 @@ pytest tests/ -m "integration" -v
 
 | Category | Files | Description |
 |----------|-------|-------------|
-| **Core** | `test_api.py`, `test_integration.py`, `test_config_flow.py` | API, setup, config flow |
-| **Entities** | `test_climate.py`, `test_sensor.py`, `test_number.py`, `test_switch.py`, `test_select.py` | Entity behavior |
-| **MQTT** | `test_mqtt.py`, `test_mqtt_protocol.py`, `test_websocket_mqtt.py` | MQTT communication |
-| **HA Patterns** | `test_ha_*.py`, `test_device_entity.py`, `test_flows_events.py` | Home Assistant fixtures |
-| **Utilities** | `test_constants.py`, `test_capabilities.py`, `test_zone_lookup.py` | Constants and helpers |
-| **Error Handling** | `test_error_recovery.py`, `test_edge_cases.py` | Error scenarios |
+| **Core** | `test_api.py`, `test_auth.py`, `test_mqtt.py`, `test_config_flow.py`, `test_config_flow_reauth.py`, `test_diagnostics.py` | API, Auth, MQTT, Setup, Reauth, Diagnostics |
+| **Entities** | `test_climate.py`, `test_sensor.py`, `test_number.py`, `test_switch.py`, `test_select.py`, `test_update.py`, `test_entities.py` | Entity logic & Base classes |
+| **Integration** | `test_integration.py`, `test_init_coverage.py` | Full flow & Component setup |
+| **Utilities** | `test_utilities.py` | Helpers, constants, capability getters |
+| **Edge Cases** | `test_edge_cases.py` | Error handling, race conditions, limits |
 
 ## Markers
 

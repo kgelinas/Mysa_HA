@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.1] - 2026-01-13
+### Added
+- **Reauthentication**: Added support for updating integration credentials (e.g. password change) without removing and re-adding the device.
+- **Diagnostics**: Added `diagnostics.py` to allow users to download a sanitized JSON dump of their device data for troubleshooting. Includes full redaction of sensitive credentials.
+- **System Health**: Added `system_health.py` to display API connectivity, device count, and MQTT listener status in HA's System Health panel.
+- **100% Test Coverage**: Achieved full coverage for core modules `mysa_api.py`, `mysa_auth.py`, and `mysa_mqtt.py`.
+- **Test Markers**: Standardized `pytest` markers (`@pytest.mark.unit`, `@pytest.mark.asyncio`) for better test organization.
+
+### Changed
+- **Config Entry Handling**: Changed authentication errors during setup to use `ConfigEntryNotReady`, enabling automatic retries when the API is temporarily unavailable.
+- **Test Consolidation**: Merged multiple API test files into a single, comprehensive `tests/test_api.py` module.
+- **Robustness**: Improved error handling in `mysa_api.py` for synchronous methods and MQTT connection loops.
+- **Test Refactoring**: Updated `test_api.py` to use `AsyncMock` correctly for all awaitable mocks.
+
+### Fixed
+- **AC Mode Logic**: Fixed a bug in `set_hvac_mode` where "cool" mode incorrectly matched "heat_cool".
+- **Test Suite**: Fixed `UnboundLocalError` and various mock definitions in the test suite.
+- **Edge Case Handling**: Resolved multiple potential `RuntimeError` and `TypeError` exceptions in `mysa_api.py` during handshake failures or empty API responses.
+
 ## [0.8.0] - 2026-01-11
 ### Added
 - **Simulated Current/Power Sensors**: For all Lite devices (BB-V2-0-L), configure an estimated max current to enable simulated energy tracking based on duty cycle. Works for both upgraded and non-upgraded Lite devices.

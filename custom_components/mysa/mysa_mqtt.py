@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ssl
 import logging
+import asyncio
 from typing import TYPE_CHECKING, Any, Optional, Tuple, List, Union
 from urllib.parse import urlparse
 from uuid import uuid1
@@ -24,16 +25,16 @@ try:
         IDENTITY_POOL_ID,
     )
     from . import mqtt
-    from .const import MQTT_KEEPALIVE, MQTT_PING_INTERVAL, MQTT_USER_AGENT
+    from .const import MQTT_KEEPALIVE, MQTT_USER_AGENT
 except ImportError:
-    from mysa_auth import (
+    from mysa_auth import (  # type: ignore[no-redef]
         Cognito,
         login,
         sigv4_sign_mqtt_url,
         IDENTITY_POOL_ID,
     )
-    import mqtt
-    from const import MQTT_KEEPALIVE, MQTT_PING_INTERVAL, MQTT_USER_AGENT
+    import mqtt  # type: ignore[no-redef]
+    from const import MQTT_KEEPALIVE, MQTT_USER_AGENT  # type: ignore[no-redef]
 
 if TYPE_CHECKING:
     import botocore.credentials
@@ -62,7 +63,7 @@ def refresh_and_sign_url(
     try:
         user_obj.renew_access_token()
         _LOGGER.debug("Refreshed access token for MQTT URL signing")
-    except Exception as e:
+    except Exception as e:  # TODO: Catch specific exceptions instead of Exception
         _LOGGER.warning("Token refresh failed (%s), attempting full re-authentication", e)
         try:
             user_obj = login(username, password)
@@ -70,7 +71,6 @@ def refresh_and_sign_url(
         except Exception as login_err:
             _LOGGER.error("Full re-authentication failed: %s", login_err)
             raise
-    
     # Get fresh credentials and sign URL
     cred = user_obj.get_credentials(identity_pool_id=IDENTITY_POOL_ID)
     signed_url = sigv4_sign_mqtt_url(cred)
@@ -141,11 +141,11 @@ async def connect_websocket(signed_url: str) -> WebSocketClientProtocol:
     ws_url = get_websocket_url(signed_url)
     ssl_context = ssl.create_default_context()
     headers = {'user-agent': MQTT_USER_AGENT}
-    
+
     try:
         ws = await websockets.connect(
             ws_url,
-            subprotocols=['mqtt'],
+            subprotocols=[websockets.Subprotocol('mqtt')],  # type: ignore[list-item]
             ssl=ssl_context,
             additional_headers=headers,
             ping_interval=None,
@@ -155,14 +155,14 @@ async def connect_websocket(signed_url: str) -> WebSocketClientProtocol:
         # Fallback for older websockets versions
         ws = await websockets.connect(
             ws_url,
-            subprotocols=['mqtt'],
+            subprotocols=[websockets.Subprotocol('mqtt')],  # type: ignore[list-item]
             ssl=ssl_context,
             extra_headers=headers,
             ping_interval=None,
             ping_timeout=None
         )
-    
-    return ws
+
+    return ws  # type: ignore[return-value]
 
 
 def create_connect_packet(keepalive: int = MQTT_KEEPALIVE) -> bytes:
@@ -207,7 +207,7 @@ class MqttConnection:
                 if packet:
                     process(packet)
     """
-    
+
     def __init__(
         self,
         signed_url: str,
@@ -227,43 +227,43 @@ class MqttConnection:
         self.keepalive = keepalive
         self._ws: Optional[WebSocketClientProtocol] = None
         self._connected: bool = False
-    
+
     async def __aenter__(self) -> 'MqttConnection':
         """Connect to MQTT broker and subscribe to device topics."""
         # Connect WebSocket
         self._ws = await connect_websocket(self.signed_url)
-        
+
         # Send MQTT CONNECT
         connect_pkt = create_connect_packet(self.keepalive)
         await self._ws.send(connect_pkt)
-        
+
         # Wait for CONNACK
         resp = await self._ws.recv()
-        pkt = parse_mqtt_packet(resp)
+        pkt = parse_mqtt_packet(resp)  # type: ignore[arg-type]
         if not isinstance(pkt, mqtt.ConnackPacket):
             await self._ws.close()
             raise RuntimeError(f"Expected CONNACK, got {pkt}")
-        
+
         _LOGGER.info("MQTT connected successfully")
-        
+
         # Subscribe to device topics
         if self.device_ids:
             sub_topics = build_subscription_topics(self.device_ids)
             sub_pkt = mqtt.subscribe(1, sub_topics)
             await self._ws.send(sub_pkt)
-            
+
             # Wait for SUBACK
             resp = await self._ws.recv()
-            pkt = parse_mqtt_packet(resp)
+            pkt = parse_mqtt_packet(resp)  # type: ignore[arg-type]
             if not isinstance(pkt, mqtt.SubackPacket):
                 await self._ws.close()
                 raise RuntimeError(f"Expected SUBACK, got {pkt}")
-            
+
             _LOGGER.info("Subscribed to %d device topics", len(self.device_ids))
-        
+
         self._connected = True
         return self
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool:
         """Disconnect from MQTT broker."""
         self._connected = False
@@ -273,21 +273,20 @@ class MqttConnection:
                 disconnect_pkt = mqtt.disconnect()
                 await self._ws.send(disconnect_pkt)
                 await self._ws.close()
-            except Exception:
+            except Exception:  # TODO: Catch specific exceptions instead of Exception
                 pass
             self._ws = None
         return False  # Don't suppress exceptions
-    
     @property
     def connected(self) -> bool:
         """Check if connection is active."""
         return self._connected and self._ws is not None
-    
+
     @property
     def websocket(self) -> Optional[WebSocketClientProtocol]:
         """Get underlying WebSocket connection."""
         return self._ws
-    
+
     async def receive(self, timeout: Optional[float] = None) -> Optional[Any]:
         """
         Receive and parse an MQTT packet.
@@ -300,24 +299,23 @@ class MqttConnection:
         """
         if not self._ws:
             raise RuntimeError("Not connected")
-        
-        import asyncio
+
         try:
             if timeout:
                 data = await asyncio.wait_for(self._ws.recv(), timeout=timeout)
             else:
                 data = await self._ws.recv()
-            return parse_mqtt_packet(data)
+            return parse_mqtt_packet(data)  # type: ignore[arg-type]
         except asyncio.TimeoutError:
             return None
-    
+
     async def send_ping(self) -> None:
         """Send MQTT PINGREQ packet."""
         if not self._ws:
             raise RuntimeError("Not connected")
         await self._ws.send(mqtt.pingreq())
         _LOGGER.debug("Sent PINGREQ keepalive")
-    
+
     async def send(self, data: bytes) -> None:
         """
         Send raw data to MQTT broker.
