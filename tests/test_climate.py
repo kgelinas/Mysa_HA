@@ -1335,7 +1335,7 @@ class TestSensorFinalEdgeCases:
     @pytest.mark.asyncio
     async def test_simulated_current_no_state(self, hass, mock_entry):
         """Test simulated current returns None when no state."""
-        from custom_components.mysa.sensor import MysaSimulatedCurrentSensor
+        from custom_components.mysa.sensor import MysaCurrentSensor
 
         async def async_update():
             return {}  # No data
@@ -1345,9 +1345,12 @@ class TestSensorFinalEdgeCases:
         )
         coordinator.data = {}
 
+        mock_api = MagicMock()
+        mock_entry.options = {"estimated_max_current": 15.0}
+
         device_data = {"Id": "d1", "Name": "L", "Model": "L"}
-        entity = MysaSimulatedCurrentSensor(
-            coordinator, "d1", device_data, 15.0, mock_entry
+        entity = MysaCurrentSensor(
+            coordinator, "d1", device_data, mock_api, mock_entry
         )
 
         assert entity.native_value is None
@@ -1355,7 +1358,7 @@ class TestSensorFinalEdgeCases:
     @pytest.mark.asyncio
     async def test_simulated_power_dict_duty(self, hass, mock_entry):
         """Test simulated power extracts duty from dict."""
-        from custom_components.mysa.sensor import MysaSimulatedPowerSensor
+        from custom_components.mysa.sensor import MysaPowerSensor
 
         async def async_update():
             return {"d1": {"Duty": {"v": 0.5}}}  # Dict duty
@@ -1365,9 +1368,12 @@ class TestSensorFinalEdgeCases:
         )
         coordinator.data = {"d1": {"Duty": {"v": 0.5}}}
 
+        mock_api = MagicMock()
+        mock_entry.options = {"estimated_max_current": 15.0}
+
         device_data = {"Id": "d1", "Name": "L", "Model": "L"}
-        entity = MysaSimulatedPowerSensor(
-            coordinator, "d1", device_data, 15.0, mock_entry
+        entity = MysaPowerSensor(
+            coordinator, "d1", device_data, mock_api, mock_entry
         )
 
         # 50% * 15A * 240V = 1800W
@@ -1625,6 +1631,25 @@ class TestClimateSetup:
 class TestClimateEdgeCasesAdditional:
     "Additional climate edge cases from setup tests."
 
+    @pytest.fixture
+    def mock_coordinator(self, hass):
+        """Mock coordinator."""
+        async def async_update():
+            return {"device1": {"stpt": 20, "ambTemp": 20}}
+        return DataUpdateCoordinator(
+            hass, MagicMock(), name="test", update_method=async_update, config_entry=MagicMock()
+        )
+
+    @pytest.fixture
+    def climate_entity(self, mock_coordinator):
+        """Mock climate entity."""
+        from custom_components.mysa.climate import MysaClimate
+        mock_api = MagicMock()
+        device_data = {"Id": "device1", "Name": "Test", "Model": "BB-V2"}
+        mock_entry = MagicMock()
+        mock_entry.entry_id = "test_entry"
+        return MysaClimate(mock_coordinator, "device1", device_data, mock_api, mock_entry)
+
     async def test_climate_current_temp_zero_returns_none(self, hass, mock_entry):
         """Test current_temperature returns None when value is 0."""
         from custom_components.mysa.climate import MysaClimate
@@ -1704,3 +1729,124 @@ class TestClimateEdgeCasesAdditional:
 
         # No state, should return None (line 109)
         assert entity._get_value("SetPoint") is None
+
+    @pytest.mark.asyncio
+    async def test_get_value_none_data(self, hass, mock_coordinator, climate_entity):
+        """Test _get_value returns None if coordinator data is None (line 104)."""
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = None
+        climate_entity.coordinator = mock_coordinator
+        val = climate_entity._get_value("stpt")
+        assert val is None
+
+    @pytest.mark.asyncio
+    async def test_get_sticky_value_exception(self, hass, mock_coordinator, climate_entity):
+        """Test _get_sticky_value exception handling (lines 196-197)."""
+        import time 
+        # Mock _pending_updates to raise on __delitem__
+        mock_pending = MagicMock()
+        # Allows .get() to return a valid state
+        mock_pending.get.return_value = {"value": 20, "ts": time.time()}
+        # Raises on delete
+        mock_pending.__delitem__.side_effect = Exception("Del Fail")
+        
+        climate_entity._pending_updates = mock_pending
+        
+        # Mock time to be within 30s window
+        with patch("time.time", return_value=time.time() + 1):
+             # Convergence: 20 == 20. Tries to del. Raises. Caught. Returns 20 (pending val)
+             val = climate_entity._get_sticky_value("stpt", 20)
+             # _get_sticky_value returns pending val (20) after exception catch
+             assert val == 20
+
+class TestACClimateCoverage(TestACClimateEdgeCases):
+    """Additional AC tests."""
+
+    @pytest.fixture
+    def mock_api(self):
+        """Mock API."""
+        return MagicMock()
+
+    @pytest.fixture
+    def ac_entity(self, hass, mock_coordinator, mock_api):
+        """Mock AC entity."""
+        from custom_components.mysa.climate import MysaACClimate
+        device_data = {
+            "Id": "device1", 
+            "Name": "Test AC", 
+            "Model": "AC-V1",
+            "SupportedCaps": {"modes": {"4": {}}}
+        }
+        mock_entry = MagicMock()
+        return MysaACClimate(mock_coordinator, "device1", device_data, mock_api, mock_entry)
+
+    async def test_ac_set_target_temp_exception(self, hass, mock_coordinator, ac_entity, mock_api):
+        """Test async_set_target_temperature exception (lines 518-527)."""
+        # Fix missing hass attribute
+        ac_entity.hass = hass
+        ac_entity.entity_id = "climate.test_ac"
+        
+        # Force API mock to be the same (fixture resolution issue?)
+        ac_entity._api = mock_api
+        
+        assert ac_entity._api is mock_api
+        
+        mock_api.set_target_temperature.side_effect = Exception("API Fail")
+        
+        # Use direct call to target specific method exception block
+        await ac_entity.async_set_target_temperature(24)
+        mock_api.set_target_temperature.assert_called()
+
+    async def test_ac_set_target_temperature_success(self, hass, mock_coordinator, ac_entity, mock_api):
+        """Test async_set_target_temperature success path (lines 518-525)."""
+        # Proper setup
+        ac_entity.hass = hass
+        ac_entity.entity_id = "climate.test_ac"
+        ac_entity._api = mock_api
+        
+        # Call with valid temperature
+        # Call with valid temperature
+        await ac_entity.async_set_target_temperature(22)
+        
+        # Verify API called
+        mock_api.set_target_temperature.assert_called_with(ac_entity._device_id, 22)
+        
+        # Verify state write requested (mocked or just run if harmless)
+        # async_write_ha_state() is called at end of success path
+
+    async def test_ac_sticky_logic(self, hass, ac_entity):
+        """Test sticky value logic (lines 182-183, 192-195)."""
+        import time
+        from unittest.mock import patch
+        
+        # Setup entity
+        ac_entity.hass = hass
+        ac_entity.entity_id = "climate.test_ac"
+        
+        # 1. Expiration (182-183)
+        ac_entity._pending_updates["test_attr"] = {"value": 100, "ts": time.time() - 31}
+        # Call _get_sticky_value
+        val = ac_entity._get_sticky_value("test_attr", 50)
+        assert val == 50 # Should return cloud value
+        assert "test_attr" not in ac_entity._pending_updates
+        
+        # 2. Convergence (Exact) (193-195)
+        # Setup pending
+        ac_entity._set_sticky_value("exact_attr", 100)
+        # Get with matching cloud value
+        val = ac_entity._get_sticky_value("exact_attr", 100)
+        assert val == 100
+        assert "exact_attr" not in ac_entity._pending_updates
+        
+        # 3. Convergence (Float) (190-192)
+        ac_entity._set_sticky_value("float_attr", 20.0)
+        # Cloud value slightly different but close
+        val = ac_entity._get_sticky_value("float_attr", 20.05)
+        assert val == 20.05
+        assert "float_attr" not in ac_entity._pending_updates
+
+        # 4. Convergence (String) (193-195)
+        ac_entity._set_sticky_value("string_attr", "ModeA")
+        val = ac_entity._get_sticky_value("string_attr", "ModeA")
+        assert val == "ModeA"
+        assert "string_attr" not in ac_entity._pending_updates

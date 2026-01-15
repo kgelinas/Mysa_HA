@@ -14,13 +14,19 @@ ROOT_DIR = os.path.dirname(TEST_DIR)
 sys.path.insert(0, ROOT_DIR)
 
 import pytest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock, AsyncMock, patch
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.const import EntityCategory
 
 # Module-level imports after path setup
 from custom_components.mysa.const import DOMAIN
+from custom_components.mysa.sensor import (
+    MysaDiagnosticSensor,
+    MysaPowerSensor,
+    MysaCurrentSensor,
+    MysaEnergySensor,
+)
 
 
 # ===========================================================================
@@ -467,48 +473,51 @@ class TestMysaZoneSensor:
 
 
 # ===========================================================================
-# MysaSimulatedCurrentSensor Tests
+# MysaCurrentSensor Tests
 # ===========================================================================
 
 
-class TestMysaSimulatedCurrentSensor:
-    """Test MysaSimulatedCurrentSensor."""
+class TestMysaCurrentSensor:
+    """Test MysaCurrentSensor."""
 
     @pytest.mark.asyncio
     async def test_simulated_current_init(
-        self, hass, mock_coordinator, mock_lite_device_data, mock_entry
+        self, hass, mock_coordinator, mock_lite_device_data, mock_entry, mock_api
     ):
-        """Test MysaSimulatedCurrentSensor initialization."""
-        from custom_components.mysa.sensor import MysaSimulatedCurrentSensor
+        """Test MysaCurrentSensor initialization."""
+        from custom_components.mysa.sensor import MysaCurrentSensor
 
+        mock_entry.options = {"estimated_max_current": 15.0}
+        
         await mock_coordinator.async_refresh()
 
-        entity = MysaSimulatedCurrentSensor(
+        entity = MysaCurrentSensor(
             mock_coordinator,
             "lite_device",
             mock_lite_device_data,
-            15.0,  # estimated max current
+            mock_api,
             mock_entry,
         )
 
         assert entity._device_id == "lite_device"
-        assert entity._estimated_max_current == 15.0
         assert "Estimated Current" in entity._attr_name
 
     @pytest.mark.asyncio
     async def test_simulated_current_value(
-        self, hass, mock_coordinator, mock_lite_device_data, mock_entry
+        self, hass, mock_coordinator, mock_lite_device_data, mock_entry, mock_api
     ):
-        """Test MysaSimulatedCurrentSensor native_value."""
-        from custom_components.mysa.sensor import MysaSimulatedCurrentSensor
+        """Test MysaCurrentSensor native_value."""
+        from custom_components.mysa.sensor import MysaCurrentSensor
 
         await mock_coordinator.async_refresh()
 
-        entity = MysaSimulatedCurrentSensor(
+        mock_entry.options = {"estimated_max_current": 15.0}
+
+        entity = MysaCurrentSensor(
             mock_coordinator,
             "lite_device",
             mock_lite_device_data,
-            15.0,
+            mock_api,
             mock_entry,
         )
 
@@ -519,18 +528,20 @@ class TestMysaSimulatedCurrentSensor:
 
     @pytest.mark.asyncio
     async def test_simulated_current_device_info(
-        self, hass, mock_coordinator, mock_lite_device_data, mock_entry
+        self, hass, mock_coordinator, mock_lite_device_data, mock_entry, mock_api
     ):
-        """Test MysaSimulatedCurrentSensor device_info."""
-        from custom_components.mysa.sensor import MysaSimulatedCurrentSensor
+        """Test MysaCurrentSensor device_info."""
+        from custom_components.mysa.sensor import MysaCurrentSensor
 
         await mock_coordinator.async_refresh()
 
-        entity = MysaSimulatedCurrentSensor(
+        mock_entry.options = {"estimated_max_current": 15.0}
+
+        entity = MysaCurrentSensor(
             mock_coordinator,
             "lite_device",
             mock_lite_device_data,
-            15.0,
+            mock_api,
             mock_entry,
         )
 
@@ -540,69 +551,76 @@ class TestMysaSimulatedCurrentSensor:
 
     @pytest.mark.asyncio
     async def test_simulated_current_extra_attrs(
-        self, hass, mock_coordinator, mock_lite_device_data, mock_entry
+        self, hass, mock_coordinator, mock_lite_device_data, mock_entry, mock_api
     ):
-        """Test MysaSimulatedCurrentSensor extra_state_attributes."""
-        from custom_components.mysa.sensor import MysaSimulatedCurrentSensor
+        """Test MysaCurrentSensor extra_state_attributes."""
+        from custom_components.mysa.sensor import MysaCurrentSensor
 
         await mock_coordinator.async_refresh()
 
-        entity = MysaSimulatedCurrentSensor(
+        mock_entry.options = {"estimated_max_current": 15.0}
+
+        entity = MysaCurrentSensor(
             mock_coordinator,
             "lite_device",
             mock_lite_device_data,
-            15.0,
+            mock_api,
             mock_entry,
         )
 
         attrs = entity.extra_state_attributes
 
-        assert "estimated_max_current" in attrs
-        assert attrs["estimated_max_current"] == 15.0
+        assert "tracking_mode" in attrs
+        assert attrs["tracking_mode"] == "Simulated"
+        assert attrs["configured_wattage"] == 0 # because usually calculated from wattage_id or fallback
 
 
 # ===========================================================================
-# MysaSimulatedPowerSensor Tests
+# MysaPowerSensor Tests
 # ===========================================================================
 
 
-class TestMysaSimulatedPowerSensor:
-    """Test MysaSimulatedPowerSensor."""
+class TestMysaPowerSensor:
+    """Test MysaPowerSensor (Simulated Mode)."""
 
     @pytest.mark.asyncio
     async def test_simulated_power_init(
-        self, hass, mock_coordinator, mock_lite_device_data, mock_entry
+        self, hass, mock_coordinator, mock_lite_device_data, mock_entry, mock_api
     ):
-        """Test MysaSimulatedPowerSensor initialization."""
-        from custom_components.mysa.sensor import MysaSimulatedPowerSensor
+        """Test MysaPowerSensor initialization."""
+        from custom_components.mysa.sensor import MysaPowerSensor
 
         await mock_coordinator.async_refresh()
 
-        entity = MysaSimulatedPowerSensor(
+        mock_entry.options = {"estimated_max_current": 15.0}
+
+        entity = MysaPowerSensor(
             mock_coordinator,
             "lite_device",
             mock_lite_device_data,
-            15.0,
+            mock_api,
             mock_entry,
         )
 
         assert entity._device_id == "lite_device"
-        assert "Estimated Power" in entity._attr_name
+        assert "Power" in entity._attr_name
 
     @pytest.mark.asyncio
     async def test_simulated_power_value(
-        self, hass, mock_coordinator, mock_lite_device_data, mock_entry
+        self, hass, mock_coordinator, mock_lite_device_data, mock_entry, mock_api
     ):
-        """Test MysaSimulatedPowerSensor native_value."""
-        from custom_components.mysa.sensor import MysaSimulatedPowerSensor
+        """Test MysaPowerSensor native_value."""
+        from custom_components.mysa.sensor import MysaPowerSensor
 
         await mock_coordinator.async_refresh()
 
-        entity = MysaSimulatedPowerSensor(
+        mock_entry.options = {"estimated_max_current": 15.0}
+
+        entity = MysaPowerSensor(
             mock_coordinator,
             "lite_device",
             mock_lite_device_data,
-            15.0,
+            mock_api,
             mock_entry,
         )
 
@@ -613,18 +631,20 @@ class TestMysaSimulatedPowerSensor:
 
     @pytest.mark.asyncio
     async def test_simulated_power_device_info(
-        self, hass, mock_coordinator, mock_lite_device_data, mock_entry
+        self, hass, mock_coordinator, mock_lite_device_data, mock_entry, mock_api
     ):
-        """Test MysaSimulatedPowerSensor device_info."""
-        from custom_components.mysa.sensor import MysaSimulatedPowerSensor
+        """Test MysaPowerSensor device_info."""
+        from custom_components.mysa.sensor import MysaPowerSensor
 
         await mock_coordinator.async_refresh()
 
-        entity = MysaSimulatedPowerSensor(
+        mock_entry.options = {"estimated_max_current": 15.0}
+
+        entity = MysaPowerSensor(
             mock_coordinator,
             "lite_device",
             mock_lite_device_data,
-            15.0,
+            mock_api,
             mock_entry,
         )
 
@@ -634,25 +654,27 @@ class TestMysaSimulatedPowerSensor:
 
     @pytest.mark.asyncio
     async def test_simulated_power_extra_attrs(
-        self, hass, mock_coordinator, mock_lite_device_data, mock_entry
+        self, hass, mock_coordinator, mock_lite_device_data, mock_entry, mock_api
     ):
-        """Test MysaSimulatedPowerSensor extra_state_attributes."""
-        from custom_components.mysa.sensor import MysaSimulatedPowerSensor
+        """Test MysaPowerSensor extra_state_attributes."""
+        from custom_components.mysa.sensor import MysaPowerSensor
 
         await mock_coordinator.async_refresh()
 
-        entity = MysaSimulatedPowerSensor(
+        mock_entry.options = {"estimated_max_current": 15.0}
+
+        entity = MysaPowerSensor(
             mock_coordinator,
             "lite_device",
             mock_lite_device_data,
-            15.0,
+            mock_api,
             mock_entry,
         )
 
         attrs = entity.extra_state_attributes
 
-        assert "estimated_max_current" in attrs
-        assert "assumed_voltage" in attrs
+        assert "tracking_mode" in attrs
+        assert attrs["tracking_mode"] == "Simulated"
 
 
 # ===========================================================================
@@ -836,8 +858,8 @@ class TestSensorSetup:
         """Test setup creates simulated sensors for Lite devices."""
         from custom_components.mysa.sensor import (
             async_setup_entry,
-            MysaSimulatedCurrentSensor,
-            MysaSimulatedPowerSensor,
+            MysaCurrentSensor,
+            MysaPowerSensor,
         )
 
         mock_entry.options = {
@@ -870,8 +892,8 @@ class TestSensorSetup:
 
         # Should include simulated current and power sensors
         entity_types = [type(e).__name__ for e in entities]
-        assert "MysaSimulatedCurrentSensor" in entity_types
-        assert "MysaSimulatedPowerSensor" in entity_types
+        assert "MysaCurrentSensor" in entity_types
+        assert "MysaPowerSensor" in entity_types
 
     @pytest.mark.asyncio
     async def test_async_setup_entry_ac_skips_heating_sensors(
@@ -962,9 +984,9 @@ class TestSensorEdgeCases:
         assert entity.native_value == 50.0
 
     @pytest.mark.asyncio
-    async def test_simulated_current_calculation(self, hass, mock_entry):
+    async def test_simulated_current_calculation(self, hass, mock_entry, mock_api):
         """Test simulated current sensor calculation."""
-        from custom_components.mysa.sensor import MysaSimulatedCurrentSensor
+        from custom_components.mysa.sensor import MysaCurrentSensor
 
         async def async_update():
             return {"device1": {"Duty": 50}}  # 50% duty cycle
@@ -974,18 +996,20 @@ class TestSensorEdgeCases:
         )
         await coordinator.async_refresh()
 
+        mock_entry.options = {"estimated_max_current": 15.0}
+
         device_data = {"Id": "device1", "Name": "Test", "Model": "BB-V2-L"}
-        entity = MysaSimulatedCurrentSensor(
-            coordinator, "device1", device_data, 15.0, mock_entry
+        entity = MysaCurrentSensor(
+            coordinator, "device1", device_data, mock_api, mock_entry
         )
 
         # 50% of 15A = 7.5A
         assert entity.native_value == 7.5
 
     @pytest.mark.asyncio
-    async def test_simulated_power_calculation(self, hass, mock_entry):
+    async def test_simulated_power_calculation(self, hass, mock_entry, mock_api):
         """Test simulated power sensor calculation."""
-        from custom_components.mysa.sensor import MysaSimulatedPowerSensor
+        from custom_components.mysa.sensor import MysaPowerSensor
 
         async def async_update():
             return {"device1": {"Duty": 100}}  # 100% duty cycle
@@ -995,9 +1019,11 @@ class TestSensorEdgeCases:
         )
         await coordinator.async_refresh()
 
+        mock_entry.options = {"estimated_max_current": 15.0}
+
         device_data = {"Id": "device1", "Name": "Test", "Model": "BB-V2-L"}
-        entity = MysaSimulatedPowerSensor(
-            coordinator, "device1", device_data, 15.0, mock_entry
+        entity = MysaPowerSensor(
+            coordinator, "device1", device_data, mock_api, mock_entry
         )
 
         # 100% * 15A * 240V = 3600W
@@ -1179,9 +1205,9 @@ class TestSensorFinalEdgeCases:
         assert entity.native_value == "Unassigned"
 
     @pytest.mark.asyncio
-    async def test_simulated_current_no_duty(self, hass, mock_entry):
+    async def test_simulated_current_no_duty(self, hass, mock_entry, mock_api):
         """Test simulated current returns 0 when no duty cycle."""
-        from custom_components.mysa.sensor import MysaSimulatedCurrentSensor
+        from custom_components.mysa.sensor import MysaCurrentSensor
 
         async def async_update():
             return {"device1": {"SomeOther": 123}}  # No duty
@@ -1191,18 +1217,20 @@ class TestSensorFinalEdgeCases:
         )
         await coordinator.async_refresh()
 
+        mock_entry.options = {"estimated_max_current": 15.0}
+
         device_data = {"Id": "device1", "Name": "Test", "Model": "BB-V2-L"}
-        entity = MysaSimulatedCurrentSensor(
-            coordinator, "device1", device_data, 15.0, mock_entry
+        entity = MysaCurrentSensor(
+            coordinator, "device1", device_data, mock_api, mock_entry
         )
 
         # Line 318
         assert entity.native_value == 0.0
 
     @pytest.mark.asyncio
-    async def test_simulated_current_dict_value(self, hass, mock_entry):
+    async def test_simulated_current_dict_value(self, hass, mock_entry, mock_api):
         """Test simulated current extracts from dict with 'v' key."""
-        from custom_components.mysa.sensor import MysaSimulatedCurrentSensor
+        from custom_components.mysa.sensor import MysaCurrentSensor
 
         async def async_update():
             return {"device1": {"Duty": {"v": 0.5}}}  # Dict format
@@ -1212,18 +1240,20 @@ class TestSensorFinalEdgeCases:
         )
         await coordinator.async_refresh()
 
+        mock_entry.options = {"estimated_max_current": 15.0}
+
         device_data = {"Id": "device1", "Name": "Test", "Model": "BB-V2-L"}
-        entity = MysaSimulatedCurrentSensor(
-            coordinator, "device1", device_data, 15.0, mock_entry
+        entity = MysaCurrentSensor(
+            coordinator, "device1", device_data, mock_api, mock_entry
         )
 
         # 50% of 15A = 7.5A (line 312)
         assert entity.native_value == 7.5
 
     @pytest.mark.asyncio
-    async def test_simulated_power_no_state(self, hass, mock_entry):
+    async def test_simulated_power_no_state(self, hass, mock_entry, mock_api):
         """Test simulated power returns None when no state."""
-        from custom_components.mysa.sensor import MysaSimulatedPowerSensor
+        from custom_components.mysa.sensor import MysaPowerSensor
 
         async def async_update():
             return {}  # No device state
@@ -1233,18 +1263,20 @@ class TestSensorFinalEdgeCases:
         )
         await coordinator.async_refresh()
 
+        mock_entry.options = {"estimated_max_current": 15.0}
+
         device_data = {"Id": "device1", "Name": "Test", "Model": "BB-V2-L"}
-        entity = MysaSimulatedPowerSensor(
-            coordinator, "device1", device_data, 15.0, mock_entry
+        entity = MysaPowerSensor(
+            coordinator, "device1", device_data, mock_api, mock_entry
         )
 
         # Line 366
         assert entity.native_value is None
 
     @pytest.mark.asyncio
-    async def test_simulated_power_no_duty(self, hass, mock_entry):
+    async def test_simulated_power_no_duty(self, hass, mock_entry, mock_api):
         """Test simulated power returns 0 when no duty cycle."""
-        from custom_components.mysa.sensor import MysaSimulatedPowerSensor
+        from custom_components.mysa.sensor import MysaPowerSensor
 
         async def async_update():
             return {"device1": {"SomeOther": 123}}  # No duty
@@ -1254,18 +1286,20 @@ class TestSensorFinalEdgeCases:
         )
         await coordinator.async_refresh()
 
+        mock_entry.options = {"estimated_max_current": 15.0}
+
         device_data = {"Id": "device1", "Name": "Test", "Model": "BB-V2-L"}
-        entity = MysaSimulatedPowerSensor(
-            coordinator, "device1", device_data, 15.0, mock_entry
+        entity = MysaPowerSensor(
+            coordinator, "device1", device_data, mock_api, mock_entry
         )
 
         # Line 380
         assert entity.native_value == 0.0
 
     @pytest.mark.asyncio
-    async def test_simulated_power_dict_voltage(self, hass, mock_entry):
+    async def test_simulated_power_dict_voltage(self, hass, mock_entry, mock_api):
         """Test simulated power extracts voltage from dict."""
-        from custom_components.mysa.sensor import MysaSimulatedPowerSensor
+        from custom_components.mysa.sensor import MysaPowerSensor
 
         async def async_update():
             return {
@@ -1277,9 +1311,11 @@ class TestSensorFinalEdgeCases:
         )
         await coordinator.async_refresh()
 
+        mock_entry.options = {"estimated_max_current": 15.0}
+
         device_data = {"Id": "device1", "Name": "Test", "Model": "BB-V2-L"}
-        entity = MysaSimulatedPowerSensor(
-            coordinator, "device1", device_data, 15.0, mock_entry
+        entity = MysaPowerSensor(
+            coordinator, "device1", device_data, mock_api, mock_entry
         )
 
         # 50% of 15A * 220V = 1650W (line 392)
@@ -1327,9 +1363,9 @@ class TestSensorFinalCoverage:
         assert result == "[1, 2, 3]"
 
     @pytest.mark.asyncio
-    async def test_simulated_current_no_state(self, hass, mock_entry):
+    async def test_simulated_current_no_state(self, hass, mock_entry, mock_api):
         """Test simulated current returns None when no state (line 304)."""
-        from custom_components.mysa.sensor import MysaSimulatedCurrentSensor
+        from custom_components.mysa.sensor import MysaCurrentSensor
 
         async def async_update():
             return {}  # No device state at all
@@ -1339,18 +1375,20 @@ class TestSensorFinalCoverage:
         )
         await coordinator.async_refresh()
 
+        mock_entry.options = {"estimated_max_current": 15.0}
+
         device_data = {"Id": "device1", "Name": "Test", "Model": "BB-V2-L"}
-        entity = MysaSimulatedCurrentSensor(
-            coordinator, "device1", device_data, 15.0, mock_entry
+        entity = MysaCurrentSensor(
+            coordinator, "device1", device_data, mock_api, mock_entry
         )
 
         # Line 304: return None when no state
         assert entity.native_value is None
 
     @pytest.mark.asyncio
-    async def test_simulated_power_dict_duty(self, hass, mock_entry):
+    async def test_simulated_power_dict_duty(self, hass, mock_entry, mock_api):
         """Test simulated power extracts duty from dict format (line 374)."""
-        from custom_components.mysa.sensor import MysaSimulatedPowerSensor
+        from custom_components.mysa.sensor import MysaPowerSensor
 
         async def async_update():
             return {"device1": {"Duty": {"v": 0.5}}}  # Dict format with 'v' key
@@ -1360,9 +1398,11 @@ class TestSensorFinalCoverage:
         )
         await coordinator.async_refresh()
 
+        mock_entry.options = {"estimated_max_current": 15.0}
+
         device_data = {"Id": "device1", "Name": "Test", "Model": "BB-V2-L"}
-        entity = MysaSimulatedPowerSensor(
-            coordinator, "device1", device_data, 15.0, mock_entry
+        entity = MysaPowerSensor(
+            coordinator, "device1", device_data, mock_api, mock_entry
         )
 
         # 50% duty * 15A * 240V = 1800W (line 374)
@@ -1398,3 +1438,257 @@ class TestSensorFinalCoverage:
 
         # Line 206: return None when key not found
         assert entity.native_value is None
+
+# ===========================================================================
+# Coverage Tests (merged from test_sensor_coverage.py)
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+class TestSensorCoverage:
+    """Targeted tests for sensor.py missing coverage."""
+
+    # test_diagnostic_mac_ip_ssid removed as sensors were deleted
+
+    async def test_power_sensor_extract_fallback(self, hass, mock_coordinator, mock_config_entry):
+        """Test _extract_value fallback to 'Id' for MysaPowerSensor (line 378)."""
+        async def async_update():
+            return {
+                "device1": {
+                    "Current": {"Id": "some_id"} # No 'v' key
+                }
+            }
+        mock_coordinator.update_method = async_update
+        await mock_coordinator.async_refresh()
+
+        device_data = {"Id": "device1", "Name": "Test", "Model": "BB-V2"}
+        sensor = MysaPowerSensor(mock_coordinator, "device1", device_data, MagicMock(), mock_config_entry)
+        
+        # Should extract "some_id" but then fail float conversion in native_value
+        # triggering exception handling coverage
+        assert sensor.native_value == 0.0
+
+    async def test_power_sensor_real_calculation(self, hass, mock_coordinator, mock_config_entry):
+        """Test real power calculation success (lines 395-398)."""
+        async def async_update():
+            return {
+                "device1": {
+                    "Voltage": 240,
+                    "Current": 10
+                }
+            }
+        mock_coordinator.update_method = async_update
+        await mock_coordinator.async_refresh()
+
+        device_data = {"Id": "device1", "Name": "Test", "Model": "BB-V2"}
+        sensor = MysaPowerSensor(mock_coordinator, "device1", device_data, MagicMock(), mock_config_entry)
+        
+        # 240 * 10 = 2400
+        assert sensor.native_value == 2400.0
+
+    async def test_power_sensor_exceptions(self, hass, mock_coordinator, mock_config_entry):
+        """Test exceptions in power calculation (lines 411-412, 421-424)."""
+        async def async_update():
+            return {
+                "device1": {
+                    "Duty": "invalid" # Cannot convert to float
+                }
+            }
+        
+        hass.config_entries.async_update_entry(mock_config_entry, options={"wattage_device1": 1000})
+        
+        mock_coordinator.update_method = async_update
+        await mock_coordinator.async_refresh()
+
+        device_data = {"Id": "device1", "Name": "Test", "Model": "BB-V2"}
+        sensor = MysaPowerSensor(mock_coordinator, "device1", device_data, MagicMock(), mock_config_entry)
+
+        assert sensor.native_value == 0.0
+
+
+    async def test_current_sensor_logic(self, hass, mock_coordinator, mock_config_entry):
+        """Test MysaCurrentSensor logic and coverage."""
+        async def async_update():
+            return {
+                "device1": {
+                     "Current": 5.0 # Real current
+                },
+                "device2": {
+                    "Current": {"Id": "bad_id"} # Fallback to Id, then fail float
+                }
+            }
+        mock_coordinator.update_method = async_update
+        await mock_coordinator.async_refresh()
+        
+        device_data = {"Id": "device1", "Name": "Test", "Model": "BB-V2"}
+        
+        # Real current success (lines 490-493)
+        sensor1 = MysaCurrentSensor(mock_coordinator, "device1", device_data, MagicMock(), mock_config_entry)
+        assert sensor1.native_value == 5.0
+
+        # Fallback to Id then exception (line 475, 492)
+        sensor2 = MysaCurrentSensor(mock_coordinator, "device2", device_data, MagicMock(), mock_config_entry)
+        assert sensor2.native_value == 0.0
+
+    async def test_current_sensor_simulated_coverage(self, hass, mock_coordinator, mock_config_entry):
+        """Test simulated current calculation exceptions (lines 508-509, 512-527)."""
+        async def async_update():
+            return {
+                "device1": {
+                    "Duty": "invalid_duty", # Fail float conversion
+                    "Voltage": 240
+                }
+            }
+        
+        # Use estimated_max_current (>0) and no device wattage (=0) to enter the fallback block (lines 508-509)
+        hass.config_entries.async_update_entry(mock_config_entry, options={"estimated_max_current": 15.0})
+        
+        mock_coordinator.update_method = async_update
+        await mock_coordinator.async_refresh()
+
+        device_data = {"Id": "device1", "Name": "Test", "Model": "BB-V2"}
+        sensor = MysaCurrentSensor(mock_coordinator, "device1", device_data, MagicMock(), mock_config_entry)
+        
+        # Should catch exception and return 0.0
+        assert sensor.native_value == 0.0
+
+    async def test_energy_sensor_restore_and_update(self, hass, mock_coordinator, mock_config_entry):
+        """Test MysaEnergySensor restore state and Riemann sum update."""
+        mock_power_sensor = MagicMock()
+        mock_power_sensor.native_value = 1000.0 # 1000W = 1kW
+
+        device_data = {"Id": "device1", "Name": "Test", "Model": "BB-V2"}
+        sensor = MysaEnergySensor(
+            mock_coordinator, "device1", device_data, MagicMock(), mock_config_entry, mock_power_sensor
+        )
+
+        # Allow setting private attributes for testing
+        sensor.hass = hass
+        sensor.entity_id = "sensor.test_energy"
+        
+        # Test Initialize/Restore
+        with patch("homeassistant.helpers.restore_state.RestoreEntity.async_get_last_state", new_callable=AsyncMock) as mock_restore:
+             mock_state = MagicMock()
+             mock_state.state = "10.5" # Previous value
+             mock_restore.return_value = mock_state
+             
+             await sensor.async_added_to_hass()
+             
+             assert sensor.native_value == 10.5
+             assert sensor._last_update is not None
+
+        # Test Update (Riemann Sum)
+        old_time = sensor._last_update
+        # Simulate 1 hour passing
+        with patch("time.time", return_value=old_time + 3600):
+             sensor._handle_coordinator_update()
+             
+             # 10.5 + (1kW * 1h) = 11.5
+             assert sensor.native_value == 11.5
+             assert sensor.extra_state_attributes["last_integration_time"] == old_time + 3600
+        
+        # Device info coverage
+        assert sensor.device_info["manufacturer"] == "Mysa"
+
+    async def test_energy_sensor_invalid_restore(self, hass, mock_coordinator, mock_config_entry):
+         """Test restore with invalid state."""
+         sensor = MysaEnergySensor(
+            mock_coordinator, "device1", {}, MagicMock(), mock_config_entry, MagicMock()
+         )
+         sensor.hass = hass
+         
+         with patch("homeassistant.helpers.restore_state.RestoreEntity.async_get_last_state", new_callable=AsyncMock) as mock_restore:
+             mock_state = MagicMock()
+             mock_state.state = "invalid"
+             mock_restore.return_value = mock_state
+             
+             await sensor.async_added_to_hass()
+             assert sensor.native_value == 0.0
+
+    async def test_power_sensor_real_exceptions(self, hass, mock_coordinator, mock_config_entry):
+        """Test real power calculation exception (lines 397-398)."""
+        async def async_update():
+            return {
+                "device1": {
+                    "Voltage": "invalid", # Real voltage invalid
+                    "Current": 10
+                }
+            }
+        mock_coordinator.update_method = async_update
+        await mock_coordinator.async_refresh()
+
+        device_data = {"Id": "device1", "Name": "Test", "Model": "BB-V2"}
+        sensor = MysaPowerSensor(mock_coordinator, "device1", device_data, MagicMock(), mock_config_entry)
+        
+        # Should catch exception and return fallback/None (fallback logic continues)
+        # In this case native_value falls through to simulated logic.
+        # Since we haven't set up simulated wattage, it returns 0.0
+        assert sensor.native_value == 0.0
+
+    async def test_power_sensor_simulated_exceptions(self, hass, mock_coordinator, mock_config_entry):
+        """Test simulated power calculation exception (lines 411-412)."""
+        async def async_update():
+            return {
+                "device1": {
+                    "Current": None, # Force fallback
+                    "Voltage": "invalid", # Force invalid voltage for fallback calc
+                }
+            }
+        
+        # Set estimated_max_current to trigger the calculation attempt
+        hass.config_entries.async_update_entry(mock_config_entry, options={"estimated_max_current": 10})
+        
+        mock_coordinator.update_method = async_update
+        await mock_coordinator.async_refresh()
+
+        device_data = {"Id": "device1", "Name": "Test", "Model": "BB-V2"}
+        sensor = MysaPowerSensor(mock_coordinator, "device1", device_data, MagicMock(), mock_config_entry)
+
+        # Should catch exception and return 0.0 wattage, thus 0.0 power
+        assert sensor.native_value == 0.0
+
+    async def test_current_sensor_simulated_valid(self, hass, mock_coordinator, mock_config_entry):
+        """Test valid simulated current calculation (lines 512-527)."""
+        async def async_update():
+            return {
+                "device1": {
+                    "Current": None, # Force simulated
+                    "Voltage": 240,
+                    "Duty": 50
+                }
+            }
+        
+        # Set per-device wattage
+        hass.config_entries.async_update_entry(mock_config_entry, options={"wattage_device1": 2400})
+        
+        mock_coordinator.update_method = async_update
+        await mock_coordinator.async_refresh()
+
+        device_data = {"Id": "device1", "Name": "Test", "Model": "BB-V2"}
+        sensor = MysaCurrentSensor(mock_coordinator, "device1", device_data, MagicMock(), mock_config_entry)
+        
+        # I = (P / V) * Duty
+        # (2400 / 240) * 0.5 = 10 * 0.5 = 5.0
+        assert sensor.native_value == 5.0
+
+    async def test_current_sensor_simulated_exceptions_block(self, hass, mock_coordinator, mock_config_entry):
+        """Test exceptions in simulated current block (lines 512-527)."""
+        async def async_update():
+            return {
+                "device1": {
+                    "Current": None,
+                    "Voltage": "invalid", # Force float conversion error
+                    "Duty": 50
+                }
+            }
+        
+        # Set per-device wattage to enter the specific block
+        hass.config_entries.async_update_entry(mock_config_entry, options={"wattage_device1": 2400})
+        
+        mock_coordinator.update_method = async_update
+        await mock_coordinator.async_refresh()
+
+        device_data = {"Id": "device1", "Name": "Test", "Model": "BB-V2"}
+        sensor = MysaCurrentSensor(mock_coordinator, "device1", device_data, MagicMock(), mock_config_entry)
+        
+        assert sensor.native_value == 0.0

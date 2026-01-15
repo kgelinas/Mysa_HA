@@ -2,7 +2,7 @@
 
 DOMAIN = "mysa"
 
-PLATFORMS = ["climate", "sensor", "update", "switch", "number", "select"]
+PLATFORMS = ["climate", "sensor", "update", "switch", "number", "select", "binary_sensor"]
 
 # =============================================================================
 # MQTT Connection Constants

@@ -1,5 +1,6 @@
 """Sensor platform for Mysa."""
 import logging
+import time
 from homeassistant.components.sensor import (
     SensorEntity,
     SensorDeviceClass,
@@ -14,8 +15,9 @@ from homeassistant.const import (
     UnitOfTemperature,
     EntityCategory,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
@@ -114,7 +116,7 @@ async def async_setup_entry(
                 )
 
             # Infloor (floor heating only)
-            if "Infloor" in state:
+            if "Infloor" in state or "flrSnsrTemp" in state:
                 entities.append(
                     MysaDiagnosticSensor(
                         coordinator, device_id, device_data, "Infloor", "Infloor Temperature",
@@ -140,32 +142,22 @@ async def async_setup_entry(
                         SensorDeviceClass.CURRENT, entry
                     )
                 )
-        # Simulated sensors for Lite devices (upgraded or not)
-        upgraded_lite_devices = entry.options.get("upgraded_lite_devices", [])
-        estimated_max_current = entry.options.get("estimated_max_current", 0)
 
-        # Check if this device is a Lite model OR manually marked as upgraded Lite
-        model = device_data.get("Model", "")
-        is_lite_model = "BB-V2-0-L" in model or "-L" in model
+        # Power and Current sensors (simulated or real)
+        if not is_ac:
+            power_sensor = MysaPowerSensor(coordinator, device_id, device_data, api, entry)
+            entities.append(power_sensor)
+            
+            # Virtual Energy Sensor (kWh)
+            entities.append(MysaEnergySensor(coordinator, device_id, device_data, api, entry, power_sensor))
 
-        normalized_id = device_id.replace(":", "").lower()
-        is_upgraded_lite = any(
-            uid.replace(":", "").lower() == normalized_id
-            for uid in upgraded_lite_devices
-        )
+            # If current wasn't added as a diagnostic sensor (e.g. Lite), add it as simulated
+            if "Current" not in state:
+                entities.append(MysaCurrentSensor(coordinator, device_id, device_data, api, entry))
 
-        # Show simulated sensors for any Lite device if estimated current is configured
-        if (is_lite_model or is_upgraded_lite) and estimated_max_current > 0:
-            entities.append(
-                MysaSimulatedCurrentSensor(
-                    coordinator, device_id, device_data, estimated_max_current, entry
-                )
-            )
-            entities.append(
-                MysaSimulatedPowerSensor(
-                    coordinator, device_id, device_data, estimated_max_current, entry
-                )
-            )
+        # === Network Diagnostic Sensors (all devices) ===
+        # Network sensors (IP, MAC, SSID) are not reliably available via API
+        # Removed per user request
 
     async_add_entities(entities)
 
@@ -193,8 +185,8 @@ class MysaDiagnosticSensor(
 
         # Categorize as Diagnostic AND Disable by default
         if sensor_key in [
-            "Current", "Duty", "HeatSink", "Infloor", "MaxCurrent",
-            "MinSetpoint", "MaxSetpoint", "Rssi", "TimeZone", "Voltage"
+            "Current", "Duty", "HeatSink", "MaxCurrent",
+            "MinSetpoint", "MaxSetpoint", "Rssi", "TimeZone", "Voltage",
         ]:
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
             self._attr_entity_registry_enabled_default = False
@@ -246,7 +238,7 @@ class MysaDiagnosticSensor(
         elif self._sensor_key == "HeatSink":
             keys = ["HeatSink", "hs"]
         elif self._sensor_key == "Infloor":
-            keys = ["Infloor", "if"]
+            keys = ["Infloor", "if", "flrSnsrTemp"]
         elif self._sensor_key == "MaxSetpoint":
             keys = ["MaxSetpoint", "mxs"]
         elif self._sensor_key == "MinSetpoint":
@@ -338,18 +330,110 @@ class MysaZoneSensor(CoordinatorEntity, SensorEntity):
         }
 
 
-class MysaSimulatedCurrentSensor(
-    CoordinatorEntity, SensorEntity
-):  # TODO: Refactor MysaSimulatedCurrentSensor to reduce instance attributes
-    """Simulated current sensor for upgraded Lite devices."""
+class MysaPowerSensor(CoordinatorEntity, SensorEntity):
+    """Representation of a Mysa Power Sensor (Real or Simulated)."""
 
-    def __init__(
-        self, coordinator, device_id, device_data, estimated_max_current, entry
-    ):  # TODO: Refactor __init__ to reduce arguments
+    def __init__(self, coordinator, device_id, device_data, api, entry):
         """Initialize."""
         super().__init__(coordinator)
         self._device_id = device_id
-        self._estimated_max_current = estimated_max_current
+        self._api = api
+        self._entry = entry
+        self._device_data = device_data
+        self._attr_name = f"{device_data.get('Name', 'Mysa')} Power"
+        self._attr_unique_id = f"{device_id}_power"
+        self._attr_native_unit_of_measurement = "W"
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_device_class = SensorDeviceClass.POWER
+
+    @property
+    def device_info(self):
+        """Return device info."""
+        return {
+            "identifiers": {(DOMAIN, self._device_id)},
+            "manufacturer": "Mysa",
+            "model": self._device_data.get("Model"),
+        }
+
+    def _extract_value(self, state, keys):
+        """Helper to extract a value from state dictionary."""
+        for key in keys:
+            val = state.get(key)
+            if val is not None:
+                if isinstance(val, dict):
+                    v = val.get('v')
+                    if v is None:
+                        v = val.get('Id')
+                    return v
+                return val
+        return None
+
+    @property
+    def native_value(self):
+        """Calculate power from real data or simulated wattage."""
+        state = self.coordinator.data.get(self._device_id)
+        if not state:
+            return None
+
+        # 1. Try real data (Voltage * Current)
+        voltage = self._extract_value(state, ["Voltage", "LineVoltage"])
+        current = self._extract_value(state, ["Current"])
+        
+        if voltage and current:
+            try:
+                return round(float(voltage) * float(current), 1)
+            except (ValueError, TypeError):
+                pass
+
+        # 2. Fallback to simulated data (Wattage * DutyCycle)
+        safe_id = self._device_id.replace(":", "").lower()
+        wattage = self._entry.options.get(f"wattage_{safe_id}", 0)
+        
+        # If no per-device wattage, try old global setting (backward compat)
+        if wattage == 0:
+             est_current = self._entry.options.get("estimated_max_current", 0)
+             # Default voltage to 240 if not reported
+             v_val = voltage if voltage else 240
+             try:
+                wattage = est_current * float(v_val)
+             except (ValueError, TypeError):
+                wattage = 0
+
+        if wattage > 0:
+            duty = self._extract_value(state, ["Duty", "dc", "DutyCycle"]) or 0
+            try:
+                duty_float = float(duty)
+                if duty_float > 1:
+                    duty_float = duty_float / 100.0
+                return round(wattage * duty_float, 1)
+            except (ValueError, TypeError):
+                pass
+
+        return 0.0
+
+    @property
+    def extra_state_attributes(self):
+        """Return extra state attributes."""
+        state = self.coordinator.data.get(self._device_id)
+        current = self._extract_value(state, ["Current"]) if state else None
+        safe_id = self._device_id.replace(":", "").lower()
+        wattage = self._entry.options.get(f"wattage_{safe_id}", 0)
+        
+        mode = "Real" if current is not None else "Simulated"
+        attrs = {"tracking_mode": mode}
+        if mode == "Simulated":
+            attrs["configured_wattage"] = wattage
+        return attrs
+
+
+class MysaCurrentSensor(CoordinatorEntity, SensorEntity):
+    """Representation of a Mysa Current Sensor (Simulated)."""
+
+    def __init__(self, coordinator, device_id, device_data, api, entry):
+        """Initialize."""
+        super().__init__(coordinator)
+        self._device_id = device_id
+        self._api = api
         self._entry = entry
         self._device_data = device_data
         self._attr_name = f"{device_data.get('Name', 'Mysa')} Estimated Current"
@@ -368,62 +452,113 @@ class MysaSimulatedCurrentSensor(
             "model": self._device_data.get("Model"),
         }
 
+    def _extract_value(self, state, keys):
+        """Helper to extract a value from state dictionary."""
+        for key in keys:
+            val = state.get(key)
+            if val is not None:
+                if isinstance(val, dict):
+                    v = val.get('v')
+                    if v is None:
+                        v = val.get('Id')
+                    return v
+                return val
+        return None
+
     @property
     def native_value(self):
-        """Calculate current from duty cycle and estimated max current."""
+        """Calculate current from wattage and duty cycle."""
         state = self.coordinator.data.get(self._device_id)
         if not state:
             return None
 
-        # Get duty cycle (0-1 or 0-100)
-        duty = None
-        for key in ["dc", "Duty", "dtyCycle", "DutyCycle"]:
-            val = state.get(key)
-            if val is not None:
-                if isinstance(val, dict):
-                    duty = val.get('v')
-                else:
-                    duty = val
-                break
+        # 1. Real current check (though this class is for when it's missing)
+        current = self._extract_value(state, ["Current"])
+        if current is not None:
+             try:
+                 return float(current)
+             except (ValueError, TypeError):
+                 pass
 
-        if duty is None:
+        # 2. Simulated current
+        safe_id = self._device_id.replace(":", "").lower()
+        wattage = self._entry.options.get(f"wattage_{safe_id}", 0)
+        
+        if wattage == 0:
+            est_current = self._entry.options.get("estimated_max_current", 0)
+            if est_current > 0:
+                duty = self._extract_value(state, ["Duty", "dc", "DutyCycle"])
+                if duty is not None:
+                    try:
+                        duty_float = float(duty)
+                        if duty_float > 1:
+                            duty_float = duty_float / 100.0
+                        return round(est_current * duty_float, 2)
+                    except (ValueError, TypeError):
+                        pass
             return 0.0
 
-        # Normalize to 0-1 range
-        if duty > 1:
-            duty = duty / 100.0
+        voltage = self._extract_value(state, ["Voltage", "LineVoltage"]) or 240
+        duty = self._extract_value(state, ["Duty", "dc", "DutyCycle"])
 
-        return round(self._estimated_max_current * duty, 2)
+        if duty is not None:
+            try:
+                duty_float = float(duty)
+                v_float = float(voltage)
+                if duty_float > 1:
+                    duty_float = duty_float / 100.0
+                # I = P / V
+                if v_float > 0:
+                    return round((wattage / v_float) * duty_float, 2)
+            except (ValueError, TypeError):
+                pass
+
+        return 0.0
 
     @property
     def extra_state_attributes(self):
         """Return extra state attributes."""
-        return {
-            "estimated_max_current": self._estimated_max_current,
-            "note": "Simulated based on duty cycle - Lite hardware has no current sensor",
-        }
+        state = self.coordinator.data.get(self._device_id)
+        current = self._extract_value(state, ["Current"]) if state else None
+        safe_id = self._device_id.replace(":", "").lower()
+        wattage = self._entry.options.get(f"wattage_{safe_id}", 0)
+        
+        mode = "Real" if current is not None else "Simulated"
+        attrs = {"tracking_mode": mode}
+        if mode == "Simulated":
+            attrs["configured_wattage"] = wattage
+        return attrs
 
 
-class MysaSimulatedPowerSensor(
-    CoordinatorEntity, SensorEntity
-):  # TODO: Refactor MysaSimulatedPowerSensor to reduce instance attributes
-    """Simulated power sensor for upgraded Lite devices."""
+class MysaEnergySensor(CoordinatorEntity, RestoreEntity, SensorEntity):
+    """Integrates Power over time to provide native kWh tracking."""
 
-    def __init__(
-        self, coordinator, device_id, device_data, estimated_max_current, entry
-    ):  # TODO: Refactor __init__ to reduce arguments
+    def __init__(self, coordinator, device_id, device_data, api, entry, power_sensor):
         """Initialize."""
         super().__init__(coordinator)
         self._device_id = device_id
-        self._estimated_max_current = estimated_max_current
+        self._api = api
         self._entry = entry
         self._device_data = device_data
-        self._attr_name = f"{device_data.get('Name', 'Mysa')} Estimated Power"
-        self._attr_unique_id = f"{device_id}_estimated_power"
-        self._attr_native_unit_of_measurement = "W"
-        self._attr_state_class = SensorStateClass.MEASUREMENT
-        self._attr_device_class = SensorDeviceClass.POWER
-        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        self._power_sensor = power_sensor
+        self._attr_name = f"{device_data.get('Name', 'Mysa')} Energy"
+        self._attr_unique_id = f"{device_id}_energy"
+        self._attr_native_unit_of_measurement = "kWh"
+        self._attr_state_class = SensorStateClass.TOTAL_INCREASING
+        self._attr_device_class = SensorDeviceClass.ENERGY
+        self._attr_native_value = 0.0
+        self._last_update = None
+
+    async def async_added_to_hass(self):
+        """Handle entity which will be added."""
+        await super().async_added_to_hass()
+        state = await self.async_get_last_state()
+        if state and state.state not in (None, "unknown", "unavailable"):
+            try:
+                self._attr_native_value = float(state.state)
+            except ValueError:
+                self._attr_native_value = 0.0
+        self._last_update = time.time()
 
     @property
     def device_info(self):
@@ -434,50 +569,29 @@ class MysaSimulatedPowerSensor(
             "model": self._device_data.get("Model"),
         }
 
-    @property
-    def native_value(self):
-        """Calculate power from duty cycle, estimated current, and assumed voltage."""
-        state = self.coordinator.data.get(self._device_id)
-        if not state:
-            return None
-
-        # Get duty cycle
-        duty = None
-        for key in ["dc", "Duty", "dtyCycle", "DutyCycle"]:
-            val = state.get(key)
-            if val is not None:
-                if isinstance(val, dict):
-                    duty = val.get('v')
-                else:
-                    duty = val
-                break
-
-        if duty is None:
-            return 0.0
-
-        # Normalize to 0-1 range
-        if duty > 1:
-            duty = duty / 100.0
-
-        # Get voltage (default 240V if not available)
-        voltage = 240
-        for key in ["volts", "Voltage", "LineVoltage"]:
-            val = state.get(key)
-            if val is not None:
-                if isinstance(val, dict):
-                    voltage = val.get('v', 240)
-                else:
-                    voltage = val
-                break
-
-        current = self._estimated_max_current * duty
-        return round(voltage * current, 1)
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        # Calculate integration
+        now = time.time()
+        if self._last_update is not None:
+            # Time delta in hours
+            diff = (now - self._last_update) / 3600.0
+            
+            # Get current power (W)
+            power = self._power_sensor.native_value
+            if power is not None and power > 0:
+                # Energy (kWh) = (Power (W) / 1000) * Time (h)
+                added_energy = (power / 1000.0) * diff
+                self._attr_native_value = round(self._attr_native_value + added_energy, 4)
+        
+        self._last_update = now
+        self.async_write_ha_state()
 
     @property
     def extra_state_attributes(self):
         """Return extra state attributes."""
         return {
-            "estimated_max_current": self._estimated_max_current,
-            "assumed_voltage": 240,
-            "note": "Simulated based on duty cycle - Lite hardware has no current sensor",
+            "last_integration_time": self._last_update,
+            "note": "Virtual Riemann sum integration of power sensor"
         }

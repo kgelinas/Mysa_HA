@@ -858,7 +858,7 @@ class TestSwitchEdgeCases:
         entity = MysaLockSwitch(
             mock_coordinator, "device1", mock_device_data, mock_api, mock_entry
         )
-        entity._pending_state = False  # Set pending
+        entity._pending_state = True  # Set pending to match Cloud (True)
 
         # is_on should return True (from coordinator) and clear pending
         assert entity.is_on is True
@@ -1715,42 +1715,47 @@ class TestMysaSensorEntities:
 
     @pytest.mark.asyncio
     async def test_simulated_current_sensor_init(
-        self, hass, mock_coordinator, mock_device_data, mock_entry
+        self, hass, mock_coordinator, mock_device_data, mock_entry, mock_api
     ):
-        """Test MysaSimulatedCurrentSensor instantiation."""
-        from custom_components.mysa.sensor import MysaSimulatedCurrentSensor
+        """Test MysaCurrentSensor instantiation."""
+        from custom_components.mysa.sensor import MysaCurrentSensor
 
         await mock_coordinator.async_refresh()
 
-        entity = MysaSimulatedCurrentSensor(
+        mock_entry.options = {"estimated_max_current": 15.0}
+
+        entity = MysaCurrentSensor(
             mock_coordinator,
             "device1",
             mock_device_data,
-            15.0,  # estimated max current
+            mock_api,
             mock_entry,
         )
 
         assert entity._device_id == "device1"
-        assert entity._estimated_max_current == 15.0
+        assert "Estimated Current" in entity._attr_name
 
     @pytest.mark.asyncio
     async def test_simulated_power_sensor_init(
-        self, hass, mock_coordinator, mock_device_data, mock_entry
+        self, hass, mock_coordinator, mock_device_data, mock_entry, mock_api
     ):
-        """Test MysaSimulatedPowerSensor instantiation."""
-        from custom_components.mysa.sensor import MysaSimulatedPowerSensor
+        """Test MysaPowerSensor instantiation."""
+        from custom_components.mysa.sensor import MysaPowerSensor
 
         await mock_coordinator.async_refresh()
 
-        entity = MysaSimulatedPowerSensor(
+        mock_entry.options = {"estimated_max_current": 15.0}
+
+        entity = MysaPowerSensor(
             mock_coordinator,
             "device1",
             mock_device_data,
-            15.0,  # estimated max current
+            mock_api,
             mock_entry,
         )
 
         assert entity._device_id == "device1"
+        assert "Power" in entity._attr_name
 
 
 # ===========================================================================
@@ -2215,6 +2220,7 @@ class TestClimateEntityAsync:
             )
             entity.coordinator = MagicMock()
             entity.coordinator.async_request_refresh = AsyncMock()
+            entity.async_write_ha_state = MagicMock()
 
             await entity.async_set_temperature(temperature=22.5)
 
@@ -2239,6 +2245,7 @@ class TestClimateEntityAsync:
             )
             entity.coordinator = MagicMock()
             entity.coordinator.async_request_refresh = AsyncMock()
+            entity.async_write_ha_state = MagicMock()
 
             await entity.async_set_hvac_mode(HVACMode.HEAT)
 

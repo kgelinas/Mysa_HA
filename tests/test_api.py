@@ -2606,6 +2606,9 @@ class TestMysaApiCoverage:
                  start_time + MQTT_PING_INTERVAL + 1, # loop 2 check (timeout) -> triggers ping
                  start_time + MQTT_PING_INTERVAL + 2 # ping log
              ]):
+                 # use MagicMock for recv since wait_for is mocked, avoiding unawaited coroutine warning
+                 mock_ws.recv = MagicMock()
+
                  mock_ws.send.side_effect = Exception("Send Failed")
                  
                  with pytest.raises(Exception, match="Send Failed"):
@@ -2675,6 +2678,7 @@ class TestMysaApiCoverage:
         async def mock_get_url(): return "wss://test"
         api._get_signed_mqtt_url = mock_get_url
         api._user_id = "uid"
+        api._perform_mqtt_handshake = AsyncMock()
         
         with patch("custom_components.mysa.mysa_api.ssl.create_default_context"), \
              patch("custom_components.mysa.mysa_api.websockets.connect") as mock_connect, \
@@ -2682,9 +2686,18 @@ class TestMysaApiCoverage:
              patch("asyncio.wait_for") as mock_wait:
              
              mock_ws = AsyncMock()
+             mock_ws.send = AsyncMock() # Fix await crash
              mock_connect.return_value.__aenter__.return_value = mock_ws
              
-             mock_ws.recv.side_effect = [b'c', b's', b'p', b'resp']
+             # Hybrid recv: 
+             # 1. await ws.recv() -> needs awaitable (Puback)
+             # 2. wait_for(ws.recv()) -> needs MagicMock (to avoid unawaited coro warning)
+             async def async_ret(val): return val
+             
+             mock_ws.recv = MagicMock(side_effect=[
+                 async_ret(b'puback'), 
+                 MagicMock() 
+             ])
              
              # Mock wait_for strictly for the response wait
              mock_wait.side_effect = asyncio.TimeoutError()
@@ -2767,6 +2780,7 @@ class TestMysaApiCoverage:
                  b'pingresp',
                  asyncio.TimeoutError()
              ]
+
              mock_mqtt.MQTT_PACKET_PINGRESP = 13
              
              # Define dummy PublishPacket class to ensure isinstance fails
@@ -2801,6 +2815,7 @@ class TestMysaApiCoverage:
         async def mock_get_url(): return "wss://test"
         api._get_signed_mqtt_url = mock_get_url
         api._user_id = "uid"
+        api._perform_mqtt_handshake = AsyncMock()
         
         with patch("custom_components.mysa.mysa_api.ssl.create_default_context"), \
              patch("custom_components.mysa.mysa_api.websockets.connect") as mock_connect, \
@@ -2809,12 +2824,46 @@ class TestMysaApiCoverage:
              
              mock_ws = AsyncMock()
              mock_connect.return_value.__aenter__.return_value = mock_ws
-             mock_ws.recv.side_effect = [b'c', b's', b'p', b'resp']
+             
+             # Hybrid recv: 1. awaitable (Puback) 2. MagicMock (wait_for)
+             async def async_ret(): return b'puback'
+             
+             mock_ws.recv.side_effect = [
+                 async_ret(), 
+                 MagicMock() 
+             ]
              
              mock_wait.side_effect = Exception("Parsing Crash")
              
              # Should not raise, just log debug
              await api._send_mqtt_command("dev1", {}, wrap=False)
+
+    @pytest.mark.asyncio
+    async def test_async_upgrade_lite_device(self, api):
+        """Test async_upgrade_lite_device coverage."""
+        # 1. Device missing (813-816)
+        assert await api.async_upgrade_lite_device("missing") is False
+        
+        # 2. Upgrade Success (818-832)
+        api.devices = {"dev1": {"Model": "BB-V2-0-L"}}
+        
+        api.hass.async_add_executor_job = AsyncMock()
+        
+        # Mock session post
+        post_mock = MagicMock()
+        post_mock.raise_for_status = MagicMock()
+        api._session.post = MagicMock(return_value=post_mock)
+        
+        assert await api.async_upgrade_lite_device("dev1") is True
+        api.hass.async_add_executor_job.assert_called()
+        
+        # 3. Warning (not lite) (820)
+        api.devices["dev1"]["Model"] = "Legacy"
+        assert await api.async_upgrade_lite_device("dev1") is True
+        
+        # 4. Exception (833-835)
+        api.hass.async_add_executor_job.side_effect = Exception("Upgrade Failed")
+        assert await api.async_upgrade_lite_device("dev1") is False
 
     @pytest.mark.asyncio
     async def test_mqtt_command_connect_type_error_no_fallback(self, api):
@@ -2856,7 +2905,11 @@ class TestMysaApiCoverage:
     async def test_run_mqtt_loop_generic_packet(self, api):
         """Test _run_mqtt_loop handles generic packets (debug log)."""
         # Cover lines 1101-1102
-        mock_ws = AsyncMock()
+        # Cover lines 1101-1102
+        # Use MagicMock to avoid unawaited coroutine warnings for unused async methods
+        mock_ws = MagicMock()
+        mock_ws.recv = MagicMock()
+        mock_ws.close = AsyncMock()
         
         with patch("custom_components.mysa.mysa_api.parse_mqtt_packet") as mock_parse, \
              patch("custom_components.mysa.mysa_api.mqtt") as mock_mqtt, \
@@ -2866,6 +2919,7 @@ class TestMysaApiCoverage:
                  b'generic',
                  asyncio.TimeoutError()
              ]
+
              
              # Generic packet (not Publish, not PINGRESP)
              mock_pkt = MagicMock()
@@ -2900,6 +2954,7 @@ class TestMysaApiCoverage:
     def test_get_devices_sync_fetch_homes_failure(self, api):
         """Test _get_devices_sync when _fetch_homes_sync fails."""
         # Cover lines 168-171
+        api._session = MagicMock()
         api._session.get.return_value.json.return_value = {"DevicesObj": []}
         
         # Simulate exception in _fetch_homes_sync
@@ -3133,3 +3188,417 @@ class TestMysaApiCoverage:
         # Invalid Swing Mode
         await api.set_ac_swing_mode("dev1", "invalid_swing_mode")
         api._send_mqtt_command.assert_not_called()
+
+# ===========================================================================
+# Coverage Tests (merged from test_api_coverage.py)
+# ===========================================================================
+
+
+    @pytest.mark.asyncio
+    async def test_send_mqtt_command_timeout_coverage(self):
+        """Test _send_mqtt_command handles TimeoutError (lines 594-595)."""
+        from custom_components.mysa.mysa_api import MysaApi
+        
+        mock_hass = MagicMock()
+        mock_hass.async_add_executor_job = AsyncMock(return_value=MagicMock())
+        
+        api = MysaApi("user", "pass", mock_hass)
+        api._user_id = "uid"
+        
+        async def mock_get_url(): return "wss://test"
+        api._get_signed_mqtt_url = mock_get_url
+        
+        with patch("custom_components.mysa.mysa_api.ssl.create_default_context"), \
+             patch("custom_components.mysa.mysa_api.websockets.connect") as mock_connect, \
+             patch("custom_components.mysa.mysa_api.mqtt"), \
+             patch("asyncio.wait_for") as mock_wait:
+             
+             mock_ws = AsyncMock()
+             mock_ws.send = AsyncMock()
+             mock_connect.return_value.__aenter__.return_value = mock_ws
+             
+             async def async_ret(val): return val
+             mock_ws.recv = MagicMock(side_effect=[
+                 async_ret(b'connack'),
+                 async_ret(b'suback'),
+                 # Iteration 1: Timeout
+                 async_ret(b'puback'),
+                 MagicMock(), 
+                 # Iteration 2: Exception
+                 async_ret(b'puback'), 
+                 MagicMock()
+             ])
+             
+             mock_wait.side_effect = [
+                 asyncio.TimeoutError(),
+                 Exception("Generated Error for Coverage")
+             ]
+             
+             # We expect _send_mqtt_command to log error but not crash
+             await api._send_mqtt_command("dev1", {"test": 1})
+
+@pytest.mark.unit
+class TestApiCoverage:
+    """Additional API tests."""
+
+    @pytest.mark.asyncio
+    async def test_downgrade_lite_device_success(self):
+        """Test async_downgrade_lite_device success."""
+        hass = MagicMock()
+        hass.async_add_executor_job = AsyncMock(side_effect=lambda f, *a: f(*a))
+        
+        from custom_components.mysa.mysa_api import MysaApi
+        api = MysaApi("user", "pass", hass)
+        api.devices = {"dev1": {"Model": "BB-V2-0"}}
+        api.notify_settings_changed = AsyncMock()
+        
+        # Mock session post
+        api._session = MagicMock()
+        api._session.post.return_value = MagicMock()
+        
+        result = await api.async_downgrade_lite_device("dev1")
+        
+        assert result is True
+        api._session.post.assert_called_once()
+        args, kwargs = api._session.post.call_args
+        assert args[0].endswith("/devices/dev1")
+        assert kwargs['json'] == {'Model': 'BB-V2-0-L'}
+
+    def test_normalize_state_connected(self):
+        """Test normalize_state extracts Connected status (line 361 coverage)."""
+        # Note: 'api' fixture comes from earlier in test_api.py or conftest
+        # But here I'll use the one I'm defining or rely on the class structure if I can reuse fixture
+        # Wait, test_api_coverage used isolated instantiation.
+        # Let's use the same isolated instantiation to be safe and consistent with the meaningful test logic
+        from custom_components.mysa.mysa_api import MysaApi
+        mock_hass = MagicMock()
+        api_instance = MysaApi("test", "pass", mock_hass)
+
+        # Test True values
+        for val in ["true", "1", "on", "True", "On"]:
+            state = {"Connected": val}
+            api_instance._normalize_state(state)
+            assert state.get("Connected") is True
+
+        # Test False values
+        for val in ["false", "0", "off", "False", "Off"]:
+            state = {"Connected": val}
+            api_instance._normalize_state(state)
+            assert state.get("Connected") is False
+
+
+@pytest.mark.unit
+class TestMysaApiExceptionCoverage:
+    """Tests for API exception handling."""
+
+    @pytest.mark.asyncio
+    async def test_upgrade_lite_device_exception(self):
+        """Test async_upgrade_lite_device exception."""
+        hass = MagicMock()
+        hass.async_add_executor_job = AsyncMock(side_effect=lambda f, *a: f(*a))
+        
+        from custom_components.mysa.mysa_api import MysaApi
+        api = MysaApi("user", "pass", hass)
+        api.devices = {"dev1": {"Model": "BB-V2-0-L"}}
+        
+        # Mock session post to raise
+        api._session = MagicMock()
+        api._session.post.side_effect = Exception("Upgrade Failed")
+        
+        result = await api.async_upgrade_lite_device("dev1")
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_downgrade_lite_device_exception(self):
+        """Test async_downgrade_lite_device exception."""
+        hass = MagicMock()
+        hass.async_add_executor_job = AsyncMock(side_effect=lambda f, *a: f(*a))
+        
+        from custom_components.mysa.mysa_api import MysaApi
+        api = MysaApi("user", "pass", hass)
+        api.devices = {"dev1": {"Model": "BB-V2-0"}}
+        
+        # Mock session post to raise
+        api._session = MagicMock()
+        api._session.post.side_effect = Exception("Downgrade Failed")
+        
+        result = await api.async_downgrade_lite_device("dev1")
+        assert result is False
+
+"""
+Tests for MysaApi credential restoration logic.
+"""
+import pytest
+from unittest.mock import MagicMock, AsyncMock, patch
+from custom_components.mysa.mysa_api import MysaApi
+
+@pytest.fixture
+def mock_hass():
+    """Create a mock Home Assistant instance."""
+    hass = MagicMock()
+    hass.async_add_executor_job = AsyncMock()
+    return hass
+
+@pytest.fixture
+def mock_cognito():
+    """Mock Cognito class imported in mysa_api."""
+    with patch("custom_components.mysa.mysa_api.Cognito") as mock:
+        yield mock
+
+@pytest.fixture
+def mock_login():
+    """Mock login function imported in mysa_api."""
+    with patch("custom_components.mysa.mysa_api.login") as mock:
+        yield mock
+
+@pytest.fixture
+def mock_boto3():
+    """Mock boto3 session."""
+    with patch("custom_components.mysa.mysa_api.boto3") as mock:
+        yield mock
+
+@pytest.mark.asyncio
+async def test_auth_restore_success(hass, mock_cognito, mock_boto3):
+    """Test successful credential restoration from cache."""
+    # Mock cached data
+    cached_data = {
+        "id_token": "valid_id_token",
+        "refresh_token": "valid_refresh_token",
+        "access_token": "valid_access_token",
+        "user_id": "test_user_id"
+    }
+
+    # Setup mocks
+    mock_cognito_instance = mock_cognito.return_value
+    mock_cognito_instance.id_token = "valid_id_token"
+    mock_cognito_instance.access_token = "valid_access_token"
+    mock_cognito_instance.refresh_token = "valid_refresh_token"
+    # verify_token returns None on success (no exception)
+    mock_cognito_instance.verify_token.return_value = None 
+
+    # Mock Store to return cached data
+    with patch("custom_components.mysa.mysa_api.Store") as MockStore:
+        store_instance = MockStore.return_value
+        store_instance.async_load = AsyncMock(return_value=cached_data)
+        store_instance.async_save = AsyncMock()
+        
+        # Instantiate API AFTER patching Store so it uses the mock
+        api = MysaApi("user", "pass", hass)
+        
+        async def side_effect(func, *args):
+            return func(*args)
+        
+        hass.async_add_executor_job.side_effect = side_effect
+
+        await api.authenticate()
+
+        # Verify Cognito was initialized
+        assert mock_cognito.call_count >= 1
+        
+        # Check the calls to find the restoration attempt
+        restoration_call_kwargs = None
+        for call_args in mock_cognito.call_args_list:
+            # call_args is (args, kwargs) tuple
+            if "id_token" in call_args.kwargs:
+                restoration_call_kwargs = call_args.kwargs
+                break
+        
+        assert restoration_call_kwargs is not None, "Did not find Cognito initialization with id_token. Calls: {}".format(mock_cognito.call_args_list)
+        assert restoration_call_kwargs["id_token"] == "valid_id_token"
+        assert restoration_call_kwargs["refresh_token"] == "valid_refresh_token"
+        
+        # Verify verify_token was called
+        mock_cognito_instance.verify_token.assert_called()
+
+@pytest.mark.asyncio
+async def test_auth_restore_refresh_needed(hass, mock_cognito, mock_boto3):
+    """Test credential restoration requiring token refresh."""
+    cached_data = {
+        "id_token": "expired_id_token",
+        "refresh_token": "valid_refresh_token",
+    }
+
+    mock_cognito_instance = mock_cognito.return_value
+    mock_cognito_instance.id_token = "expired_id_token"
+    mock_cognito_instance.refresh_token = "valid_refresh_token"
+    
+    # verify_token raises Exception on expiry
+    mock_cognito_instance.verify_token.side_effect = Exception("Token expired")
+    
+    with patch("custom_components.mysa.mysa_api.Store") as MockStore:
+        store_instance = MockStore.return_value
+        store_instance.async_load = AsyncMock(return_value=cached_data)
+        store_instance.async_save = AsyncMock()
+
+        api = MysaApi("user", "pass", hass)
+        
+        async def side_effect(func, *args):
+            return func(*args)
+        hass.async_add_executor_job.side_effect = side_effect
+
+        await api.authenticate()
+
+        # Verify renew_access_token was called
+        mock_cognito_instance.renew_access_token.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_auth_restore_failure_fallback(hass, mock_cognito, mock_login, mock_boto3):
+    """Test fallback to password login when restoration fails completely."""
+    cached_data = {
+        "id_token": "bad_token",
+        "refresh_token": "bad_token",
+    }
+    
+    # Restoration path uses mock_cognito
+    mock_restored = mock_cognito.return_value
+    mock_restored.id_token = "bad_token"
+    mock_restored.refresh_token = "bad_token"
+    # Verification fails
+    mock_restored.verify_token.side_effect = Exception("Expired")
+    # Refresh fails
+    mock_restored.renew_access_token.side_effect = Exception("Refresh failed")
+    
+    with patch("custom_components.mysa.mysa_api.Store") as MockStore:
+        store_instance = MockStore.return_value
+        store_instance.async_load = AsyncMock(return_value=cached_data)
+        store_instance.async_save = AsyncMock()
+
+        api = MysaApi("user", "pass", hass)
+        
+        async def side_effect(func, *args):
+            return func(*args)
+        hass.async_add_executor_job.side_effect = side_effect
+
+        await api.authenticate()
+        
+        # Verify restoration attempt happened on mock_cognito
+        assert mock_cognito.call_count == 1
+        _, kwargs = mock_cognito.call_args_list[0]
+        assert "id_token" in kwargs
+        
+        # Verify fallback to login() happened
+        mock_login.assert_called_once()
+        args, _ = mock_login.call_args
+        # login(username, password, bsess=...)
+        assert args[0] == "user"
+        assert args[1] == "pass"
+
+# ===========================================================================
+# Coverage Gap Tests
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_authenticate_cached_credentials_execution(hass):
+    """Test authenticate executes inner do_sync_login with cached credentials."""
+    # This specifically targets the inner function definition and execution lines 82-87
+    api = MysaApi("user", "pass", hass)
+    
+    # Mock storage to return valid cached tokens
+    api._store.async_load = AsyncMock(return_value={
+        "id_token": "valid_id",
+        "refresh_token": "valid_refresh"
+    })
+    
+    # Mock executor to run the sync function immediately
+    async def mock_executor(func, *args):
+        return func(*args)
+    hass.async_add_executor_job = AsyncMock(side_effect=mock_executor)
+
+    # Mock Cognito
+    mock_cognito_instance = MagicMock()
+    mock_cognito_instance.id_token = "valid_id"
+    mock_cognito_instance.refresh_token = "valid_refresh"
+    mock_cognito_instance.verify_token.return_value = True
+
+    with patch("custom_components.mysa.mysa_api.Cognito", return_value=mock_cognito_instance), \
+         patch("custom_components.mysa.mysa_api.boto3"), \
+         patch("requests.Session"):
+             
+         # Mock user ID fetch to succeed
+         mock_response = MagicMock()
+         mock_response.json.return_value = {"User": {"Id": "user_123"}}
+         mock_response.raise_for_status.return_value = None
+         # The lambda for get user id will be called via async_add_executor_job
+         # Since we mocked executor to just call func, we need to handle the lambda.
+         # But the lambda calls self._session.get.
+         # We can just mock self._session.get via requests.Session().get
+         
+         # Note: requests.Session() returns a NEW mock each time unless configured otherwise
+         # MysaApi creates a new session in authenticate.
+         
+         await api.authenticate()
+             
+         # Verification
+         assert api._user_obj == mock_cognito_instance
+         assert api._session is not None
+
+@pytest.mark.asyncio
+async def test_api_properties(hass):
+    """Test public properties (lines 82, 87)."""
+    api = MysaApi("user", "pass", hass)
+    assert api.is_connected is False
+    assert api.is_mqtt_running is False
+    
+    api._session = MagicMock()
+    assert api.is_connected is True
+    
+    api._mqtt_listener_task = MagicMock()
+    api._mqtt_listener_task.done.return_value = False
+    assert api.is_mqtt_running is True
+
+@pytest.mark.asyncio
+async def test_send_mqtt_command_parse_exception(hass): # Keep hass fixture to avoid unused arg warning if pytest expects it?
+    # Actually, let's just ignore the fixture and create a mock.
+    # But pytest-homeassistant might require hass fixture for loop integration?
+    # We'll use a local mock.
+    mock_hass = MagicMock()
+    mock_hass.async_add_executor_job = AsyncMock(return_value=MagicMock())
+    
+    api = MysaApi("user", "pass", mock_hass)
+    api._user_id = "test_user"
+    api._user_obj = MagicMock()
+    api._get_signed_mqtt_url = AsyncMock(return_value="wss://mqtt.example.com")
+    
+    mock_ws = MagicMock()
+    mock_ws.send = AsyncMock()
+    connack = mqtt.ConnackPacket(0, 0)
+    suback = mqtt.SubackPacket(1, [0x01])
+    
+    # We want to raise exception on the 4th call to recv (Loop 1)
+    # 1. Connect (Connack check) - return safe bytes
+    # 2. Subscribe (Suback check) - return safe bytes
+    # 3. Wait Puback - return safe bytes
+    # 4. Loop - Raise Exception
+    mock_ws.recv = AsyncMock(side_effect=[
+        b"connack_bytes",
+        b"suback_bytes",
+        b"puback_bytes",
+        Exception("Recv Error")
+    ])
+    
+    with patch("websockets.connect", return_value=MagicMock(__aenter__=AsyncMock(return_value=mock_ws), __aexit__=AsyncMock())), \
+         patch("custom_components.mysa.mysa_api.mqtt.parse_one", side_effect=[
+             connack, 
+             suback, 
+             None # Puback read doesn't call parse_one, but loop start calls parse_one? 
+             # Wait, if recv raises, parse_one is NOT called!
+         ]), \
+         patch("custom_components.mysa.mysa_api._LOGGER") as mock_logger:
+        
+        await api._send_mqtt_command("device_id", {"test": 1})
+        
+        # Verification
+        # The error is logged, but the function itself doesn't return anything specific
+        # for this error path. We just want to ensure it doesn't crash and logs.
+        mock_logger.debug.assert_called() # Ensure something was logged
+        assert any("Recv Error" in str(call_args) for call_args in mock_logger.debug.call_args_list)
+
+
+@pytest.mark.asyncio
+async def test_downgrade_lite_device_not_found(hass):
+    """Test downgrade fail when device not found (lines 858-859)."""
+    api = MysaApi("user", "pass", hass)
+    api.devices = {} # Empty
+    
+    result = await api.async_downgrade_lite_device("missing_device")
+    assert result is False

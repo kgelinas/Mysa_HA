@@ -15,5 +15,6 @@
     "pytz>=2024.1",
     "websockets>=14.0"
   ],
-  "version": "0.8.1"
+  "system_health": true,
+  "version": "0.8.2"
 }

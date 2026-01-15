@@ -88,22 +88,31 @@ class MysaNumber(CoordinatorEntity, NumberEntity):  # TODO: Refactor MysaNumber 
         return None
 
     def _get_value_with_pending(self, keys):
-        """Get value from state or pending value if state is not yet updated."""
-        # If we have a pending value that's less than 60 seconds old, use it
-        if self._pending_value is not None and self._pending_time is not None:
-            if time.time() - self._pending_time < 60:
-                return self._pending_value
+        """Get value using sticky optimistic logic."""
+        # Cloud value
+        state = None
+        if self.coordinator.data:
+            state = self.coordinator.data.get(self._device_id)
+        val = self._extract_value(state, keys) if state else None
+        current_val = float(val) if val is not None else None
 
-            # Pending expired, clear it
-            self._pending_value = None
-            self._pending_time = None
+        if self._pending_value is not None:
+             # 1. Check expiration (30s)
+            if self._pending_time and (time.time() - self._pending_time > 30):
+                self._pending_value = None
+                self._pending_time = None
+                return current_val
 
-        # Get from coordinator
-        state = self.coordinator.data.get(self._device_id)
-        if not state:
-            return None
-        val = self._extract_value(state, keys)
-        return float(val) if val is not None else None
+            # 2. Check convergence
+            if current_val is not None and current_val == self._pending_value:
+                self._pending_value = None
+                self._pending_time = None
+                return current_val
+
+            # 3. Sticky return
+            return self._pending_value
+
+        return current_val
 
 
 class MysaMinBrightnessNumber(MysaNumber):  # TODO: Implement abstract methods
@@ -128,7 +137,7 @@ class MysaMinBrightnessNumber(MysaNumber):  # TODO: Implement abstract methods
         self._pending_time = time.time()
         self.async_write_ha_state()  # Update UI immediately
         await self._api.set_min_brightness(self._device_id, int(value))
-        # Don't clear pending - let it expire after 60 seconds
+        # Don't clear pending - let it expire or converge
 
 
 class MysaMaxBrightnessNumber(MysaNumber):  # TODO: Implement abstract methods
@@ -153,4 +162,4 @@ class MysaMaxBrightnessNumber(MysaNumber):  # TODO: Implement abstract methods
         self._pending_time = time.time()
         self.async_write_ha_state()  # Update UI immediately
         await self._api.set_max_brightness(self._device_id, int(value))
-        # Don't clear pending - let it expire after 60 seconds
+        # Don't clear pending - let it expire or converge

@@ -1,5 +1,6 @@
 """Select platform for Mysa AC horizontal swing."""
 import logging
+import time
 
 
 from homeassistant.components.select import SelectEntity
@@ -59,7 +60,7 @@ class MysaHorizontalSwingSelect(
         self._attr_name = f"{device_data.get('Name', 'Mysa AC')} Horizontal Swing"
         self._attr_unique_id = f"{device_id}_horizontal_swing"
         self._pending_option = None
-        self._pending_option = None
+        self._pending_timestamp = None
 
         # Build options from SupportedCaps or defaults
         self._build_options(device_data)
@@ -111,25 +112,36 @@ class MysaHorizontalSwingSelect(
 
     @property
     def current_option(self) -> str | None:
-        """Return current horizontal swing position."""
-        # Return pending option if set
+        """Return current horizontal swing position using sticky optimistic logic."""
+        # Calculate current cloud option
+        state = None
+        if self.coordinator.data:
+            state = self.coordinator.data.get(self._device_id)
+        current_cloud_option = None
+        if state:
+            val = state.get("SwingStateHorizontal")
+            if isinstance(val, dict):
+                val = val.get('v')
+            if val is not None:
+                current_cloud_option = AC_HORIZONTAL_SWING_MODES.get(int(val), "auto")
+
         if self._pending_option is not None:
+             # 1. Check expiration
+            if self._pending_timestamp and (time.time() - self._pending_timestamp > 30):
+                self._pending_option = None
+                self._pending_timestamp = None
+                return current_cloud_option if current_cloud_option else "auto"
+
+            # 2. Check convergence
+            if current_cloud_option is not None and current_cloud_option == self._pending_option:
+                self._pending_option = None
+                self._pending_timestamp = None
+                return current_cloud_option
+
+            # 3. Sticky return
             return self._pending_option
 
-        state = self.coordinator.data.get(self._device_id)
-        if not state:
-            return "auto"
-
-        # Get swing position value
-        val = state.get("SwingStateHorizontal")
-        if isinstance(val, dict):
-            val = val.get('v')
-
-        if val is not None:
-            self._pending_option = None  # Clear pending once confirmed
-            return AC_HORIZONTAL_SWING_MODES.get(int(val), "auto")
-
-        return "auto"
+        return current_cloud_option if current_cloud_option else "auto"
 
     async def async_select_option(self, option: str) -> None:
         """Set horizontal swing position."""
@@ -140,6 +152,7 @@ class MysaHorizontalSwingSelect(
                 return
             # Optimistic update
             self._pending_option = option
+            self._pending_timestamp = time.time()
             self.async_write_ha_state()
 
             await self._api.set_ac_horizontal_swing(self._device_id, position)

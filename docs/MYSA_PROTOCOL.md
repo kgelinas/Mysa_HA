@@ -31,6 +31,9 @@ MQTT is delivered over WebSocket using AWS IoT Core. Connection requires:
 2. SigV4-signed WebSocket URL
 3. MQTT protocol version 3.1.1
 
+#### SigV4 Nuances
+Mysa uses a non-standard AWS SigV4 signing implementation. The `X-Amz-Security-Token` (session token) must be added to the query parameters **after** the signature has been calculated, rather than being part of the signed request string.
+
 ### Topics
 
 Each device has three topics:
@@ -60,12 +63,13 @@ Commands are wrapped in an envelope structure:
 
 ### Message Types
 
-| MsgType | Direction | Description                    |
-|:--------|:----------|:-------------------------------|
-| 6       | → Device  | Settings changed notification  |
-| 40      | ← Device  | State update                   |
-| 44      | → Device  | Command (wrapped)              |
-| 44      | ← Device  | Command response               |
+| MsgType | Direction | Description                                |
+|:--------|:----------|:-------------------------------------------|
+| 5       | → Device  | Killer Ping (Reset to pairing mode)        |
+| 6       | → Device  | Settings Nudge (Trigger cloud sync)        |
+| 40      | ← Device  | State update                               |
+| 44      | → Device  | Command (wrapped)                          |
+| 44      | ← Device  | Command response                           |
 
 ---
 
@@ -101,11 +105,29 @@ Commands are wrapped in an envelope structure:
 | 5     | Fan Only |
 | 6     | Dry      |
 
-#### Set Button Lock
-```json
-{"cmd": [{"lk": 1, "tm": -1}], "type": TYPE, "ver": 1}
-```
 - `lk`: 0 = Unlocked, 1 = Locked
+
+#### Killer Ping (Reboot to Pairing)
+```json
+{
+  "Device": "DEVICE_ID",
+  "Timestamp": 1704825600,
+  "MsgType": 5,
+  "EchoID": 1
+}
+```
+*Note: This message is sent WITHOUT the standard MsgType 44 envelope.*
+
+#### Settings Nudge
+```json
+{
+  "Device": "DEVICE_ID",
+  "EventType": 0,
+  "MsgType": 6,
+  "Timestamp": 1704825600
+}
+```
+*Note: This message is sent WITHOUT the standard MsgType 44 envelope. It is used to notify the cloud that settings were changed via HTTP, triggering a state push to the device.*
 
 ---
 
@@ -199,8 +221,17 @@ Uses AWS Cognito with JWT tokens. Include auth header on all requests.
 
 ### Endpoints
 
+#### GET /homes
+Returns list of homes and associated zones.
+- `Id`: Home UUID
+- `Zones`: Array of zone objects (`Id`, `Name`)
+- `ERate`: Electricity rate in $/kWh
+
 #### GET /users
-Returns current user information.
+Returns current user information and paired devices.
+- `Id`: User UUID
+- `CognitoAttrs`: email, name, etc.
+- `DevicesPaired`: State of all paired devices
 
 #### GET /devices
 Returns list of all devices with settings.
@@ -212,7 +243,11 @@ Returns live state (temperature, humidity, sensors) for all devices.
 Returns settings for a specific device.
 
 #### POST /devices/{device_id}
-Update device settings. Body is JSON with settings to change.
+Update device settings or metadata.
+**Advanced Example: Model Conversion (Lite to Full)**
+```json
+{"Model": "BB-V2-0"}  // Change model from BB-V2-0-L to BB-V2-0
+```
 
 **Common settings:**
 ```json
@@ -250,6 +285,7 @@ Returns firmware update information.
 | Voltage       | Line voltage             | float       |
 | Current       | Line current             | float       |
 | HeatSink      | Heat sink temperature    | float       |
+| flrSnsrTemp   | Floor temperature (V2)   | float       |
 | Brightness/br | Display brightness       | int/dict    |
 | ProximityMode | Wake on approach         | bool        |
 

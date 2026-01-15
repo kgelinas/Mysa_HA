@@ -46,7 +46,8 @@ class MysaApi:  # TODO: Refactor MysaApi to reduce public methods and instance a
         hass,
         coordinator_callback=None,
         upgraded_lite_devices=None,
-        estimated_max_current=0
+        estimated_max_current=0,
+        wattages=None
     ):
         """Initialize the API."""
         self.username = username
@@ -59,6 +60,7 @@ class MysaApi:  # TODO: Refactor MysaApi to reduce public methods and instance a
         self.devices = {}
         self.upgraded_lite_devices = upgraded_lite_devices or []
         self.estimated_max_current = estimated_max_current
+        self.wattages = wattages or {}
         self.homes = []
         self.zones = {}  # zone_id -> zone_name
         self.states = {}
@@ -71,6 +73,18 @@ class MysaApi:  # TODO: Refactor MysaApi to reduce public methods and instance a
         self._mqtt_ws = None
         self._mqtt_should_reconnect = True
         self._mqtt_reconnect_delay = 5  # Start with 5 seconds
+
+        self._mqtt_reconnect_delay = 5  # Start with 5 seconds
+
+    @property
+    def is_connected(self) -> bool:
+        """Return if API session is active."""
+        return self._session is not None
+
+    @property
+    def is_mqtt_running(self) -> bool:
+        """Return if MQTT listener is running."""
+        return bool(self._mqtt_listener_task and not self._mqtt_listener_task.done())
 
     async def authenticate(self):
         """Authenticate with Mysa (Async)."""
@@ -353,6 +367,11 @@ class MysaApi:  # TODO: Refactor MysaApi to reduce public methods and instance a
             # Handle int/string/bool
             state['Lock'] = 1 if (str(lock_val).lower() in ['1', 'true', 'on', 'locked']) else 0
 
+        # Connectivity variant
+        conn_val = get_v(['Connected'])
+        if conn_val is not None:
+            state['Connected'] = (str(conn_val).lower() in ['1', 'true', 'on'])
+
         # Zone identification
         zone_val = get_v(['Zone', 'zone_id', 'zn'])
         if zone_val is not None:
@@ -586,6 +605,7 @@ class MysaApi:  # TODO: Refactor MysaApi to reduce public methods and instance a
                                 )
                     except asyncio.TimeoutError:
                         _LOGGER.debug("Timed out waiting for device status response")
+                        # re-raise to exit loop or handle? It just continues.
                     except Exception as e:  # TODO: Catch specific exceptions instead of Exception
                         _LOGGER.debug("Error parsing device status response: %s", e)
 
@@ -794,11 +814,65 @@ class MysaApi:  # TODO: Refactor MysaApi to reduce public methods and instance a
         await self._send_mqtt_command(device_id, body)
 
         # Optimistic update
-        self._update_state_cache(
-            device_id, {"SwingStateHorizontal": {"v": position}, "ssh": position}
-        )
+        self._update_state_cache(device_id, {"SwingStateHorizontal": {"v": position}, "ssh": position})
+        self._last_command_time[device_id] = time.time()
         await self.notify_settings_changed(device_id)
 
+    async def async_upgrade_lite_device(self, device_id: str) -> bool:
+        """Convert a Lite device to a Full device (Magic Upgrade).
+        
+        This changes the Model ID from BB-V2-0-L to BB-V2-0.
+        """
+        device = self.devices.get(device_id)
+        if not device:
+            _LOGGER.error("Cannot upgrade: Device %s not found", device_id)
+            return False
+
+        model = device.get("Model", "")
+        if "Lite" not in model and "-L" not in model:
+            _LOGGER.warning("Device %s (%s) does not appear to be a Lite model", device_id, model)
+            # We proceed anyway if the user forces it via service call, but log a warning.
+
+        _LOGGER.warning("Initiating Magic Upgrade for %s (%s). This modifies firmware settings.", device_id, model)
+        
+        url = f"{BASE_URL}/devices/{device_id}"
+        try:
+            # Just like the debug tool: POST {"Model": "BB-V2-0"}
+            await self.hass.async_add_executor_job(
+                lambda: self._session.post(url, json={'Model': 'BB-V2-0'}).raise_for_status()
+            )
+            _LOGGER.info("Magic Upgrade command sent successfully to %s. Power cycle required.", device_id)
+            return True
+        except Exception as e:
+            _LOGGER.error("Magic Upgrade failed for %s: %s", device_id, e)
+            return False
+        await self.notify_settings_changed(device_id)
+
+    async def async_downgrade_lite_device(self, device_id: str) -> bool:
+        """Convert a Full device back to a Lite device (Revert Magic Upgrade).
+
+        This changes the Model ID from BB-V2-0 to BB-V2-0-L.
+        """
+        device = self.devices.get(device_id)
+        if not device:
+            _LOGGER.error("Cannot downgrade: Device %s not found", device_id)
+            return False
+
+        model = device.get("Model", "")
+        _LOGGER.warning("Initiating Magic Revert for %s (%s). This modifies firmware settings.", device_id, model)
+
+        url = f"{BASE_URL}/devices/{device_id}"
+        try:
+            # POST {"Model": "BB-V2-0-L"}
+            await self.hass.async_add_executor_job(
+                lambda: self._session.post(url, json={'Model': 'BB-V2-0-L'}).raise_for_status()
+            )
+            _LOGGER.info("Magic Revert command sent successfully to %s. Power cycle required.", device_id)
+            return True
+        except Exception as e:
+            _LOGGER.error("Magic Revert failed for %s: %s", device_id, e)
+            return False
+            
     async def set_lock(self, device_id, locked: bool):
         """Set thermostat button lock via MQTT + HTTP."""
         self._last_command_time[device_id] = time.time()

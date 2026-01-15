@@ -138,28 +138,40 @@ class MysaOptionsFlowHandler(config_entries.OptionsFlow):  # TODO: Add more publ
             return self.async_create_entry(title="", data=user_input)
 
         # Get the API instance to find current devices
-        # This assumes the integration is already setup and running
         try:
             api = self.hass.data[DOMAIN][self._config_entry.entry_id]["api"]
-            device_options = {
-                d_id: f"{d_data.get('Name', d_id)} ({d_id})"
-                for d_id, d_data in api.devices.items()
-            }
+            devices = api.devices
         except KeyError:
-            # Fallback if API not loaded (should generally process)
-            device_options = {}
+            devices = {}
+
+        device_options = {
+            d_id: f"{d_data.get('Name', d_id)} ({d_id})"
+            for d_id, d_data in devices.items()
+        }
+
+        # Build schema
+        schema_dict = {
+            vol.Optional(
+                "upgraded_lite_devices",
+                default=self._config_entry.options.get("upgraded_lite_devices", [])
+            ): cv.multi_select(device_options),
+        }
+
+        # Add per-device wattage for heating thermostats
+        for d_id, d_data in devices.items():
+            if not api.is_ac_device(d_id):
+                safe_id = d_id.replace(":", "").lower()
+                key = f"wattage_{safe_id}"
+                friendly_name = d_data.get('Name', d_id)
+                schema_dict[
+                    vol.Optional(
+                        key,
+                        default=self._config_entry.options.get(key, 0)
+                    )
+                ] = vol.All(vol.Coerce(int), vol.Range(min=0, max=5000))
 
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema({
-                vol.Optional(
-                    "upgraded_lite_devices",
-                    default=self._config_entry.options.get("upgraded_lite_devices", [])
-                ): cv.multi_select(device_options),
-                vol.Optional(
-                    "estimated_max_current",
-                    default=self._config_entry.options.get("estimated_max_current", 0)
-                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=30)),
-            }),
+            data_schema=vol.Schema(schema_dict),
             description_placeholders={}
         )

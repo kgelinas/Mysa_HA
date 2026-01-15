@@ -33,10 +33,9 @@ class TestSystemHealth:
     async def test_system_health_with_api(self, hass):
         """Test system health with connected API."""
         mock_api = MagicMock()
-        mock_api._session = MagicMock()  # Session exists = connected
+        mock_api.is_connected = True
         mock_api.devices = {"device1": {}, "device2": {}}
-        mock_api._mqtt_task = MagicMock()
-        mock_api._mqtt_task.done.return_value = False  # Task running
+        mock_api.is_mqtt_running = True
 
         hass.data[DOMAIN] = {"test_entry": {"api": mock_api}}
 
@@ -50,10 +49,9 @@ class TestSystemHealth:
     async def test_system_health_mqtt_stopped(self, hass):
         """Test system health when MQTT listener is stopped."""
         mock_api = MagicMock()
-        mock_api._session = MagicMock()
+        mock_api.is_connected = True
         mock_api.devices = {"device1": {}}
-        mock_api._mqtt_task = MagicMock()
-        mock_api._mqtt_task.done.return_value = True  # Task completed/stopped
+        mock_api.is_mqtt_running = False
 
         hass.data[DOMAIN] = {"test_entry": {"api": mock_api}}
 
@@ -63,11 +61,11 @@ class TestSystemHealth:
 
     @pytest.mark.asyncio
     async def test_system_health_no_mqtt_task(self, hass):
-        """Test system health when MQTT task is None."""
+        """Test system health when MQTT task is None via property."""
         mock_api = MagicMock()
-        mock_api._session = MagicMock()
+        mock_api.is_connected = True
         mock_api.devices = {}
-        mock_api._mqtt_task = None
+        mock_api.is_mqtt_running = False
 
         hass.data[DOMAIN] = {"test_entry": {"api": mock_api}}
 

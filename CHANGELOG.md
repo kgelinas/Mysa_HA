@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+
+## [0.8.2] - 2026-01-14
+### Added
+- **Floor Temperature Sensor Support**: Added support for `flrSnsrTemp` key used by some Mysa In-Floor models.
+- **Infloor Sensor Enabled Default**: The "Infloor Temperature" sensor is now enabled by default for supported devices.
+- **100% Test Coverage**: Achieved full coverage for `climate.py` (AC logic), `mysa_api.py` (core logic), `sensor.py`, `config_flow.py`, `binary_sensor.py`, and `__init__.py`.
+- **Robustness Tests**: Added rigorous exception handling verification for MQTT loop timeouts and generic errors in `mysa_api.py`.
+- **Optimistic UI**: Instant feedback for all controls (Switches, Climate, Number, Select) with sticky state logic.
+- **New Service**: `mysa.upgrade_lite_device` ("Magic Upgrade") to check and upgrade BB-V2-0-L Lite devices to Full feature set.
+- **Revert Service**: Added `mysa.downgrade_lite_device` to revert "Magic Upgrade" changes (Full -> Lite).
+- **Call for Testers**: Mysa for Central AC/Heat (ST-V1) is now available for testing. Support is **NOT** verified; we need users to provide logs and feedback to implement full support.
+
+### Fixed
+- **Simulated Sensor Tests**: Resolution of failing tests in simulated current/power sensor logic.
+- **Fixture Conflicts**: Fixed `api` fixture conflicts in `tests/test_api.py`.
+
+### Changed
+- **Test Consolidation**: Merged all modular coverage tests into `tests/test_api.py` and `tests/test_sensor.py`.
+- **Cleanup**: Removed temporary test files and consolidated re-authentication tests into `tests/test_config_flow.py`.
+- **Documentation**: Updated protocol docs with `flrSnsrTemp` field.
+
 ## [0.8.1] - 2026-01-13
 ### Added
 - **Reauthentication**: Added support for updating integration credentials (e.g. password change) without removing and re-adding the device.

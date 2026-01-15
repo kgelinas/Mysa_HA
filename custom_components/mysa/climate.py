@@ -78,6 +78,7 @@ class MysaClimate(CoordinatorEntity, ClimateEntity):  # TODO: Refactor MysaClima
         self._entry = entry
         self._attr_name = device_data.get("Name", "Mysa Thermostat")
         self._attr_unique_id = device_id
+        self._pending_updates = {}
 
     @property
     def device_info(self):
@@ -99,6 +100,8 @@ class MysaClimate(CoordinatorEntity, ClimateEntity):  # TODO: Refactor MysaClima
 
     def _get_value(self, key):
         """Get value from state, handling both dict (v/t) and direct value."""
+        if self.coordinator.data is None:
+            return None
         state = self.coordinator.data.get(self._device_id)
         if not state:
             return None
@@ -133,9 +136,8 @@ class MysaClimate(CoordinatorEntity, ClimateEntity):  # TODO: Refactor MysaClima
         val = self._extract_value(state, ["stpt", "setpoint_t", "SetPoint"])
 
         _LOGGER.debug("Device %s target_temp raw value: %s", self._device_id, val)
-        if val is not None:
-            return float(val)
-        return None
+        current = float(val) if val is not None else None
+        return self._get_sticky_value("target_temperature", current)
 
     @property
     def current_humidity(self):
@@ -151,6 +153,8 @@ class MysaClimate(CoordinatorEntity, ClimateEntity):  # TODO: Refactor MysaClima
 
     def _get_state_data(self):
         """Helper to get state data from coordinator."""
+        if self.coordinator.data is None:
+            return None
         return self.coordinator.data.get(self._device_id)
 
     def _extract_value(self, state, keys):
@@ -165,6 +169,42 @@ class MysaClimate(CoordinatorEntity, ClimateEntity):  # TODO: Refactor MysaClima
                     return v
                 return val
         return None
+
+    def _get_sticky_value(self, attr_name, cloud_value):
+        """Get value using sticky optimistic logic."""
+        pending = self._pending_updates.get(attr_name)
+        if pending:
+            val = pending['value']
+            ts = pending['ts']
+
+            # 1. Check expiration (30s)
+            if time.time() - ts > 30:
+                del self._pending_updates[attr_name]
+                return cloud_value
+
+            # 2. Check convergence
+            try:
+                if cloud_value is not None:
+                    # Handle float comparison for temperatures
+                    if isinstance(val, (int, float)) and isinstance(cloud_value, (int, float)):
+                        if abs(val - cloud_value) < 0.1:
+                            del self._pending_updates[attr_name]
+                            return cloud_value
+                    elif val == cloud_value:
+                        del self._pending_updates[attr_name]
+                        return cloud_value
+            except Exception:
+                pass
+
+            # 3. Sticky return
+            return val
+
+        return cloud_value
+
+    def _set_sticky_value(self, attr_name, value):
+        """Set sticky value."""
+        self._pending_updates[attr_name] = {'value': value, 'ts': time.time()}
+        self.async_write_ha_state()
 
     @property
     def hvac_mode(self):
@@ -187,7 +227,7 @@ class MysaClimate(CoordinatorEntity, ClimateEntity):  # TODO: Refactor MysaClima
         _LOGGER.debug("Device %s hvac_mode: mode_id=%s -> result=%s (raw keys: %s)",
                       self._device_id, mode_id, result, list(state.keys()))
 
-        return result
+        return self._get_sticky_value("hvac_mode", result)
 
     @property
     def hvac_action(self):
@@ -233,14 +273,8 @@ class MysaClimate(CoordinatorEntity, ClimateEntity):  # TODO: Refactor MysaClima
         if (temp := kwargs.get(ATTR_TEMPERATURE)) is None:
             return
         try:
-            # Optimistic update: set all sync-related keys
-            state = self._get_state_data()
-            if state is not None:
-                # Wrap value if it looks like cloud API
-                val_wrap = {"v": temp, "t": int(time.time())}
-                state["sp"] = temp
-                state["stpt"] = temp
-                state["SetPoint"] = val_wrap
+            # Optimistic update
+            self._set_sticky_value("target_temperature", temp)
 
             await self._api.set_target_temperature(self._device_id, temp)
             self.async_write_ha_state()
@@ -250,14 +284,8 @@ class MysaClimate(CoordinatorEntity, ClimateEntity):  # TODO: Refactor MysaClima
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set new target hvac mode."""
         try:
-            # Optimistic update: HEAT=3, OFF=1
-            mode_val = 1 if hvac_mode == HVACMode.OFF else 3
-            state = self._get_state_data()
-            if state is not None:
-                val_wrap = {"v": mode_val, "t": int(time.time())}
-                state["md"] = mode_val
-                state["TstatMode"] = val_wrap
-                state["Mode"] = val_wrap
+            # Optimistic update
+            self._set_sticky_value("hvac_mode", hvac_mode)
 
             await self._api.set_hvac_mode(self._device_id, hvac_mode)
             self.async_write_ha_state()
@@ -426,7 +454,8 @@ class MysaACClimate(MysaClimate):  # TODO: Refactor MysaACClimate to implement m
             return AC_FAN_MODES.get(int(fan_val), "auto")
 
         # Try from normalized FanMode
-        return state.get("FanMode", "auto")
+        cloud_val = state.get("FanMode", "auto")
+        return self._get_sticky_value("fan_mode", cloud_val)
 
     @property
     def swing_modes(self):
@@ -446,7 +475,8 @@ class MysaACClimate(MysaClimate):  # TODO: Refactor MysaACClimate to implement m
             return AC_SWING_MODES.get(int(swing_val), "auto")
 
         # Try from normalized SwingMode
-        return state.get("SwingMode", "auto")
+        cloud_val = state.get("SwingMode", "auto")
+        return self._get_sticky_value("swing_mode", cloud_val)
 
     @property
     def extra_state_attributes(self):
@@ -476,16 +506,25 @@ class MysaACClimate(MysaClimate):  # TODO: Refactor MysaACClimate to implement m
             mode_val = mode_mapping.get(hvac_mode, AC_MODE_OFF)
 
             # Optimistic update
-            state = self._get_state_data()
-            if state is not None:
-                val_wrap = {"v": mode_val, "t": int(time.time())}
-                state["md"] = mode_val
-                state["TstatMode"] = val_wrap
+            self._set_sticky_value("hvac_mode", hvac_mode)
 
             await self._api.set_hvac_mode(self._device_id, hvac_mode)
             self.async_write_ha_state()
         except Exception as e:  # TODO: Catch specific exceptions instead of Exception
             _LOGGER.error("Failed to set AC HVAC mode: %s", e)
+
+    async def async_set_target_temperature(self, temperature: float) -> None:
+        """Set new target temperature."""
+        try:
+            temp = round(temperature / self._attr_target_temperature_step) * self._attr_target_temperature_step
+
+            # Optimistic update
+            self._set_sticky_value("target_temperature", temp)
+
+            await self._api.set_target_temperature(self._device_id, temp)
+            self.async_write_ha_state()
+        except Exception as e:  # TODO: Catch specific exceptions instead of Exception
+            _LOGGER.error("Failed to set AC target temperature: %s", e)
 
     async def async_set_fan_mode(self, fan_mode: str) -> None:
         """Set new fan mode."""
@@ -507,12 +546,7 @@ class MysaACClimate(MysaClimate):  # TODO: Refactor MysaACClimate to implement m
         """Set new swing mode (vertical)."""
         try:
             # Optimistic update
-            swing_val = AC_SWING_MODES_REVERSE.get(swing_mode.lower())
-            state = self._get_state_data()
-            if state is not None and swing_val is not None:
-                state["ss"] = swing_val
-                state["SwingState"] = {"v": swing_val, "t": int(time.time())}
-                state["SwingMode"] = swing_mode.lower()
+            self._set_sticky_value("swing_mode", swing_mode)
 
             await self._api.set_ac_swing_mode(self._device_id, swing_mode)
             self.async_write_ha_state()

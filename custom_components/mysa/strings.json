@@ -39,5 +39,15 @@
                 }
             }
         }
+    },
+    "services": {
+        "upgrade_lite_device": {
+            "name": "Upgrade Lite Device",
+            "description": "Upgrades a Mysa Lite thermostat to Full features (Magic Upgrade)."
+        },
+        "downgrade_lite_device": {
+            "name": "Revert Lite Device",
+            "description": "Reverts a Mysa thermostat from Full features back to Lite (Downgrade)."
+        }
     }
 }

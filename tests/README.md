@@ -2,7 +2,7 @@
 
 This directory contains the comprehensive test suite for the Mysa Home Assistant integration.
 
-## Test Count: 785 tests
+## Test Count: 906 tests
 
 ## Running Tests
 
@@ -24,7 +24,7 @@ pytest tests/ -m "integration" -v
 |----------|-------|-------------|
 | **Core** | `test_api.py`, `test_auth.py`, `test_mqtt.py`, `test_config_flow.py`, `test_config_flow_reauth.py`, `test_diagnostics.py` | API, Auth, MQTT, Setup, Reauth, Diagnostics |
 | **Entities** | `test_climate.py`, `test_sensor.py`, `test_number.py`, `test_switch.py`, `test_select.py`, `test_update.py`, `test_entities.py` | Entity logic & Base classes |
-| **Integration** | `test_integration.py`, `test_init_coverage.py` | Full flow & Component setup |
+| **Integration** | `test_integration.py` | Full flow & Component setup |
 | **Utilities** | `test_utilities.py` | Helpers, constants, capability getters |
 | **Edge Cases** | `test_edge_cases.py` | Error handling, race conditions, limits |
 

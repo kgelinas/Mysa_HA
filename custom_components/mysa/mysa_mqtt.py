@@ -14,7 +14,11 @@ from urllib.parse import urlparse
 from uuid import uuid1
 
 import websockets
-from websockets.legacy.client import WebSocketClientProtocol
+if TYPE_CHECKING:
+    try:
+        from websockets.client import WebSocketClientProtocol
+    except ImportError:
+        from websockets.legacy.client import WebSocketClientProtocol
 
 # Support both package imports (for HA) and direct imports (for debug tool)
 try:

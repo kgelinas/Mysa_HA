@@ -1,6 +1,6 @@
 # Mysa for Home Assistant
 
-[![Version](https://img.shields.io/badge/version-0.8.1-blue.svg)](https://github.com/kgelinas/Mysa_HA)
+[![Version](https://img.shields.io/badge/version-0.8.2-blue.svg)](https://github.com/kgelinas/Mysa_HA)
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz/)
 
 A native cloud integration for Mysa devices in Home Assistant. Uses the official Mysa Cloud architecture (MQTT + HTTP) for real-time updates and instant command execution.
@@ -29,7 +29,11 @@ A native cloud integration for Mysa devices in Home Assistant. Uses the official
 - **Mysa Baseboard V2** (BB-V2)
 - **Mysa Baseboard V2 Lite** (BB-V2-L)
 - **Mysa In-Floor** (INF-V1)
-- **Mysa AC Controller** (AC-V1) ✨ *New*
+- **Mysa AC Controller** (AC-V1)
+
+### 🧪 Call for Testers
+
+We are looking for users with the **Mysa for Central AC/Heat (ST-V1)**. Support is currently **unverified**. If you have this device, please install the integration and report your findings (and debug logs) on GitHub to help us fully support it!
 
 ## Installation
 
@@ -90,8 +94,9 @@ Or manually:
 | Max Current | Hidden | Diagnostic |
 | RSSI | Hidden | Diagnostic |
 | Duty Cycle | Hidden | Diagnostic |
+| Infloor | Enabled | Diagnostic |
 
-## Upgraded Lite Devices
+## Unlock Features on Lite Devices
 
 > **Note**: If you only use Home Assistant to control your Mysa devices, you do NOT need to perform any upgrade. The Lite thermostat works perfectly with this integration as-is. The "magic upgrade" is only useful if you also use the official Mysa mobile app.
 
@@ -103,15 +108,48 @@ The Lite-to-Full conversion unlocks features in the **Mysa mobile app** (not Hom
 - Humidity display in app
 - Per-zone schedules
 
-### If You've Already Upgraded
+### How to Upgrade (Magic Upgrade Service)
 
-If you've performed the Lite-to-Full conversion using the debug tool's `advanced` menu, configure Home Assistant to send the correct command type:
+You can unlock your device directly from Home Assistant using the new "Magic Upgrade" service.
 
-1. Go to **Settings → Devices & Services → Mysa → Configure**
-2. Select the upgraded device(s) in "Upgraded Lite Devices"
-3. Click Submit
+1.  Identify your **Mysa Baseboard V2 Lite (BB-V2-0-L)** device.
+2.  Go to **Developer Tools** > **Services** (or **Actions**).
+3.  Search for `mysa.upgrade_lite_device` (Upgrade Lite Device).
+4.  Select your Lite thermostat.
+5.  Click **Perform Action**.
+6.  **Power Cycle Required**: The device firmware has been updated. You MUST physically flip the breaker off and on (or unplug/wait/plug in) for the change to take effect.
 
-This ensures commands use Type 5 (Lite hardware) instead of Type 4 (Full hardware).
+**What happens?**
+- The integration sends a command to change the device's Model ID to `BB-V2-0` (Full).
+- It **automatically updates** your integration configuration to treat this device as an "Upgraded Lite" device (ensuring correct commands are sent).
+
+> ⚠️ **Warning**: This modifies device firmware settings. Use at your own risk.
+
+### How to Revert (Downgrade Service)
+
+If you need to return your device to its original factory state (Lite), you can use the "Revert Lite Device" service.
+
+1.  Identify the device.
+2.  Go to **Developer Tools** > **Services** (or **Actions**).
+3.  Search for `mysa.downgrade_lite_device`.
+4.  Select the device.
+5.  Click **Perform Action**.
+6.  **Power Cycle Required**: You MUST physically flip the breaker off and on (or unplug/wait/plug in).
+
+**What happens?**
+- The integration sends a command to restore the device's Model ID to `BB-V2-0-L` (Lite).
+- It **automatically updates** your integration configuration to remove this device from the "Upgraded Lite" list.
+
+> ⚠️ **Warning**: This modifies device firmware settings. Use at your own risk.
+
+### If You Upgraded Manually
+
+If you performed the upgrade using the debug tool or another method *before* this integration, verify your configuration:
+1.  Go to **Settings → Devices & Services → Mysa → Configure**
+2.  Ensure your device is checked in "Upgraded Lite Devices"
+3.  Click Submit
+
+This manually tells the integration to use Type 5 (Lite) commands for your customized device.
 
 ### Simulated Energy Sensors (All Lite Devices)
 
@@ -147,7 +185,7 @@ For developers interested in the Mysa API, see [docs/MYSA_PROTOCOL.md](docs/MYSA
 
 ### Testing
 
-The integration includes a comprehensive test suite with **785 tests** and **85% code coverage**.
+The integration includes a comprehensive test suite with **906 tests** and **>99% code coverage**.
 
 ```bash
 # Run all tests
@@ -155,9 +193,6 @@ pytest tests/ -v
 
 # Run with coverage report
 pytest tests/ --cov=custom_components/mysa --cov-report=term-missing
-
-# Run specific test file
-pytest tests/test_climate.py -v
 ```
 
 **Coverage by module:**
@@ -165,14 +200,14 @@ pytest tests/test_climate.py -v
 |:-------|:--------:|
 | `climate.py` | 100% |
 | `sensor.py` | 100% |
+| `binary_sensor.py` | 100% |
 | `switch.py` | 100% |
 | `config_flow.py` | 100% |
 | `mqtt.py` | 100% |
-| `mysa_auth.py` | 94% |
-| `mysa_mqtt.py` | 96% |
-| `mysa_api.py` | 57%* |
+| `mysa_auth.py` | 100% |
+| `mysa_mqtt.py` | 100% |
+| `mysa_api.py` | 100% |
 
-_*API coverage limited by network-dependent methods_
 
 ### Dev Container
 

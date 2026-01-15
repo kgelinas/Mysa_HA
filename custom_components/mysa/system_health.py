@@ -17,7 +17,7 @@ def async_register(
     register.async_register_info(system_health_info)
 
 
-async def system_health_info(hass: HomeAssistant) -> dict[str, Any]:  # TODO: Use or remove unused argument
+async def system_health_info(hass: HomeAssistant) -> dict[str, Any]:
     """Get info for the info page."""
     data = hass.data.get(DOMAIN, {})
 
@@ -36,7 +36,7 @@ async def system_health_info(hass: HomeAssistant) -> dict[str, Any]:  # TODO: Us
         }
 
     return {
-        "api_connected": api._session is not None,  # TODO: Use public property instead of protected member
+        "api_connected": api.is_connected,
         "devices": len(api.devices) if api.devices else 0,
-        "mqtt_listener": "Running" if api._mqtt_task and not api._mqtt_task.done() else "Stopped",  # TODO: Use public property instead of protected member
+        "mqtt_listener": "Running" if api.is_mqtt_running else "Stopped",
     }
