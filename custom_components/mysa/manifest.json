@@ -16,5 +16,5 @@
     "websockets>=14.0"
   ],
   "system_health": true,
-  "version": "0.8.2"
+  "version": "0.8.5"
 }

@@ -122,6 +122,7 @@ def mock_api():
     api.start_mqtt_listener = AsyncMock()
     api.stop_mqtt_listener = AsyncMock()
     api.devices = api.get_devices.return_value
+    api.simulated_energy = False
     return api
 
 

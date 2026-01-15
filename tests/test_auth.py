@@ -204,32 +204,32 @@ class TestGetCredentials:
                 # This returns a RefreshableCredentials object
                 creds = cog.get_credentials(identity_id="us-east-1:test-id")
                 assert isinstance(creds, botocore.credentials.RefreshableCredentials)
-                
+
                 # Setup verify_token to raise exception once, then succeed
                 cog.verify_token.side_effect = [
                     pycognito.TokenVerificationException("Expired"),
                     None
                 ]
-                
+
                 # Manually invoke the refresh callback
                 refresh_func = creds._refresh_using
                 # The callback should:
                 # 1. Verification fails -> triggers renew_access_token
                 # 2. Calls get_credentials recursively
                 # We need to break the recursion for the test or mock get_credentials
-                
+
                 # ACTUALLY, checking the implementation:
                 # _refresh_credentials calls:
                 #   verify_token -> renew_access_token (if exception)
                 #   return self.get_credentials(...)
-                
+
                 # So if we call refresh_func(), it will return a new Credentials object
-                # We mock get_credentials to avoid infinite recursion in test environment 
+                # We mock get_credentials to avoid infinite recursion in test environment
                 # (although logically it creates a NEW creds object)
-                
+
                 with patch.object(cog, 'get_credentials') as mock_get_creds:
                      refresh_func()
-                     
+
                      # Verify logic
                      cog.verify_token.assert_called()
                      cog.renew_access_token.assert_called_once()
@@ -257,6 +257,9 @@ class TestLogin:
         from custom_components.mysa.mysa_auth import login
 
         mock_session = MagicMock()
+        # Mock internal botocore session
+        mock_inner = MagicMock()
+        mock_session._session = mock_inner
 
         with patch("custom_components.mysa.mysa_auth.Cognito") as MockCognito:
             mock_user = MagicMock()

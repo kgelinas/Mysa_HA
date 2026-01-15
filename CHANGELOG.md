@@ -3,6 +3,22 @@
 All notable changes to this project will be documented in this file.
 
 
+## [0.8.5] - 2026-01-15
+### Added
+- **Standalone Debug Tool**: Added cross-platform build support for the `mysa_debug` tool. Users can now download single-file executables for Windows (`.exe`), Linux, and macOS from GitHub Actions/Releases without needing Python installed.
+- **Robust Authentication**: Refactored `mysa_auth` and `client` modules to use `boto3` sessions more consistently, improving stability for both the integration and the debug tool.
+- **Client Coverage**: Achieved 100% test coverage for `client.py` by covering edge cases for uninitialized sessions.
+
+## [0.8.3] - 2026-01-15
+### Added
+- **Energy Cost Sensor**: New sensor entity `_electricity_rate` that exposes the electricity rate configured in the Mysa App (per home) to Home Assistant. This allows users to track energy costs natively in the Energy Dashboard.
+- **Interactive Options Flow**: Massive overhaul of the configuration options. Users can now rename zones directly in Home Assistant and configure energy simulation settings per device.
+- **Dynamic Config UI**: Input fields now show dynamic current values (e.g. "Rename Zone: Living Room") and localized field descriptions.
+- **Forced Simulated Energy**: Added a global "Force Simulated Energy" toggle. This bypasses real-time Voltage/Current readings from the device and forces the integration to calculate power based on Wattage * Duty Cycle. Useful for devices with faulty sensors or for testing.
+
+### Fixed
+- **API Zone Overrides**: `MysaApi.get_zone_name` now correctly checks for user-defined overrides before falling back to the cloud name.
+
 ## [0.8.2] - 2026-01-14
 ### Added
 - **Native Energy Entity**: Added a virtual Energy (kWh) sensor that tracks usage over time (Riemann sum integration) for all devices.

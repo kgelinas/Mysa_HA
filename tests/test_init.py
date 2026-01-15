@@ -28,30 +28,30 @@ async def test_async_service_handle_success(hass: HomeAssistant, mock_api):
     hass.data[DOMAIN] = {
         "mysa_account_id": {"api": mock_api}
     }
-    
+
     # Mock Device Registry
     mock_device_registry = MagicMock()
     mock_device_entry = MagicMock()
     mock_device_entry.identifiers = {(DOMAIN, "device_id_123")}
     mock_device_registry.async_get.return_value = mock_device_entry
-    
+
     # Ensure API has device
     mock_api.devices = {"device_id_123": {}}
-    
+
     # Mock Config Entry
     hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
     hass.config_entries.async_update_entry = MagicMock(return_value=True)
-    
+
     with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_device_registry):
         call = MagicMock()
         call.service = "upgrade_lite_device"
         call.data = {"device_id": "ha_device_id"}
-        
+
         await async_service_handle(hass, call)
-        
+
         # Verify API called
         mock_api.async_upgrade_lite_device.assert_called_with("device_id_123")
-        
+
         # Verify Config Entry Updated
         hass.config_entries.async_update_entry.assert_called()
 
@@ -60,11 +60,11 @@ async def test_async_service_handle_no_device(hass: HomeAssistant):
     """Test service handle when device not found."""
     mock_device_registry = MagicMock()
     mock_device_registry.async_get.return_value = None
-    
+
     with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_device_registry):
         call = MagicMock()
         call.data = {"device_id": "invalid_id"}
-        
+
         # Should return/log warning but not crash
         await async_service_handle(hass, call)
 
@@ -75,42 +75,42 @@ async def test_async_service_handle_no_mysa_id(hass: HomeAssistant):
     mock_device_entry = MagicMock()
     mock_device_entry.identifiers = {("other_domain", "id")}
     mock_device_registry.async_get.return_value = mock_device_entry
-    
+
     with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_device_registry):
         call = MagicMock()
         call.data = {"device_id": "ha_id"}
-        
+
         await async_service_handle(hass, call)
 
 @pytest.mark.asyncio
 async def test_async_service_handle_api_failure(hass: HomeAssistant, mock_api):
     """Test service handle when API upgrade fails."""
     mock_api.async_upgrade_lite_device.return_value = False
-    
+
     hass.data[DOMAIN] = {
         "mysa_account_id": {"api": mock_api}
     }
-    
+
     mock_device_registry = MagicMock()
     mock_device_entry = MagicMock()
     mock_device_entry.identifiers = {(DOMAIN, "dev1")}
     mock_device_registry.async_get.return_value = mock_device_entry
-    
+
     # Mock config entry linkage via some means or just rely on global lookup if code does that
     # Code likely finds entry from device registry -> config_entries
     mock_device_entry.config_entries = ["entry_id"]
-    hass.config_entries.async_get_entry = MagicMock(return_value=MagicMock(data={})) 
-    
+    hass.config_entries.async_get_entry = MagicMock(return_value=MagicMock(data={}))
+
     # API must have device
     mock_api.devices = {"dev1": {}}
-    
+
     with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_device_registry):
         call = MagicMock()
         call.service = "upgrade_lite_device"
         call.data = {"device_id": "ha_id"}
-        
+
         await async_service_handle(hass, call)
-        
+
         mock_api.async_upgrade_lite_device.assert_called()
 
 @pytest.mark.asyncio
@@ -119,22 +119,22 @@ async def test_service_handle_orphaned_device(hass: HomeAssistant, mock_api):
     hass.data[DOMAIN] = {
         "mysa_account_id": {"api": mock_api}
     }
-    
+
     mock_device_registry = MagicMock()
     mock_device_entry = MagicMock()
     mock_device_entry.identifiers = {(DOMAIN, "orphaned_device")}
     mock_device_registry.async_get.return_value = mock_device_entry
-    
+
     # API devices empty or doesn't have it
     mock_api.devices = {"other_device": {}}
-    
+
     with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_device_registry):
         call = MagicMock()
         call.data = {"device_id": "ha_orphaned"}
-        
+
         # Should log error line 134
         await async_service_handle(hass, call)
-        
+
         mock_api.async_upgrade_lite_device.assert_not_called()
 
 @pytest.mark.asyncio
@@ -144,34 +144,34 @@ async def test_async_service_handle_downgrade_success(hass: HomeAssistant, mock_
     mock_entry = MagicMock()
     mock_entry.data = {}
     mock_entry.options = {"upgraded_lite_devices": ["device_id_123"]}
-    
+
     hass.data[DOMAIN] = {
         "mysa_account_id": {"api": mock_api}
     }
-    
+
     # Mock Device Registry
     mock_device_registry = MagicMock()
     mock_device_entry = MagicMock()
     mock_device_entry.identifiers = {(DOMAIN, "device_id_123")}
     mock_device_registry.async_get.return_value = mock_device_entry
-    
+
     # Ensure API has device
     mock_api.devices = {"device_id_123": {}}
-    
+
     # Mock Config Entry
     hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
     hass.config_entries.async_update_entry = MagicMock(return_value=True)
-    
+
     with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_device_registry):
         call = MagicMock()
         call.service = "downgrade_lite_device"
         call.data = {"device_id": "ha_device_id"}
-        
+
         await async_service_handle(hass, call)
-        
+
         # Verify API called
         mock_api.async_downgrade_lite_device.assert_called_with("device_id_123")
-        
+
         # Verify Config Entry Updated (removed from list)
         update_call_args = hass.config_entries.async_update_entry.call_args
         assert update_call_args is not None

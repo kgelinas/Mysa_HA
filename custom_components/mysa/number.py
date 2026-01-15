@@ -1,4 +1,5 @@
 """Number platform for Mysa."""
+# pylint: disable=abstract-method
 import time
 import logging
 

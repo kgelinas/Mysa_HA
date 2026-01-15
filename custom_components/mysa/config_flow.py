@@ -1,4 +1,5 @@
 """Config flow for Mysa integration."""
+# pylint: disable=abstract-method
 from __future__ import annotations
 
 import logging
@@ -137,12 +138,14 @@ class MysaOptionsFlowHandler(config_entries.OptionsFlow):  # TODO: Add more publ
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        # Get the API instance to find current devices
+        # Get the API instance to find current devices and zones
         try:
             api = self.hass.data[DOMAIN][self._config_entry.entry_id]["api"]
             devices = api.devices
-        except KeyError:
+            zones = api.zones
+        except (KeyError, AttributeError):
             devices = {}
+            zones = []
 
         device_options = {
             d_id: f"{d_data.get('Name', d_id)} ({d_id})"
@@ -151,6 +154,10 @@ class MysaOptionsFlowHandler(config_entries.OptionsFlow):  # TODO: Add more publ
 
         # Build schema
         schema_dict = {
+            vol.Optional(
+                "simulated_energy",
+                default=self._config_entry.options.get("simulated_energy", False)
+            ): bool,
             vol.Optional(
                 "upgraded_lite_devices",
                 default=self._config_entry.options.get("upgraded_lite_devices", [])
@@ -162,13 +169,31 @@ class MysaOptionsFlowHandler(config_entries.OptionsFlow):  # TODO: Add more publ
             if not api.is_ac_device(d_id):
                 safe_id = d_id.replace(":", "").lower()
                 key = f"wattage_{safe_id}"
-                friendly_name = d_data.get('Name', d_id)
+                name = d_data.get('Name', d_id)
                 schema_dict[
                     vol.Optional(
                         key,
-                        default=self._config_entry.options.get(key, 0)
+                        default=self._config_entry.options.get(key, 0),
+                        description=f"Wattage for {name}"
                     )
                 ] = vol.All(vol.Coerce(int), vol.Range(min=0, max=5000))
+
+        # Add zone renaming
+        # zones is a list of dicts: [{'id': 123, 'Name': 'Living Room', ...}]
+        for zone in zones:
+            z_id = zone.get('id')
+            z_name = zone.get('Name')
+            if z_id:
+                key = f"zone_name_{z_id}"
+                current_val = self._config_entry.options.get(key, z_name)
+                # Use default instead of suggested_value to allow using description for label
+                schema_dict[
+                    vol.Optional(
+                        key,
+                        default=current_val,
+                        description=f"Rename Zone: {z_name}"
+                    )
+                ] = str
 
         return self.async_show_form(
             step_id="init",

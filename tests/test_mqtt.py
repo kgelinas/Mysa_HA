@@ -71,7 +71,7 @@ class TestImportFallback:
                 # Prepare fallback mocks BEFORE import
                 mock_fallback_auth = MagicMock()
                 mock_fallback_auth.Cognito = "FALLBACK_COGNITO"
-                
+
                 # Mock the fallback modules (mysa_auth, mqtt, const)
                 # These are ABSOLUTE imports in the fallback block
                 fallback_mocks = {
@@ -79,16 +79,16 @@ class TestImportFallback:
                     "mqtt": MagicMock(),
                     "const": MagicMock(),
                 }
-                
+
                 with patch.dict(sys.modules, fallback_mocks):
                     import custom_components.mysa.mysa_mqtt
-                    
+
                     # Verify we triggered the error
                     assert triggered["val"], "Relative import was not intercepted!"
-                    
+
                     # Verify we used the fallback
                     assert custom_components.mysa.mysa_mqtt.Cognito == "FALLBACK_COGNITO"
-                    
+
         finally:
             # Restore original modules
             sys.modules.update(original_modules)

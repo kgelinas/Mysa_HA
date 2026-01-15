@@ -11,7 +11,7 @@ import os
 import logging
 from functools import wraps
 from time import time
-from typing import Optional
+from typing import Optional, Any, cast
 
 import requests  # type: ignore[import-untyped]
 
@@ -76,13 +76,14 @@ class Cognito(pycognito.Cognito):
     """
 
     @wraps(pycognito.Cognito.__init__)  # type: ignore[misc]
-    def __init__(self,  # TODO: Refactor arguments to correct order
-        session: Optional[botocore.session.Session] = None,
+    def __init__(self,
+        session: Optional[boto3.session.Session] = None,
         pool_jwk: Optional[dict] = None,
-        *args, **kwargs
+        **kwargs
     ):
+
         self._session = session
-        super().__init__(*args, session=session, **kwargs)
+        super().__init__(session=session, **kwargs)
         self.pool_jwk = pool_jwk
 
     def get_credentials(self,
@@ -101,8 +102,13 @@ class Cognito(pycognito.Cognito):
             client = self._session.client('cognito-identity', region_name=region)
         else:
             client = boto3.client('cognito-identity', region_name=region)
+        
+        # Cast to Any because Pyrefly doesn't know specific service methods
+        client = cast(Any, client)
 
-        # TODO: Fix unsubscriptable object pylint error properly
+        # pylint: disable=unsubscriptable-object
+        # pylint: disable=unsubscriptable-object
+        assert self.id_claims is not None
         assert self.id_claims['iss'].startswith('https://')
         logins = {self.id_claims['iss'][8:]: self.id_token}
 
@@ -131,12 +137,12 @@ class Cognito(pycognito.Cognito):
 def login(user: str, password: str, bsess: Optional[boto3.session.Session] = None) -> Cognito:
     """
     Authenticate with Mysa using email and password.
-    
+
     Args:
         user: Mysa account email
         password: Mysa account password
         bsess: Optional boto3 session
-        
+
     Returns:
         Authenticated Cognito user object
     """
@@ -158,18 +164,19 @@ def login(user: str, password: str, bsess: Optional[boto3.session.Session] = Non
 def auther(u: Cognito):
     """
     Create a requests auth handler that auto-refreshes tokens.
-    
+
     Args:
         u: Authenticated Cognito user object
-        
+
     Returns:
         Auth callable for requests.Session
     """
-    def f(request: requests.Request) -> requests.Request:
-        # TODO: Fix unsubscriptable object pylint error properly
-        if time() > u.id_claims['exp'] - 5:
+    def f(request: requests.PreparedRequest) -> requests.PreparedRequest:
+        # pylint: disable=unsubscriptable-object
+        if u.id_claims and time() > u.id_claims['exp'] - 5:
             u.renew_access_token()
-        request.headers['authorization'] = u.id_token
+        if u.id_token:
+            request.headers['authorization'] = u.id_token
         return request
     return f
 
@@ -181,13 +188,13 @@ def auther(u: Cognito):
 def sigv4_sign_mqtt_url(cred: botocore.credentials.Credentials) -> str:
     """
     Sign MQTT WebSocket URL using AWS SigV4.
-    
+
     Mysa uses an unusual signing approach where the session token is added
     AFTER signing rather than being included in the signed URL.
-    
+
     Args:
         cred: AWS credentials from Cognito
-        
+
     Returns:
         Signed MQTT WebSocket URL
     """

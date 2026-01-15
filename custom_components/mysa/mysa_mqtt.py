@@ -54,12 +54,12 @@ def refresh_and_sign_url(
     """
     Refresh tokens and get signed MQTT URL.
     Falls back to full re-login if refresh fails.
-    
+
     Args:
         user_obj: Authenticated Cognito user object
         username: Mysa account email
         password: Mysa account password
-        
+
     Returns:
         tuple: (signed_url, user_obj) - may return new user_obj if re-auth happened
     """
@@ -84,10 +84,10 @@ def refresh_and_sign_url(
 def build_subscription_topics(device_ids: List[str]) -> List[mqtt.SubscriptionSpec]:
     """
     Build MQTT subscription topic list for devices.
-    
+
     Args:
         device_ids: List of device IDs (MAC addresses)
-        
+
     Returns:
         List of mqtt.SubscriptionSpec objects
     """
@@ -104,10 +104,10 @@ def build_subscription_topics(device_ids: List[str]) -> List[mqtt.SubscriptionSp
 def parse_mqtt_packet(data: Union[bytes, bytearray]) -> Optional[Any]:
     """
     Parse MQTT packet from raw data.
-    
+
     Args:
         data: Raw bytes from WebSocket
-        
+
     Returns:
         Parsed MQTT packet or None if parsing failed
     """
@@ -121,10 +121,10 @@ def parse_mqtt_packet(data: Union[bytes, bytearray]) -> Optional[Any]:
 def get_websocket_url(signed_url: str) -> str:
     """
     Convert signed HTTPS URL to WSS URL.
-    
+
     Args:
         signed_url: AWS SigV4 signed HTTPS URL
-        
+
     Returns:
         WSS URL for WebSocket connection
     """
@@ -135,10 +135,10 @@ def get_websocket_url(signed_url: str) -> str:
 async def connect_websocket(signed_url: str) -> WebSocketClientProtocol:
     """
     Create WebSocket connection to MQTT broker.
-    
+
     Args:
         signed_url: AWS SigV4 signed MQTT URL
-        
+
     Returns:
         WebSocket connection object
     """
@@ -172,10 +172,10 @@ async def connect_websocket(signed_url: str) -> WebSocketClientProtocol:
 def create_connect_packet(keepalive: int = MQTT_KEEPALIVE) -> bytes:
     """
     Create MQTT CONNECT packet with unique client ID.
-    
+
     Args:
         keepalive: Keepalive interval in seconds
-        
+
     Returns:
         MQTT CONNECT packet bytes
     """
@@ -185,11 +185,11 @@ def create_connect_packet(keepalive: int = MQTT_KEEPALIVE) -> bytes:
 def create_subscribe_packet(device_ids: List[str], packet_id: int = 1) -> bytes:
     """
     Create MQTT SUBSCRIBE packet for device topics.
-    
+
     Args:
         device_ids: List of device IDs to subscribe to
         packet_id: MQTT packet ID
-        
+
     Returns:
         MQTT SUBSCRIBE packet bytes
     """
@@ -200,10 +200,10 @@ def create_subscribe_packet(device_ids: List[str], packet_id: int = 1) -> bytes:
 class MqttConnection:
     """
     Async context manager for MQTT connections.
-    
+
     Handles WebSocket connection, MQTT handshake, and device subscription
     in a clean, reusable way.
-    
+
     Usage:
         async with MqttConnection(signed_url, device_ids) as conn:
             while True:
@@ -220,7 +220,7 @@ class MqttConnection:
     ):
         """
         Initialize MQTT connection.
-        
+
         Args:
             signed_url: AWS SigV4 signed MQTT URL
             device_ids: List of device IDs to subscribe to
@@ -294,10 +294,10 @@ class MqttConnection:
     async def receive(self, timeout: Optional[float] = None) -> Optional[Any]:
         """
         Receive and parse an MQTT packet.
-        
+
         Args:
             timeout: Optional timeout in seconds
-            
+
         Returns:
             Parsed MQTT packet or None on timeout
         """
@@ -323,7 +323,7 @@ class MqttConnection:
     async def send(self, data: bytes) -> None:
         """
         Send raw data to MQTT broker.
-        
+
         Args:
             data: MQTT packet bytes to send
         """

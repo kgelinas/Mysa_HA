@@ -663,10 +663,10 @@ class TestSetupFlowAsync:
         from custom_components.mysa.mysa_api import MysaApi
 
         with (
-            patch("custom_components.mysa.mysa_api.login") as mock_login,
-            patch("custom_components.mysa.mysa_api.auther"),
-            patch("custom_components.mysa.mysa_api.requests.Session"),
-            patch("custom_components.mysa.mysa_api.Store") as mock_store,
+            patch("custom_components.mysa.client.login") as mock_login,
+            patch("custom_components.mysa.client.auther"),
+            patch("custom_components.mysa.client.requests.Session"),
+            patch("custom_components.mysa.client.Store") as mock_store,
         ):
             mock_user = MagicMock()
             mock_user.id_token = "test-token"
@@ -693,18 +693,21 @@ class TestCommandFlowAsync:
 
         api = MysaApi.__new__(MysaApi)
         api.hass = hass
-        api.devices = {"device1": {"type": 4}}
-        api._send_mqtt_command = AsyncMock()
-        api._update_state_cache = MagicMock()
-        api._get_payload_type = MagicMock(return_value=4)
-        api.upgraded_lite_devices = []
+        api.client = MagicMock()
+        api.client.devices = {"device1": {"type": 4}}
+        api.client.user_id = "test-user-id"
+
+        api.realtime = MagicMock()
+        api.realtime.send_command = AsyncMock()
+
         api._last_command_time = {}
+        api.upgraded_lite_devices = []
 
         await api.set_target_temperature("device1", 23.0)
 
-        api._send_mqtt_command.assert_called()
+        api.realtime.send_command.assert_called()
 
         # Verify device was in calls
-        call_args_list = api._send_mqtt_command.call_args_list
+        call_args_list = api.realtime.send_command.call_args_list
         device_ids = [call[0][0] for call in call_args_list]
         assert "device1" in device_ids

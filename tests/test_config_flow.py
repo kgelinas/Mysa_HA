@@ -193,7 +193,7 @@ class TestOptionsFlow:
         }
         mock_api.devices = devices
         mock_api.get_devices = AsyncMock(return_value=devices)
-        
+
         # Mock is_ac_device to return False
         mock_api.is_ac_device = MagicMock(return_value=False)
 
@@ -204,7 +204,7 @@ class TestOptionsFlow:
         assert result["type"] == "form"
         # Verify schema contains wattage_device1
         schema = result["data_schema"]
-        
+
         # Voluptuous schema keys are wrapped, check string representation
         keys = list(schema.schema.keys())
         found = any("wattage_device1" in str(k) for k in keys)
@@ -567,7 +567,7 @@ class TestConfigFlowReauth:
 
         flow = ConfigFlow()
         flow.hass = hass
-        
+
         # entry is None (default state if async_step_reauth wasn't called or failed)
         flow.entry = None
 
@@ -593,8 +593,8 @@ class TestConfigFlowReauth:
 
         # Simulate exception during validation
         with patch.object(
-            flow, 
-            "_validate_credentials", 
+            flow,
+            "_validate_credentials",
             side_effect=Exception("API Error")
         ):
             result = await flow.async_step_reauth_confirm(
@@ -620,7 +620,7 @@ class TestConfigFlowCoverage:
     async def test_options_flow_heating_device_schema(self, hass, mock_config_entry):
         """Test schema generation for heating devices (lines 163-166)."""
         from custom_components.mysa.config_flow import MysaOptionsFlowHandler
-        
+
         handler = MysaOptionsFlowHandler(mock_config_entry)
         handler.hass = hass
 
@@ -647,3 +647,39 @@ class TestConfigFlowCoverage:
                 found = True
                 break
         assert found
+
+    @pytest.mark.asyncio
+    async def test_config_flow_coverage_gap(self, hass):
+        """Test config flow coverage (lines 168+ and loop 184-190)."""
+        from custom_components.mysa.config_flow import ConfigFlow
+
+        flow = ConfigFlow()
+        flow.hass = hass
+        
+        # Mock entry with existing options
+        entry = MagicMock()
+        entry.options = {"simulated_energy": False}
+        entry.entry_id = "test_id"
+        
+        # Mock API
+        api = MagicMock()
+        # Device that is NOT AC (to trigger line 169)
+        # Device with Name to trigger line 172
+        api.devices = {"dev1": {"Name": "Heater", "Model": "BB-V2"}}
+        api.zones = [{"id": 1, "Name": "Zone1"}]
+        api.is_ac_device.return_value = False
+        
+        hass.data[DOMAIN] = {"test_id": {"api": api}}
+        
+        handler = flow.async_get_options_flow(entry)
+        handler.hass = hass
+        
+        # Run step init
+        result = await handler.async_step_init()
+        
+        assert result["type"] == "form"
+        schema = result["data_schema"]
+        
+        # Verify Zone field (Line 184-190 coverage)
+        # This proves the loop ran and added the field
+        assert any(str(k) == "zone_name_1" for k in schema.schema)

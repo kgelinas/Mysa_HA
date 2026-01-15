@@ -1,4 +1,5 @@
 """Climate platform for Mysa."""
+# pylint: disable=abstract-method
 import logging
 import time
 from typing import Any
@@ -25,7 +26,7 @@ from .const import (
     DOMAIN,
     AC_MODE_OFF, AC_MODE_AUTO, AC_MODE_HEAT, AC_MODE_COOL, AC_MODE_FAN_ONLY, AC_MODE_DRY,
     AC_FAN_MODES, AC_FAN_MODES_REVERSE,
-    AC_SWING_MODES, AC_SWING_MODES_REVERSE,
+    AC_SWING_MODES,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -494,17 +495,6 @@ class MysaACClimate(MysaClimate):  # TODO: Refactor MysaACClimate to implement m
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set new HVAC mode for AC."""
         try:
-            # Map HA mode to Mysa value for optimistic update
-            mode_mapping = {
-                HVACMode.OFF: AC_MODE_OFF,
-                HVACMode.HEAT_COOL: AC_MODE_AUTO,
-                HVACMode.HEAT: AC_MODE_HEAT,
-                HVACMode.COOL: AC_MODE_COOL,
-                HVACMode.FAN_ONLY: AC_MODE_FAN_ONLY,
-                HVACMode.DRY: AC_MODE_DRY,
-            }
-            mode_val = mode_mapping.get(hvac_mode, AC_MODE_OFF)
-
             # Optimistic update
             self._set_sticky_value("hvac_mode", hvac_mode)
 

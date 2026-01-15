@@ -1,4 +1,5 @@
 """Update platform for Mysa."""
+# pylint: disable=abstract-method
 import logging
 from datetime import timedelta
 

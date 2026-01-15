@@ -139,7 +139,7 @@ class TestCoverageEdgeCases:
     async def test_switch_none_data(self, mock_coordinator, mock_api, mock_entry):
         """Test switch with None coordinator data."""
         entity = MysaLockSwitch(mock_coordinator, "device1", {}, mock_api, mock_entry)
-        
+
         mock_coordinator.data = None
         assert entity.is_on is False
 
@@ -158,14 +158,14 @@ class TestCoverageEdgeCases:
         mock_coordinator.data = {"device1": {"SwingStateHorizontal": 6}} # Center (6)
         await entity.async_select_option("left")
         assert entity.current_option == "left"
-        
+
         with patch("time.time", return_value=time.time() + 31):
             assert entity.current_option == "center" # Reverts to cloud
 
         # 2. Convergence
         entity._pending_option = "left"
         entity._pending_timestamp = time.time()
-        
+
         # Cloud updates to 'left' (4)
         mock_coordinator.data = {"device1": {"SwingStateHorizontal": 4}}
         assert entity.current_option == "left"
@@ -209,7 +209,7 @@ class TestCoverageEdgeCases:
         # 2. Extract Value Edge Cases (Nested 'v' is None)
         mock_coordinator.data = {"device1": {"test_key": {"v": None, "Id": 999}}}
         val = entity._extract_value(mock_coordinator.data["device1"], ["test_key"])
-        assert val == 999 
+        assert val == 999
 
         # 3. Exception Handling
         mock_api.set_target_temperature.side_effect = Exception("API Error")
@@ -227,10 +227,10 @@ class TestCoverageEdgeCases:
             mock_coordinator, "device1", {}, mock_api, mock_entry
         )
         entity.async_write_ha_state = MagicMock()
-        
+
         # Test int/float match logic in _get_sticky_value
         entity._set_sticky_value("target_temperature", 20.0)
-        
+
         mock_coordinator.data = {"device1": {"stpt": 20}}
         # This triggers the isinstance(val, (int, float)) check
         assert entity.target_temperature == 20.0
@@ -240,7 +240,7 @@ class TestCoverageEdgeCases:
         entity._set_sticky_value("test_attr", "foo")
         # Manually inject into pending for testing generic get
         entity._pending_updates["test_attr"] = {'value': "foo", 'ts': time.time()}
-        
+
         # We can't easily test generic attr via public property without adding one
         # But we can test hvac_mode enum match
         entity._set_sticky_value("hvac_mode", HVACMode.HEAT)

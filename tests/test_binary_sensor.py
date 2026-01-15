@@ -75,7 +75,7 @@ class TestMysaBinarySensor:
     async def test_sensor_attributes(self, hass, mock_coordinator):
         """Test sensor status attributes."""
         await mock_coordinator.async_refresh()
-        
+
         device_data = {"Id": "device1", "Name": "Test Device", "Model": "BB-V2"}
         entity = MysaConnectionSensor(mock_coordinator, "device1", device_data)
 
@@ -83,7 +83,7 @@ class TestMysaBinarySensor:
         assert entity.unique_id == "device1_connection"
         assert entity.device_class == BinarySensorDeviceClass.CONNECTIVITY
         assert entity.entity_category == EntityCategory.DIAGNOSTIC
-        
+
         info = entity.device_info
         assert info["identifiers"] == {(DOMAIN, "device1")}
         assert info["manufacturer"] == "Mysa"
@@ -103,7 +103,7 @@ class TestMysaBinarySensor:
         device2_data = {"Id": "device2", "Name": "Offline Device"}
         entity2 = MysaConnectionSensor(mock_coordinator, "device2", device2_data)
         assert entity2.is_on is False
-    
+
     async def test_is_on_missing_state(self, hass, mock_config_entry):
         """Test is_on returns False when state is missing."""
         async def async_update():

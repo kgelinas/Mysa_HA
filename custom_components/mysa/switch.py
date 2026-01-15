@@ -1,4 +1,5 @@
 """Switch platform for Mysa."""
+# pylint: disable=abstract-method
 import logging
 import time
 from typing import Any
@@ -86,7 +87,7 @@ class MysaSwitch(CoordinatorEntity, SwitchEntity):  # TODO: Refactor MysaSwitch 
     def _get_state_with_pending(self, keys):
         """Get boolean state using sticky optimistic logic."""
         if self.coordinator.data is None:
-             return self._pending_state or False
+            return self._pending_state or False
         state = self.coordinator.data.get(self._device_id)
         if not state:
             return self._pending_state or False

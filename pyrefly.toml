@@ -1,0 +1,25 @@
+# Pyrefly Configuration
+# https://pyrefly.org/docs/configuration
+
+# Paths to include in type checking
+project-includes = [
+    "custom_components/mysa",
+    "tests",
+    "tools"
+]
+
+# Paths to exclude
+project-excludes = [
+    "**/__pycache__",
+    "build",
+    "dist",
+    ".pytest_cache"
+]
+
+# Python Target Version
+python-version = "3.13"
+
+# Formatting and Reporting
+[report]
+show-column-numbers = true
+show-error-codes = true

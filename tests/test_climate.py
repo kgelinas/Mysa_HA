@@ -520,6 +520,20 @@ class TestMysaACClimateActions:
 
         mock_api.set_ac_swing_mode.assert_called_once_with("ac_device_123", "auto")
 
+    @pytest.mark.asyncio
+    async def test_ac_set_temperature(
+        self, hass, mock_coordinator, ac_entity, mock_api
+    ):
+        """Test async_set_target_temperature for AC."""
+        await mock_coordinator.async_refresh()
+
+        # Step is 1.0 for AC
+        await ac_entity.async_set_target_temperature(temperature=22.4)
+
+        # Should round to 22.0
+        mock_api.set_target_temperature.assert_called_once_with("ac_device_123", 22.0)
+        ac_entity.async_write_ha_state.assert_called()
+
 
 # ===========================================================================
 # Helper Method Tests
@@ -1742,16 +1756,16 @@ class TestClimateEdgeCasesAdditional:
     @pytest.mark.asyncio
     async def test_get_sticky_value_exception(self, hass, mock_coordinator, climate_entity):
         """Test _get_sticky_value exception handling (lines 196-197)."""
-        import time 
+        import time
         # Mock _pending_updates to raise on __delitem__
         mock_pending = MagicMock()
         # Allows .get() to return a valid state
         mock_pending.get.return_value = {"value": 20, "ts": time.time()}
         # Raises on delete
         mock_pending.__delitem__.side_effect = Exception("Del Fail")
-        
+
         climate_entity._pending_updates = mock_pending
-        
+
         # Mock time to be within 30s window
         with patch("time.time", return_value=time.time() + 1):
              # Convergence: 20 == 20. Tries to del. Raises. Caught. Returns 20 (pending val)
@@ -1772,8 +1786,8 @@ class TestACClimateCoverage(TestACClimateEdgeCases):
         """Mock AC entity."""
         from custom_components.mysa.climate import MysaACClimate
         device_data = {
-            "Id": "device1", 
-            "Name": "Test AC", 
+            "Id": "device1",
+            "Name": "Test AC",
             "Model": "AC-V1",
             "SupportedCaps": {"modes": {"4": {}}}
         }
@@ -1785,14 +1799,14 @@ class TestACClimateCoverage(TestACClimateEdgeCases):
         # Fix missing hass attribute
         ac_entity.hass = hass
         ac_entity.entity_id = "climate.test_ac"
-        
+
         # Force API mock to be the same (fixture resolution issue?)
         ac_entity._api = mock_api
-        
+
         assert ac_entity._api is mock_api
-        
+
         mock_api.set_target_temperature.side_effect = Exception("API Fail")
-        
+
         # Use direct call to target specific method exception block
         await ac_entity.async_set_target_temperature(24)
         mock_api.set_target_temperature.assert_called()
@@ -1803,14 +1817,14 @@ class TestACClimateCoverage(TestACClimateEdgeCases):
         ac_entity.hass = hass
         ac_entity.entity_id = "climate.test_ac"
         ac_entity._api = mock_api
-        
+
         # Call with valid temperature
         # Call with valid temperature
         await ac_entity.async_set_target_temperature(22)
-        
+
         # Verify API called
         mock_api.set_target_temperature.assert_called_with(ac_entity._device_id, 22)
-        
+
         # Verify state write requested (mocked or just run if harmless)
         # async_write_ha_state() is called at end of success path
 
@@ -1818,18 +1832,18 @@ class TestACClimateCoverage(TestACClimateEdgeCases):
         """Test sticky value logic (lines 182-183, 192-195)."""
         import time
         from unittest.mock import patch
-        
+
         # Setup entity
         ac_entity.hass = hass
         ac_entity.entity_id = "climate.test_ac"
-        
+
         # 1. Expiration (182-183)
         ac_entity._pending_updates["test_attr"] = {"value": 100, "ts": time.time() - 31}
         # Call _get_sticky_value
         val = ac_entity._get_sticky_value("test_attr", 50)
         assert val == 50 # Should return cloud value
         assert "test_attr" not in ac_entity._pending_updates
-        
+
         # 2. Convergence (Exact) (193-195)
         # Setup pending
         ac_entity._set_sticky_value("exact_attr", 100)
@@ -1837,7 +1851,7 @@ class TestACClimateCoverage(TestACClimateEdgeCases):
         val = ac_entity._get_sticky_value("exact_attr", 100)
         assert val == 100
         assert "exact_attr" not in ac_entity._pending_updates
-        
+
         # 3. Convergence (Float) (190-192)
         ac_entity._set_sticky_value("float_attr", 20.0)
         # Cloud value slightly different but close

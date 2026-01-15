@@ -225,7 +225,7 @@ Uses AWS Cognito with JWT tokens. Include auth header on all requests.
 Returns list of homes and associated zones.
 - `Id`: Home UUID
 - `Zones`: Array of zone objects (`Id`, `Name`)
-- `ERate`: Electricity rate in $/kWh
+- `ERate`: Electricity rate in $/kWh (float)
 
 #### GET /users
 Returns current user information and paired devices.

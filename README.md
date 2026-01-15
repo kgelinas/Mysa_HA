@@ -1,6 +1,10 @@
 # Mysa for Home Assistant
 
-[![Version](https://img.shields.io/badge/version-0.8.2-blue.svg)](https://github.com/kgelinas/Mysa_HA)
+[![Version](https://img.shields.io/badge/version-0.8.5-blue.svg)](https://github.com/kgelinas/Mysa_HA)
+
+...
+
+The integration includes a comprehensive test suite with **100% code coverage** for core modules.
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz/)
 
 A native cloud integration for Mysa devices in Home Assistant. Uses the official Mysa Cloud architecture (MQTT + HTTP) for real-time updates and instant command execution.
@@ -22,6 +26,7 @@ A native cloud integration for Mysa devices in Home Assistant. Uses the official
 | 🔍 Diagnostics Download | ✓ | ✓ |
 | 🔄 Firmware Updates | ✓ | ✓ |
 | ⚡ Real-time MQTT Sync | ✓ | ✓ |
+| 💰 Energy Cost Integration | ✓ | ✓ |
 
 ## Supported Devices
 
@@ -95,6 +100,7 @@ Or manually:
 | RSSI | Hidden | Diagnostic |
 | Duty Cycle | Hidden | Diagnostic |
 | Infloor | Enabled | Diagnostic |
+| Electricity Rate | Diagnostic | Diagnostic |
 
 ## Unlock Features on Lite Devices
 
@@ -175,6 +181,15 @@ python mysa_debug.py
 
 Features include MQTT sniffing, HTTP/MQTT command testing, and advanced operations like Lite-to-Full conversion and device pairing mode reset.
 
+### Standalone Executables (Web-based Debugger Replacement)
+
+For users who do not want to install Python, **standalone executables** are available for **Windows, Linux, and macOS**. These single-file applications require no installation.
+
+1.  Go to the **Actions** tab in the GitHub repository.
+2.  Select the latest **Build Cross-Platform Debug Tool** workflow run.
+3.  Download the artifact for your OS (e.g., `mysa_debug_windows-latest`).
+4.  Run the executable directly. Lists devices and commands same as below.
+
 See [docs/MYSA_DEBUG.md](docs/MYSA_DEBUG.md) for usage details.
 
 ## Protocol Documentation
@@ -185,7 +200,7 @@ For developers interested in the Mysa API, see [docs/MYSA_PROTOCOL.md](docs/MYSA
 
 ### Testing
 
-The integration includes a comprehensive test suite with **906 tests** and **>99% code coverage**.
+The integration includes a comprehensive test suite with **100% code coverage** for core modules.
 
 ```bash
 # Run all tests
@@ -202,11 +217,19 @@ pytest tests/ --cov=custom_components/mysa --cov-report=term-missing
 | `sensor.py` | 100% |
 | `binary_sensor.py` | 100% |
 | `switch.py` | 100% |
+| `number.py` | 100% |
+| `select.py` | 100% |
+| `update.py` | 100% |
+| `client.py` | 100% |
 | `config_flow.py` | 100% |
 | `mqtt.py` | 100% |
 | `mysa_auth.py` | 100% |
 | `mysa_mqtt.py` | 100% |
 | `mysa_api.py` | 100% |
+| `device.py` | 100% |
+| `realtime.py` | 100% |
+| `diagnostics.py` | 100% |
+| `system_health.py` | 100% |
 
 
 ### Dev Container

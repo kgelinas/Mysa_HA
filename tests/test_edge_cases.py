@@ -486,26 +486,27 @@ class TestMqttRecoveryAsync:
         mock_ws.close.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_stop_mqtt_listener_mocked(self, hass):
-        """Test MysaApi.stop_mqtt_listener with mocked task."""
+    async def test_realtime_stop_listener_mocked(self, hass):
+        """Test MysaRealtime.stop with mocked task."""
+        from custom_components.mysa.realtime import MysaRealtime
 
-        api = MysaApi.__new__(MysaApi)
-        api.hass = hass
-        api._mqtt_should_reconnect = True
-        api._mqtt_connected = asyncio.Event()
-        api._mqtt_connected.set()
+        # Mock callbacks
+        realtime = MysaRealtime(hass, AsyncMock(), AsyncMock())
+        realtime._mqtt_should_reconnect = True
+        realtime._mqtt_connected = asyncio.Event()
+        realtime._mqtt_connected.set()
 
         # Create a real async task that can be cancelled
         async def long_running():
             await asyncio.sleep(100)
 
         real_task = asyncio.create_task(long_running())
-        api._mqtt_listener_task = real_task
-        api._mqtt_ws = AsyncMock()
+        realtime._mqtt_listener_task = real_task
+        realtime._mqtt_ws = AsyncMock()
 
-        await api.stop_mqtt_listener()
+        await realtime.stop()
 
-        assert api._mqtt_should_reconnect is False
+        assert realtime._mqtt_should_reconnect is False
         assert real_task.cancelled()
 
 

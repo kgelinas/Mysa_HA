@@ -1,4 +1,5 @@
 """Select platform for Mysa AC horizontal swing."""
+# pylint: disable=abstract-method
 import logging
 import time
 

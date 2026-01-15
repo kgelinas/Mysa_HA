@@ -206,11 +206,15 @@ class TestApiCoordinatorIntegration:
         """Test coordinator calling mocked MysaApi.get_state."""
         from unittest.mock import patch
         from custom_components.mysa.mysa_api import MysaApi
+        from custom_components.mysa.client import MysaClient
 
         mock_api = MysaApi.__new__(MysaApi)
         mock_api.hass = hass
+        mock_api.client = MysaClient(hass, "u", "p")
+        mock_api.states = {}
+        mock_api._last_command_time = {}
 
-        with patch.object(MysaApi, "_get_state_sync") as mock_sync:
+        with patch.object(MysaClient, "_get_state_sync") as mock_sync:
             mock_sync.return_value = {"device1": {"temperature": 22.5, "humidity": 50}}
 
             async def update_method():
@@ -1171,8 +1175,9 @@ class TestMysaApiAsyncMocking:
     @pytest.mark.asyncio
     async def test_get_state_async_mocked(self, hass):
         """Test mocking MysaApi.get_state with AsyncMock."""
+        from custom_components.mysa.client import MysaClient
 
-        with patch.object(MysaApi, "_get_state_sync") as mock_sync:
+        with patch.object(MysaClient, "_get_state_sync") as mock_sync:
             mock_sync.return_value = {
                 "device1": {
                     "temperature": 21.5,
@@ -1183,6 +1188,11 @@ class TestMysaApiAsyncMocking:
 
             api = MysaApi.__new__(MysaApi)
             api.hass = hass
+            api.client = MysaClient(hass, "user", "pass")
+            # We mock the session so _get_state_sync doesn't explode if called for real (though it should be patched)
+            api.client._session = MagicMock()
+            api.states = {}
+            api._last_command_time = {}
 
             result = await api.get_state()
 
@@ -1196,17 +1206,31 @@ class TestMysaApiAsyncMocking:
 
         api = MysaApi.__new__(MysaApi)
         api.hass = hass
-        api.devices = {"device1": {"type": 4}}
-        api._send_mqtt_command = AsyncMock()
-        api._update_state_cache = MagicMock()
-        api._get_payload_type = MagicMock(return_value=4)
-        api.upgraded_lite_devices = []
+        api.client = MagicMock()
+        api.client.user_id = "test-user-id"
+        api.client.devices = {"device1": {"type": 4}}
+
+        api.realtime = MagicMock()
+        api.realtime.send_command = AsyncMock()
+
+        # Other necessary init
         api._last_command_time = {}
+        api.states = {}
+        api.upgraded_lite_devices = []
 
-        await api.set_target_temperature("device1", 22.0)
+        await api.set_target_temperature("device1", 23.0)
 
-        api._send_mqtt_command.assert_called()
-        # Verify at least one call was for our device
-        call_args_list = api._send_mqtt_command.call_args_list
-        device_ids_called = [call[0][0] for call in call_args_list]
-        assert "device1" in device_ids_called
+        api.realtime.send_command.assert_called()
+
+        # We need to look through all calls because notify_settings_changed is called after
+        found_cmd = False
+        for call in api.realtime.send_command.call_args_list:
+            args, kwargs = call
+            body = args[1]
+            if "cmd" in body:
+                found_cmd = True
+                assert args[0] == "device1"
+                assert body["cmd"][0]["sp"] == 23.0
+                break
+
+        assert found_cmd, "Did not find command call with 'cmd' in body"

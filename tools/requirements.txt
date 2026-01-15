@@ -1,0 +1,5 @@
+boto3>=1.28.0
+requests>=2.31.0
+websockets>=11.0
+prompt_toolkit>=3.0.0
+pycognito>=2023.5.0

@@ -8,18 +8,29 @@ A command-line utility for testing and debugging Mysa device communication. Usef
 - Dependencies: `websockets`, `requests`, `boto3`
 - Optional: `prompt_toolkit` (for better input experience)
 
-```bash
-pip install websockets requests boto3 prompt_toolkit
-```
+### Run Standalone Executable (Windows/Linux/Mac)
+**No Python installation required.**
 
-## Running the Tool
+1.  Download the latest executable from the **Actions** tab in the GitHub repository (look for "Build Cross-Platform Debug Tool").
+2.  Run the file directly:
+    *   **Windows**: Double-click `mysa_debug.exe` (or run in CMD/PowerShell).
+    *   **Linux/Mac**: Run `./mysa_debug` in terminal.
+        *   Note: On Mac/Linux, you may need to make it executable first: `chmod +x mysa_debug`
 
-From the repository root:
+### Run from Source (Python)
 
-```bash
-cd tools
-python mysa_debug.py
-```
+If you have Python installed or want to modifying the code:
+
+1.  **Install dependencies**:
+    ```bash
+    pip install -r tools/requirements.txt
+    ```
+
+2.  **Run**:
+    ```bash
+    cd tools
+    python mysa_debug.py
+    ```
 
 On first run, you'll be prompted for your Mysa account credentials. These are saved to `~/.mysa_debug_auth.json` for future sessions.
 

@@ -35,7 +35,8 @@
                 "description": "Configure advanced device settings.",
                 "data": {
                     "upgraded_lite_devices": "Upgraded Lite Devices (Force Type 5)",
-                    "estimated_max_current": "Estimated Max Current (Amps)"
+                    "estimated_max_current": "Estimated Max Current (Amps)",
+                    "simulated_energy": "Force Simulated Energy"
                 }
             }
         }

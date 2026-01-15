@@ -147,13 +147,16 @@ async def async_setup_entry(
         if not is_ac:
             power_sensor = MysaPowerSensor(coordinator, device_id, device_data, api, entry)
             entities.append(power_sensor)
-            
+
             # Virtual Energy Sensor (kWh)
             entities.append(MysaEnergySensor(coordinator, device_id, device_data, api, entry, power_sensor))
 
             # If current wasn't added as a diagnostic sensor (e.g. Lite), add it as simulated
             if "Current" not in state:
                 entities.append(MysaCurrentSensor(coordinator, device_id, device_data, api, entry))
+
+            # Electricity Rate (Cost) Sensor - based on device's home rate
+            entities.append(MysaElectricityRateSensor(coordinator, device_id, device_data, api, entry))
 
         # === Network Diagnostic Sensors (all devices) ===
         # Network sensors (IP, MAC, SSID) are not reliably available via API
@@ -375,28 +378,33 @@ class MysaPowerSensor(CoordinatorEntity, SensorEntity):
         if not state:
             return None
 
+        # Check simulated energy flag
+        force_simulated = getattr(self._api, "simulated_energy", False)
+
         # 1. Try real data (Voltage * Current)
-        voltage = self._extract_value(state, ["Voltage", "LineVoltage"])
-        current = self._extract_value(state, ["Current"])
-        
-        if voltage and current:
-            try:
-                return round(float(voltage) * float(current), 1)
-            except (ValueError, TypeError):
-                pass
+        if not force_simulated:
+            voltage = self._extract_value(state, ["Voltage", "LineVoltage"])
+            current = self._extract_value(state, ["Current"])
+
+            if voltage and current:
+                try:
+                    return round(float(voltage) * float(current), 1)
+                except (ValueError, TypeError):
+                    pass
 
         # 2. Fallback to simulated data (Wattage * DutyCycle)
         safe_id = self._device_id.replace(":", "").lower()
         wattage = self._entry.options.get(f"wattage_{safe_id}", 0)
-        
+
         # If no per-device wattage, try old global setting (backward compat)
         if wattage == 0:
-             est_current = self._entry.options.get("estimated_max_current", 0)
-             # Default voltage to 240 if not reported
-             v_val = voltage if voltage else 240
-             try:
+            est_current = self._entry.options.get("estimated_max_current", 0)
+            # Default voltage to 240 if not reported
+            voltage = self._extract_value(state, ["Voltage", "LineVoltage"])
+            v_val = voltage if voltage else 240
+            try:
                 wattage = est_current * float(v_val)
-             except (ValueError, TypeError):
+            except (ValueError, TypeError):
                 wattage = 0
 
         if wattage > 0:
@@ -418,10 +426,16 @@ class MysaPowerSensor(CoordinatorEntity, SensorEntity):
         current = self._extract_value(state, ["Current"]) if state else None
         safe_id = self._device_id.replace(":", "").lower()
         wattage = self._entry.options.get(f"wattage_{safe_id}", 0)
-        
-        mode = "Real" if current is not None else "Simulated"
+        force_simulated = getattr(self._api, "simulated_energy", False)
+
+        mode = "Real"
+        if force_simulated:
+            mode = "Forced Simulated"
+        elif current is None:
+            mode = "Simulated"
+            
         attrs = {"tracking_mode": mode}
-        if mode == "Simulated":
+        if mode in ["Simulated", "Forced Simulated"]:
             attrs["configured_wattage"] = wattage
         return attrs
 
@@ -472,18 +486,22 @@ class MysaCurrentSensor(CoordinatorEntity, SensorEntity):
         if not state:
             return None
 
+        # Check simulated energy flag
+        force_simulated = getattr(self._api, "simulated_energy", False)
+
         # 1. Real current check (though this class is for when it's missing)
-        current = self._extract_value(state, ["Current"])
-        if current is not None:
-             try:
-                 return float(current)
-             except (ValueError, TypeError):
-                 pass
+        if not force_simulated:
+            current = self._extract_value(state, ["Current"])
+            if current is not None:
+                try:
+                    return float(current)
+                except (ValueError, TypeError):
+                    pass
 
         # 2. Simulated current
         safe_id = self._device_id.replace(":", "").lower()
         wattage = self._entry.options.get(f"wattage_{safe_id}", 0)
-        
+
         if wattage == 0:
             est_current = self._entry.options.get("estimated_max_current", 0)
             if est_current > 0:
@@ -522,10 +540,16 @@ class MysaCurrentSensor(CoordinatorEntity, SensorEntity):
         current = self._extract_value(state, ["Current"]) if state else None
         safe_id = self._device_id.replace(":", "").lower()
         wattage = self._entry.options.get(f"wattage_{safe_id}", 0)
-        
-        mode = "Real" if current is not None else "Simulated"
+        force_simulated = getattr(self._api, "simulated_energy", False)
+
+        mode = "Real"
+        if force_simulated:
+            mode = "Forced Simulated"
+        elif current is None:
+            mode = "Simulated"
+
         attrs = {"tracking_mode": mode}
-        if mode == "Simulated":
+        if mode in ["Simulated", "Forced Simulated"]:
             attrs["configured_wattage"] = wattage
         return attrs
 
@@ -577,14 +601,14 @@ class MysaEnergySensor(CoordinatorEntity, RestoreEntity, SensorEntity):
         if self._last_update is not None:
             # Time delta in hours
             diff = (now - self._last_update) / 3600.0
-            
+
             # Get current power (W)
             power = self._power_sensor.native_value
             if power is not None and power > 0:
                 # Energy (kWh) = (Power (W) / 1000) * Time (h)
                 added_energy = (power / 1000.0) * diff
                 self._attr_native_value = round(self._attr_native_value + added_energy, 4)
-        
+
         self._last_update = now
         self.async_write_ha_state()
 
@@ -595,3 +619,45 @@ class MysaEnergySensor(CoordinatorEntity, RestoreEntity, SensorEntity):
             "last_integration_time": self._last_update,
             "note": "Virtual Riemann sum integration of power sensor"
         }
+
+
+class MysaElectricityRateSensor(CoordinatorEntity, SensorEntity):
+    """Representation of the Electricity Rate for a device's home."""
+
+    def __init__(self, coordinator, device_id, device_data, api, entry):
+        """Initialize."""
+        super().__init__(coordinator)
+        self._device_id = device_id
+        self._api = api
+        self._entry = entry
+        self._device_data = device_data
+        self._attr_name = f"{device_data.get('Name', 'Mysa')} Electricity Rate"
+        self._attr_unique_id = f"{device_id}_electricity_rate"
+        # We use a generic currency/kWh unit. Since we don't know the currency,
+        # we try to be generic, or assume local currency units.
+        # But 'monetary' device class usually requires ISO currency code in unit?
+        # Actually 'monetary' is for total balance.
+        # Energy price is usually just invalid for device_class=monetary unless it is the total cost.
+        # We will use no device class, but provide the unit.
+        self._attr_native_unit_of_measurement = "$/kWh"  # Generic symbol per protocol
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        self._attr_icon = "mdi:currency-usd"
+
+    @property
+    def device_info(self):
+        """Return device info."""
+        return {
+            "identifiers": {(DOMAIN, self._device_id)},
+            "manufacturer": "Mysa",
+            "model": self._device_data.get("Model"),
+        }
+
+    @property
+    def native_value(self):
+        """Return the electricity rate."""
+        # Rate is static per home, but we fetch via API helper that checks mapping
+        rate = self._api.get_electricity_rate(self._device_id)
+        if rate is not None:
+            return rate
+        return None
