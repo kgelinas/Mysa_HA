@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 
 ## [0.8.2] - 2026-01-14
 ### Added
+- **Native Energy Entity**: Added a virtual Energy (kWh) sensor that tracks usage over time (Riemann sum integration) for all devices.
 - **Floor Temperature Sensor Support**: Added support for `flrSnsrTemp` key used by some Mysa In-Floor models.
 - **Infloor Sensor Enabled Default**: The "Infloor Temperature" sensor is now enabled by default for supported devices.
 - **100% Test Coverage**: Achieved full coverage for `climate.py` (AC logic), `mysa_api.py` (core logic), `sensor.py`, `config_flow.py`, `binary_sensor.py`, and `__init__.py`.
