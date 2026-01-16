@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import traceback
 from datetime import timedelta
 from functools import partial
 
@@ -28,6 +29,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         try:
             return await api.get_state()
         except Exception as e:
+
+            traceback.print_exc()
             raise UpdateFailed(f"Error communicating with API: {e}") from e
 
     coordinator = DataUpdateCoordinator(

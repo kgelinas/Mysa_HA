@@ -1653,7 +1653,7 @@ class TestSensorCoverage:
         mock_api = MagicMock()
         mock_api.simulated_energy = False
         sensor = MysaCurrentSensor(mock_coordinator, "device1", device_data, mock_api, mock_config_entry)
-        
+
         # Verify it returns 0.0 on ValueError/TypeError (lines 515-516 coverage)
         assert sensor.native_value == 0.0
 
@@ -1662,7 +1662,7 @@ class TestSensorCoverage:
         """Test missing coverage lines in sensor.py."""
         mock_api = MagicMock()
         mock_api.simulated_energy = False
-        
+
         # 1. Power Sensor ValueError (lines 392-393)
         node_data = {
             "device1": {
@@ -1672,7 +1672,7 @@ class TestSensorCoverage:
         }
         mock_coordinator.data = node_data
         device_data = {"Id": "dev1", "Name": "Test"}
-        
+
         sensor = MysaPowerSensor(mock_coordinator, "device1", device_data, mock_api, mock_config_entry)
         assert sensor.native_value == 0.0
 

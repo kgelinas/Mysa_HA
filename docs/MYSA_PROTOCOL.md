@@ -38,7 +38,7 @@ Mysa uses a non-standard AWS SigV4 signing implementation. The `X-Amz-Security-T
 
 Each device has three topics:
 - `/v1/dev/{device_id}/in` - Commands TO device
-- `/v1/dev/{device_id}/out` - State FROM device  
+- `/v1/dev/{device_id}/out` - State FROM device
 - `/v1/dev/{device_id}/batch` - Batch updates
 
 The `{device_id}` is the MAC address without colons, lowercase.

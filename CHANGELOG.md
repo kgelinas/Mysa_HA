@@ -102,7 +102,7 @@ All notable changes to this project will be documented in this file.
 ## [0.7.1] - 2026-01-09
 ### Added
 - **Auto-Zone Configuration**: Zones are now automatically fetched from the Mysa API and synced to Home Assistant areas. Manual zone configuration has been removed.
-- **Debug Tool Improvements**: 
+- **Debug Tool Improvements**:
   - Added device filtering to `sniff` command (e.g., `sniff 1` or `sniff <ID>`).
   - Added short aliases for commands (`ls`, `ex`, `?`).
   - Refactored help menu for better readability.

@@ -19,6 +19,7 @@ import os
 import time
 import getpass
 from datetime import datetime
+import requests
 
 # Add custom_components directory to path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -29,7 +30,7 @@ sys.path.insert(0, mysa_path)
 try:
     from mysa_auth import (
         login, auther,
-        REGION, IDENTITY_POOL_ID, CLIENT_HEADERS, BASE_URL,
+        REGION, CLIENT_HEADERS, BASE_URL,
     )
     from mysa_mqtt import (
         refresh_and_sign_url, MqttConnection,
@@ -50,7 +51,7 @@ except ImportError:
     HAS_PROMPT_TOOLKIT = False
     print("Note: Install prompt_toolkit for better input experience: pip install prompt_toolkit")
 
-import requests
+
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 _LOGGER = logging.getLogger(__name__)
@@ -100,7 +101,7 @@ class MysaDebugTool:
         # Try saved credentials
         if os.path.exists(self.auth_path):
             try:
-                with open(self.auth_path, 'r') as f:
+                with open(self.auth_path, 'r', encoding='utf-8') as f:
                     saved = json.load(f)
                 print(f"Using saved credentials from {self.auth_path}")
                 self.username = saved['username']
@@ -113,7 +114,8 @@ class MysaDebugTool:
                 # Get user ID
                 r = self.session.get(f"{BASE_URL}/users")
                 r.raise_for_status()
-                self.user_id = r.json().get("User", {}).get("Id", self._user_obj.id_claims['cognito:username'])
+                user_data = r.json().get("User", {})
+                self.user_id = user_data.get("Id", self._user_obj.id_claims['cognito:username'])
                 print(f"✓ Authenticated as {self.user_id[:8]}...")
                 return True
             except Exception as e:
@@ -131,10 +133,11 @@ class MysaDebugTool:
 
             r = self.session.get(f"{BASE_URL}/users")
             r.raise_for_status()
-            self.user_id = r.json().get("User", {}).get("Id", self._user_obj.id_claims['cognito:username'])
+            user_data = r.json().get("User", {})
+            self.user_id = user_data.get("Id", self._user_obj.id_claims['cognito:username'])
 
             # Save credentials
-            with open(self.auth_path, 'w') as f:
+            with open(self.auth_path, 'w', encoding='utf-8') as f:
                 json.dump({'username': self.username, 'password': self.password}, f)
             os.chmod(self.auth_path, 0o600)
             print(f"✓ Authenticated and saved to {self.auth_path}")
@@ -184,54 +187,63 @@ class MysaDebugTool:
                     continue
 
                 cmd = parts[0].lower()
-
-                if cmd in ('q', 'quit', 'exit'):
-                    print("Goodbye!")
+                if not await self._handle_command(cmd, parts):
                     return
-                elif cmd in ('ls', 'list'):
-                    self.list_devices()
-                elif cmd == 'sniff':
-                    if len(parts) > 1:
-                         # Filter mode
-                         target = self._resolve_device(parts[1])
-                         if target:
-                             self.sniff_mode = True
-                             self.sniff_filter = target
-                             print(f"Sniff Mode: ON (Filtered to {target})")
-                         else:
-                             print(f"Invalid device ref: {parts[1]}")
-                    else:
-                        # Toggle global
-                        if self.sniff_mode and self.sniff_filter:
-                            # If filtered, clear filter but keep sniff on (or toggle off? context dependent)
-                            # User expectation: 'sniff' toggles.
-                            self.sniff_mode = False
-                            self.sniff_filter = None
-                            print("Sniff Mode: OFF")
-                        else:
-                            self.sniff_mode = not self.sniff_mode
-                            self.sniff_filter = None
-                            print(f"Sniff Mode: {'ON' if self.sniff_mode else 'OFF'}")
-                elif cmd in ('examples', 'ex'):
-                    self.show_examples()
-                elif cmd in ('help', '?'):
-                    self.print_help()
-                elif cmd == 'advanced':
-                    await self.advanced_menu()
-                elif cmd == 'homes':
-                    await self.show_homes()
-                elif cmd == 'users':
-                    await self.show_users()
-                elif cmd == 'http' and len(parts) >= 3:
-                    await self.send_http(parts[1], parts[2])
-                elif cmd == 'mqtt' and len(parts) >= 3:
-                    await self.send_mqtt_raw(parts[1], parts[2])
-                elif cmd == 'state' and len(parts) >= 2:
-                    await self.show_state(parts[1])
-                else:
-                    print("Unknown command. Type 'help' or 'ex' for available commands.")
             except Exception as e:
                 print(f"Error: {e}")
+
+    async def _handle_command(self, cmd, parts):
+        """Handle parsed command."""
+        if cmd in ('q', 'quit', 'exit'):
+            print("Goodbye!")
+            return False
+
+        if cmd in ('ls', 'list'):
+            self.list_devices()
+        elif cmd == 'sniff':
+            self._handle_sniff(parts)
+        elif cmd in ('examples', 'ex'):
+            self.show_examples()
+        elif cmd in ('help', '?'):
+            self.print_help()
+        elif cmd == 'advanced':
+            await self.advanced_menu()
+        elif cmd == 'homes':
+            await self.show_homes()
+        elif cmd == 'users':
+            await self.show_users()
+        elif cmd == 'http' and len(parts) >= 3:
+            await self.send_http(parts[1], parts[2])
+        elif cmd == 'mqtt' and len(parts) >= 3:
+            await self.send_mqtt_raw(parts[1], parts[2])
+        elif cmd == 'state' and len(parts) >= 2:
+            await self.show_state(parts[1])
+        else:
+            print("Unknown command. Type 'help' or 'ex' for available commands.")
+
+        return True
+
+    def _handle_sniff(self, parts):
+        """Handle sniff command."""
+        if len(parts) > 1:
+            # Filter mode
+            target = self._resolve_device(parts[1])
+            if target:
+                self.sniff_mode = True
+                self.sniff_filter = target
+                print(f"Sniff Mode: ON (Filtered to {target})")
+            else:
+                print(f"Invalid device ref: {parts[1]}")
+        else:
+            # Toggle global
+            if self.sniff_mode and self.sniff_filter:
+                self.sniff_mode = False
+                self.sniff_filter = None
+                print("Sniff Mode: OFF")
+            else:
+                self.sniff_mode = not self.sniff_mode
+                self.sniff_filter = None
+                print(f"Sniff Mode: {'ON' if self.sniff_mode else 'OFF'}")
 
     def print_help(self):
         """Print available commands."""
@@ -304,27 +316,31 @@ class MysaDebugTool:
 
             # Extract key user info
             user = data.get('User', data.get('user', {}))
-            if user:
-                cognito = user.get('CognitoAttrs', {})
-                print("\n--- User Info ---")
-                print(f"  User ID: {user.get('Id', 'Unknown')}")
-                print(f"  Email: {cognito.get('email', 'Unknown')}")
-                print(f"  Name: {cognito.get('name', cognito.get('given_name', '') + ' ' + cognito.get('family_name', ''))}")
-                print(f"  Language: {user.get('LanguagePreference', 'Unknown')}")
-                print(f"  Primary Home: {user.get('PrimaryHome', 'Unknown')}")
-                print(f"  ERate: ${user.get('ERate', 'N/A')}/kWh")
-                print(f"  App Version: {user.get('LastAppVersion', 'Unknown')}")
+            if not user:
+                return
 
-                # DevicesPaired summary
-                paired = user.get('DevicesPaired', {}).get('State', {})
-                if paired:
-                    print("\n--- Paired Devices ---")
-                    for category, devices in paired.items():
-                        if devices:
-                            print(f"  {category}:")
-                            for did, info in devices.items():
-                                dtype = info.get('deviceType', 'Unknown')
-                                print(f"    • {did}: {dtype}")
+            cognito = user.get('CognitoAttrs', {})
+            print("\n--- User Info ---")
+            print(f"  User ID: {user.get('Id', 'Unknown')}")
+            given = cognito.get('given_name', '')
+            family = cognito.get('family_name', '')
+            full_name = cognito.get('name', f"{given} {family}")
+            print(f"  Name: {full_name}")
+            print(f"  Language: {user.get('LanguagePreference', 'Unknown')}")
+            print(f"  Primary Home: {user.get('PrimaryHome', 'Unknown')}")
+            print(f"  ERate: ${user.get('ERate', 'N/A')}/kWh")
+            print(f"  App Version: {user.get('LastAppVersion', 'Unknown')}")
+
+            # DevicesPaired summary
+            paired = user.get('DevicesPaired', {}).get('State', {})
+            if paired:
+                print("\n--- Paired Devices ---")
+                for category, devices in paired.items():
+                    if devices:
+                        print(f"  {category}:")
+                        for did, info in devices.items():
+                            dtype = info.get('deviceType', 'Unknown')
+                            print(f"    • {did}: {dtype}")
         except Exception as e:
             print(f"Failed to fetch /users: {e}")
 
@@ -393,7 +409,7 @@ class MysaDebugTool:
 
         print(f"\n🎯 Target: {device.get('Name', 'Unknown')} ({did})")
         print(f"   Current Model: {old_model}")
-        print(f"   New Model: BB-V2-0")
+        print("   New Model: BB-V2-0")
 
         confirm = input("\n⚠️  Type 'YES I UNDERSTAND' to proceed: ").strip()
         if confirm != 'YES I UNDERSTAND':
@@ -459,10 +475,9 @@ class MysaDebugTool:
             return
 
         # Build killer ping payload
-        import time as time_module
         payload = {
             "Device": did,
-            "Timestamp": int(time_module.time()),
+            "Timestamp": int(time.time()),
             "MsgType": 5,
             "EchoID": 1
         }
@@ -471,7 +486,9 @@ class MysaDebugTool:
         topic = f"/v1/dev/{did.replace(':', '').lower()}/in"
 
         try:
-            pub_pkt = mqtt.publish(topic, False, 1, False, packet_id=99, payload=json.dumps(payload).encode())
+            pub_pkt = mqtt.publish(
+                topic, False, 1, False, packet_id=99, payload=json.dumps(payload).encode()
+            )
             await self.ws.send(pub_pkt)
 
             print("\n" + "="*60)
@@ -514,7 +531,8 @@ class MysaDebugTool:
         print("       ^ Lock buttons (lk: 0=Unlock, 1=Lock)")
         print(f'  mqtt {did} {{"cmd":[{{"pr":1,"tm":-1}}],"type":4,"ver":1}}')
         print("       ^ Proximity mode (pr: 0=Off, 1=On)")
-        print(f'  mqtt {did} {{"cmd":[{{"tm":-1,"br":{{"a_b":1,"a_br":100,"i_br":50,"a_dr":60,"i_dr":30}}}}],"type":4,"ver":1}}')
+        print(f'  mqtt {did} {{"cmd":[{{"tm":-1,"br":{{"a_b":1,"a_br":100,"i_br":50,'
+              f'"a_dr":60,"i_dr":30}}}}],"type":4,"ver":1}}')
         print("       ^ Brightness (a_b=auto, a_br=active%, i_br=idle%, a_dr/i_dr=duration)")
 
         print("\n--- MQTT AC Examples (type=2 for AC-V1) ---")
@@ -621,7 +639,9 @@ class MysaDebugTool:
         print(f"Body: {json.dumps(body, indent=2)}")
 
         try:
-            pub_pkt = mqtt.publish(topic, False, 1, False, packet_id=2, payload=json_payload.encode())
+            pub_pkt = mqtt.publish(
+                topic, False, 1, False, packet_id=2, payload=json_payload.encode()
+            )
             await self.ws.send(pub_pkt)
             print("✓ Sent!")
         except Exception as e:
@@ -642,7 +662,9 @@ class MysaDebugTool:
         safe_did = did.replace(":", "").lower()
         topic = f"/v1/dev/{safe_did}/in"
         try:
-            pub_pkt = mqtt.publish(topic, False, 1, False, packet_id=3, payload=json.dumps(body).encode())
+            pub_pkt = mqtt.publish(
+                topic, False, 1, False, packet_id=3, payload=json.dumps(body).encode()
+            )
             await self.ws.send(pub_pkt)
         except Exception:
             pass  # Notification is best-effort
@@ -721,8 +743,9 @@ class MysaDebugTool:
         try:
             payload = json.loads(pkt.payload)
             msg_type = payload.get('msg') or payload.get('MsgType')
-            print(f"\n[{timestamp}] [SNIFF {arrow}] MsgType {msg_type}: {json.dumps(payload, indent=2)}")
-        except:
+            print(f"\n[{timestamp}] [SNIFF {arrow}] MsgType {msg_type}: "
+                  f"{json.dumps(payload, indent=2)}")
+        except Exception:
             print(f"\n[{timestamp}] [SNIFF {arrow}] {pkt.payload.decode(errors='ignore')}")
 
 

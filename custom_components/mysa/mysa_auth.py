@@ -7,22 +7,23 @@ Handles Cognito authentication, token management, and MQTT URL signing.
 Based on mysotherm (https://github.com/dlenski/mysotherm) by @dlenski
 """
 from __future__ import annotations
+# pylint: disable=line-too-long
 import os
 import logging
 from functools import wraps
 from time import time
 from typing import Optional, Any, cast
 
-import requests  # type: ignore[import-untyped]
-
 # boto3 wastes 1 second trying to connect to EC2 metadata unless disabled
 os.environ['AWS_EC2_METADATA_DISABLED'] = 'true'
-# TODO: Refactor imports to standard position
+
+# pylint: disable=wrong-import-position
+import requests  # type: ignore[import-untyped]
 import boto3
 import botocore
-import botocore.credentials
 import botocore.auth
 import botocore.awsrequest
+import botocore.credentials
 import pycognito
 import pycognito.exceptions
 
@@ -36,7 +37,26 @@ _LOGGER = logging.getLogger(__name__)
 REGION = 'us-east-1'
 """Region for Mysa AWS infrastructure"""
 
-JWKS = {"keys":[{"alg":"RS256","e":"AQAB","kid":"udQ2TtD4g3Jc3dORobozGYu/T3qqcCtJonq0dwcrF8g=","kty":"RSA","n":"pwNwcNWr0CWijS_RlmooyzRq5Ud5GBDXKiTtS_4TV9MkXmxctKwiLFa_wnWsPw2B_RyQ6aY06de1qzylabuGcDQBpWFjmSWBoMiAFa2Facbhr4RnElLrs5MZTI3KZPVQlQaL0vvOERWC-3qe3HIG3EeaPyciSXS4aB2ldZCdLd2vtVJNwlzroqKiptXay9AeyQwiF6Tk2CXq4XZ3bcC5sFl53XjofoXXyZCrkBDjHBppE9Rhm0aw7u3DSozPbkiAEK-x92xQZ-Ymrl1eTLL4J08KiBdog2gVWYJqM9DdJ1T0rTBNXxNKgpnP9M83KnN8ViRgayBfLlyLpOOFaFK5lw","use":"sig"},{"alg":"RS256","e":"AQAB","kid":"f5vP7g+ehnb4PP+90i1WVsnUNfccQZVReBmaRvrHga0=","kty":"RSA","n":"nKGdPVq3wzz8Cy8tLwZ7OP44avSrNf-fcvqLV-lRG-9ziZavn4L7an2KZy_MDmdxBSekVDUoERAJNhNRlLFVRt_ialnUwkuZw0hkzeVyRT50-jE1bieF4I_zjOm7t_QhJTMoLG2KuDZcaGZa5RpDXZJGwPGKxcFjpH_VwgxFDwlTYPc2BjofuW8OwKNdm1CMNstG94pxGZoRuak_wd3Sg20DXH1c43kmHCiy4Ish-3oVHYMhVNv-pra02HXr-fJv8Rd7E0nVfw_Iki8MfWE6C5NunMCx74rigHbMMKZrzQtnB4EdxlcqZWjkC_5Qd1AhM6-gYchXMCKq18COrPPR1w","use":"sig"}]}  # TODO: Break long line
+JWKS = {
+    "keys": [
+        {
+            "alg": "RS256",
+            "e": "AQAB",
+            "kid": "udQ2TtD4g3Jc3dORobozGYu/T3qqcCtJonq0dwcrF8g=",
+            "kty": "RSA",
+            "n": "pwNwcNWr0CWijS_RlmooyzRq5Ud5GBDXKiTtS_4TV9MkXmxctKwiLFa_wnWsPw2B_RyQ6aY06de1qzylabuGcDQBpWFjmSWBoMiAFa2Facbhr4RnElLrs5MZTI3KZPVQlQaL0vvOERWC-3qe3HIG3EeaPyciSXS4aB2ldZCdLd2vtVJNwlzroqKiptXay9AeyQwiF6Tk2CXq4XZ3bcC5sFl53XjofoXXyZCrkBDjHBppE9Rhm0aw7u3DSozPbkiAEK-x92xQZ-Ymrl1eTLL4J08KiBdog2gVWYJqM9DdJ1T0rTBNXxNKgpnP9M83KnN8ViRgayBfLlyLpOOFaFK5lw",
+            "use": "sig"
+        },
+        {
+            "alg": "RS256",
+            "e": "AQAB",
+            "kid": "f5vP7g+ehnb4PP+90i1WVsnUNfccQZVReBmaRvrHga0=",
+            "kty": "RSA",
+            "n": "nKGdPVq3wzz8Cy8tLwZ7OP44avSrNf-fcvqLV-lRG-9ziZavn4L7an2KZy_MDmdxBSekVDUoERAJNhNRlLFVRt_ialnUwkuZw0hkzeVyRT50-jE1bieF4I_zjOm7t_QhJTMoLG2KuDZcaGZa5RpDXZJGwPGKxcFjpH_VwgxFDwlTYPc2BjofuW8OwKNdm1CMNstG94pxGZoRuak_wd3Sg20DXH1c43kmHCiy4Ish-3oVHYMhVNv-pra02HXr-fJv8Rd7E0nVfw_Iki8MfWE6C5NunMCx74rigHbMMKZrzQtnB4EdxlcqZWjkC_5Qd1AhM6-gYchXMCKq18COrPPR1w",
+            "use": "sig"
+        }
+    ]
+}
 """Well-known JWKs for Mysa's Cognito IDP user pool (cached)"""
 
 USER_POOL_ID = "us-east-1_GUFWfhI7g"
@@ -102,7 +122,6 @@ class Cognito(pycognito.Cognito):
             client = self._session.client('cognito-identity', region_name=region)
         else:
             client = boto3.client('cognito-identity', region_name=region)
-        
         # Cast to Any because Pyrefly doesn't know specific service methods
         client = cast(Any, client)
 

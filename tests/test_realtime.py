@@ -450,4 +450,3 @@ class TestMysaRealtime:
         with patch("custom_components.mysa.realtime.connect_websocket", side_effect=Exception("Fail")):
             await rt.send_command("d", {}, "u")
             # Should not raise
-

@@ -153,6 +153,7 @@ def publish(  # TODO: Refactor to reduce arguments
     packet_id: Optional[int] = None
 ) -> bytes:
     """Create a PUBLISH packet."""
+    # pylint: disable=too-many-arguments,too-many-positional-arguments
     if qos > 0 and packet_id is None:
         raise ValueError('QoS > 0 requires a packet_id')
 

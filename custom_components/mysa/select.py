@@ -7,6 +7,7 @@ import time
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -42,16 +43,17 @@ async def async_setup_entry(
         async_add_entities(entities)
 
 
-class MysaHorizontalSwingSelect(
-    CoordinatorEntity, SelectEntity
-):  # TODO: Refactor MysaHorizontalSwingSelect to reduce instance attributes, duplicate code, and implement abstract methods
-    """Select entity for AC horizontal swing position."""
+class MysaHorizontalSwingSelect(CoordinatorEntity, SelectEntity):
+    """Select entity for AC horizontal swing position.
+
+    TODO: Refactor MysaHorizontalSwingSelect to reduce instance attributes,
+    duplicate code, and implement abstract methods.
+    """
 
     _attr_icon = "mdi:arrow-left-right"
 
-    def __init__(  # TODO: Refactor __init__ to reduce arguments
-        self, coordinator, device_id, device_data, api, entry
-    ):
+    def __init__(self, coordinator, device_id, device_data, api, entry):
+        # TODO: Refactor __init__ to reduce arguments
         """Initialize."""
         super().__init__(coordinator)
         self._device_id = device_id
@@ -91,20 +93,18 @@ class MysaHorizontalSwingSelect(
         )
 
     @property
-    def device_info(self):
+    def device_info(self) -> DeviceInfo:
         """Return device info."""
         state = self.coordinator.data.get(self._device_id)
         zone_id = state.get("Zone") if state else None
         zone_name = self._entry.options.get(f"zone_name_{zone_id}") if zone_id else None
 
-        info = {
-            "identifiers": {(DOMAIN, self._device_id)},
-            "manufacturer": "Mysa",
-            "model": self._device_data.get("Model"),
-        }
-        if zone_name:
-            info["suggested_area"] = zone_name
-        return info
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._device_id)},
+            manufacturer="Mysa",
+            model=self._device_data.get("Model"),
+            suggested_area=zone_name,
+        )
 
     @property
     def options(self) -> list[str]:

@@ -7,13 +7,8 @@ Tests for custom_components/mysa/binary_sensor.py
 import sys
 import os
 
-# Add project root to path for imports
-TEST_DIR = os.path.dirname(os.path.abspath(__file__))
-ROOT_DIR = os.path.dirname(TEST_DIR)
-sys.path.insert(0, ROOT_DIR)
-
-import pytest
 from unittest.mock import MagicMock, AsyncMock
+import pytest
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 from homeassistant.const import EntityCategory
@@ -23,6 +18,12 @@ from custom_components.mysa.binary_sensor import (
     async_setup_entry,
     MysaConnectionSensor,
 )
+
+# Add project root to path for imports
+TEST_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.dirname(TEST_DIR)
+sys.path.insert(0, ROOT_DIR)
+
 
 @pytest.fixture
 def mock_coordinator(hass, mock_config_entry):
@@ -65,14 +66,16 @@ class TestMysaBinarySensor:
         }
 
         entities = []
-        async_add_entities = MagicMock(side_effect=lambda e: entities.extend(e))
+        async_add_entities = MagicMock(side_effect=entities.extend)
 
         await async_setup_entry(hass, mock_config_entry, async_add_entities)
 
         assert len(entities) == 2
         assert isinstance(entities[0], MysaConnectionSensor)
 
-    async def test_sensor_attributes(self, hass, mock_coordinator):
+    async def test_sensor_attributes(
+        self, hass, mock_coordinator  # pylint: disable=unused-argument
+    ):
         """Test sensor status attributes."""
         await mock_coordinator.async_refresh()
 
@@ -90,7 +93,9 @@ class TestMysaBinarySensor:
         assert info["model"] == "BB-V2"
         assert info["name"] == "Test Device"
 
-    async def test_is_on_state(self, hass, mock_coordinator):
+    async def test_is_on_state(
+        self, hass, mock_coordinator  # pylint: disable=unused-argument
+    ):
         """Test is_on property based on Connected state."""
         await mock_coordinator.async_refresh()
 
@@ -110,7 +115,11 @@ class TestMysaBinarySensor:
             return {} # Empty data
 
         coordinator = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_config_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_config_entry
         )
         await coordinator.async_refresh()
 

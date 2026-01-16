@@ -38,7 +38,10 @@ async def async_setup_entry(
     async_add_entities(entities, update_before_add=True)
 
 
-class MysaUpdate(UpdateEntity):  # TODO: Refactor MysaUpdate to implement abstract methods, reduce instance attributes and duplicate code
+class MysaUpdate(
+    UpdateEntity
+):  # TODO: Refactor MysaUpdate to implement abstract methods...
+    # pylint: disable=too-many-instance-attributes
     """Mysa Firmware Update Entity."""
 
     _attr_device_class = UpdateDeviceClass.FIRMWARE
@@ -92,5 +95,5 @@ class MysaUpdate(UpdateEntity):  # TODO: Refactor MysaUpdate to implement abstra
                 )
 
 
-        except Exception as e:  # TODO: Catch specific exceptions instead of Exception
+        except Exception as e:
             _LOGGER.warning("Error fetching firmware info: %s", e)

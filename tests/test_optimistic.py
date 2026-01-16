@@ -247,4 +247,3 @@ class TestCoverageEdgeCases:
         mock_coordinator.data = {"device1": {"md": 3}} # Heat
         assert entity.hvac_mode == HVACMode.HEAT
         assert "hvac_mode" not in entity._pending_updates
-

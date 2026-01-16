@@ -4,8 +4,11 @@ DataUpdateCoordinator Tests.
 Simple tests for coordinator patterns using real DataUpdateCoordinator.
 """
 
-import sys
+import asyncio
 import os
+import sys
+from datetime import timedelta
+from unittest.mock import MagicMock, AsyncMock, patch
 
 # Add project root to path for imports
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -13,11 +16,10 @@ ROOT_DIR = os.path.dirname(TEST_DIR)
 sys.path.insert(0, ROOT_DIR)
 
 import pytest
-from unittest.mock import MagicMock, AsyncMock
-from datetime import timedelta
 
 # Module-level imports
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from custom_components.mysa.mysa_api import MysaApi
 
 
 class TestCoordinatorSetup:
@@ -1056,16 +1058,6 @@ class TestDeviceFeaturesMatrix:
 
 # --- From test_async.py ---
 
-ROOT_DIR = os.path.dirname(TEST_DIR)
-sys.path.insert(0, ROOT_DIR)
-
-import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
-import asyncio
-
-# Module-level import after path setup
-from custom_components.mysa.mysa_api import MysaApi
-
 
 class TestAsyncPatterns:
     """Test basic async patterns."""
@@ -1225,7 +1217,7 @@ class TestMysaApiAsyncMocking:
         # We need to look through all calls because notify_settings_changed is called after
         found_cmd = False
         for call in api.realtime.send_command.call_args_list:
-            args, kwargs = call
+            args, _kwargs = call
             body = args[1]
             if "cmd" in body:
                 found_cmd = True

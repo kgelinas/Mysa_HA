@@ -32,6 +32,7 @@ class MysaClient:
         self.devices = {}
         self.homes = []
         self.zones = {}
+        self.zone_to_home = {}
         self.device_to_home = {}
         self.home_rates = {}
         self._last_command_time = {} # Shared state need? Probably passed from top level
@@ -130,7 +131,8 @@ class MysaClient:
         r = self._session.get(url)
         r.raise_for_status()
 
-        devices_raw = r.json().get('DevicesObj', [])
+        json_resp = r.json()
+        devices_raw = json_resp.get('DevicesObj', json_resp.get('Devices', []))
         if isinstance(devices_raw, list):
             self.devices = {d['Id']: d for d in devices_raw}
         else:
@@ -161,6 +163,7 @@ class MysaClient:
         self.homes = data.get('Homes', data.get('homes', []))
 
         self.zones = {}
+        self.zone_to_home = {}
         self.device_to_home = {}
         self.home_rates = {}
 
@@ -180,7 +183,9 @@ class MysaClient:
                 if z_id:
                     if z_name:
                         self.zones[z_id] = z_name
-                    # Map Devices in this zone to this home
+                    # Map zone to home for reverse lookup
+                    self.zone_to_home[z_id] = h_id
+                    # Map Devices in this zone to this home (if available)
                     for d_id in zone.get('DeviceIds', []):
                         self.device_to_home[d_id] = h_id
 
@@ -195,11 +200,13 @@ class MysaClient:
         # Check explicit device mapping first (from Zone->DeviceIds)
         home_id = self.device_to_home.get(device_id)
 
-        # Fallback: If device not found in mapping, try to find it via its current Zone setting
+        # Fallback: Find home via device's Zone setting
         if not home_id and device_id in self.devices:
-            # We would need the device's current state to know its zone
-            # This is a best effort without circular dependency on state if not passed in
-            pass
+            device = self.devices[device_id]
+            # Check device's Zone attribute
+            zone_id = device.get('Zone')
+            if zone_id:
+                home_id = self.zone_to_home.get(zone_id)
 
         if home_id:
             return self.home_rates.get(home_id)
@@ -268,11 +275,10 @@ class MysaClient:
 
             MysaDeviceLogic.normalize_state(new_data)
 
-            # Since we are returning the fulll new state for the coordinator to merge,
-            # we don't necessarily need to check _last_command_time here if the coordinator does it.
-            # But the logic was embedded here. Let's return the simplified merge and let caller handle staleness
-            # OR handle it here if we pass the timestamp dict.
-            # To keep it simple, we return the fresh HTTP state. The coordinator/api class will decide whether to overwrite MQTT state.
+            # Since we are returning the full new state for the coordinator to merge,
+            # we don't necessarily need to check _last_command_time here.
+            # Let's return the simplified merge and let caller handle staleness.
+            # The coordinator/api class will decide whether to overwrite MQTT state.
 
             result_states[device_id] = new_data
 

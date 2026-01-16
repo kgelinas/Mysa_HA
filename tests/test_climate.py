@@ -724,6 +724,26 @@ class TestClimateEdgeCases:
 
         assert value == "zone123"
 
+    @pytest.mark.asyncio
+    async def test_hvac_mode_sticky_value_invalid(
+        self, hass, mock_coordinator, mock_device_data, mock_api, mock_entry
+    ):
+        """Test hvac_mode handles invalid sticky value gracefully (lines 235-236)."""
+        from custom_components.mysa.climate import MysaClimate
+
+        await mock_coordinator.async_refresh()
+
+        entity = MysaClimate(
+            mock_coordinator, "device1", mock_device_data, mock_api, mock_entry
+        )
+
+        # Set an invalid sticky value that will cause ValueError when converting to HVACMode
+        entity._pending_updates["hvac_mode"] = {"value": "invalid_mode_value", "ts": 9999999999}
+
+        # Should not raise, should return the original result instead
+        mode = entity.hvac_mode
+        assert mode in [HVACMode.HEAT, HVACMode.OFF]  # Should fall back
+
 
 class TestACClimateEdgeCases:
     """Test AC climate edge cases."""
@@ -927,6 +947,62 @@ class TestACClimateEdgeCases:
         assert entity.hvac_mode == HVACMode.OFF
         assert entity.fan_mode == "auto"
         assert entity.swing_mode == "auto"
+
+    @pytest.mark.asyncio
+    async def test_ac_hvac_mode_invalid_mode_id(
+        self, hass, mock_ac_device_data, mock_api, mock_entry
+    ):
+        """Test AC hvac_mode handles invalid mode_id (lines 413-414)."""
+
+        async def async_update():
+            return {
+                "ac_invalid": {
+                    "md": "not_a_number",  # Invalid mode_id that will raise ValueError
+                    "ambTemp": 22.0,
+                }
+            }
+
+        coordinator = DataUpdateCoordinator(
+            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+        )
+        await coordinator.async_refresh()
+
+        from custom_components.mysa.climate import MysaACClimate
+
+        entity = MysaACClimate(
+            coordinator, "ac_invalid", mock_ac_device_data, mock_api, mock_entry
+        )
+
+        # Should return OFF when mode_id conversion fails
+        assert entity.hvac_mode == HVACMode.OFF
+
+    @pytest.mark.asyncio
+    async def test_ac_hvac_mode_none_mode_id(
+        self, hass, mock_ac_device_data, mock_api, mock_entry
+    ):
+        """Test AC hvac_mode when mode_id is None (line 416)."""
+
+        async def async_update():
+            return {
+                "ac_no_mode": {
+                    "ambTemp": 22.0,
+                    # No 'md' or 'Mode' key - mode_id will be None
+                }
+            }
+
+        coordinator = DataUpdateCoordinator(
+            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+        )
+        await coordinator.async_refresh()
+
+        from custom_components.mysa.climate import MysaACClimate
+
+        entity = MysaACClimate(
+            coordinator, "ac_no_mode", mock_ac_device_data, mock_api, mock_entry
+        )
+
+        # Should return OFF when mode_id is None
+        assert entity.hvac_mode == HVACMode.OFF
 
 
 class TestClimateExceptionHandling:

@@ -213,13 +213,13 @@ class TestMysaClient:
         assert client.get_electricity_rate("unknown") is None
         # Invalid rate should simply result in nothing (or strict Home lookup returning None)
         # We don't have a device under h2, so no direct check unless we map one
-        
+
     async def test_get_electricity_rate_fallback(self, mock_hass):
         """Test get_electricity_rate fallback path."""
         client = MysaClient(mock_hass, "u", "p")
         # Device exists but is not mapped to a home
         client.devices = {"d_fallback": {"Id": "d_fallback"}}
-        
+
         # This hits line 204: if not home_id and device_id in self.devices: pass
         rate = client.get_electricity_rate("d_fallback")
         assert rate is None
