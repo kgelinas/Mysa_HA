@@ -12,7 +12,7 @@ _LOGGER = logging.getLogger(__name__)
 class MysaApi:
     """Mysa API Client."""
 
-    # pylint: disable=too-many-arguments, too-many-public-methods, too-many-instance-attributes
+    # pylint: disable=too-many-arguments, too-many-public-methods, too-many-instance-attributes, too-many-positional-arguments
     def __init__(
         self,
         username,
@@ -386,7 +386,9 @@ class MysaApi:
         body = {"cmd": [{"ssh": position, "tm": -1}], "type": payload_type, "ver": 1}
         await self.realtime.send_command(device_id, body, self.client.user_id)
 
-        self._update_state_cache(device_id, {"SwingStateHorizontal": {"v": position}, "ssh": position})
+        self._update_state_cache(
+            device_id, {"SwingStateHorizontal": {"v": position}, "ssh": position}
+        )
         self._last_command_time[device_id] = time.time() # why twice? preserved from original
         await self.notify_settings_changed(device_id)
 

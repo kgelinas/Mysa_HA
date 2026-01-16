@@ -1,4 +1,5 @@
 """Sensor platform for Mysa."""
+# pylint: disable=too-many-branches
 import logging
 import time
 from homeassistant.components.sensor import (
@@ -19,13 +20,14 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.entity import DeviceInfo
 
 from .const import DOMAIN
 
 
 _LOGGER = logging.getLogger(__name__)
 
-# TODO: Refactor async_setup_entry to reduce number of locals
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -44,6 +46,7 @@ async def async_setup_entry(
     entities: list[SensorEntity] = []
     for device_id, device_data in devices.items():
         is_ac = api.is_ac_device(device_id)
+        state = {}
 
         # Zone Name Sensor (all devices)
         entities.append(MysaZoneSensor(coordinator, device_id, device_data, api))
@@ -103,7 +106,6 @@ async def async_setup_entry(
                 )
             )
             state = coordinator.data.get(device_id, {})
-            state = coordinator.data.get(device_id, {})
 
             # HeatSink (heating only)
             if "HeatSink" in state:
@@ -149,14 +151,18 @@ async def async_setup_entry(
             entities.append(power_sensor)
 
             # Virtual Energy Sensor (kWh)
-            entities.append(MysaEnergySensor(coordinator, device_id, device_data, api, entry, power_sensor))
+            entities.append(
+                MysaEnergySensor(coordinator, device_id, device_data, api, entry, power_sensor)
+            )
 
             # If current wasn't added as a diagnostic sensor (e.g. Lite), add it as simulated
             if "Current" not in state:
                 entities.append(MysaCurrentSensor(coordinator, device_id, device_data, api, entry))
 
             # Electricity Rate (Cost) Sensor - based on device's home rate
-            entities.append(MysaElectricityRateSensor(coordinator, device_id, device_data, api, entry))
+            entities.append(
+                MysaElectricityRateSensor(coordinator, device_id, device_data, api, entry)
+            )
 
         # === Network Diagnostic Sensors (all devices) ===
         # Network sensors (IP, MAC, SSID) are not reliably available via API
@@ -165,11 +171,11 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 class MysaDiagnosticSensor(
-    CoordinatorEntity, SensorEntity
-):  # TODO: Refactor MysaDiagnosticSensor to reduce instance attributes and duplicate code
+    SensorEntity, CoordinatorEntity
+):
     """Representation of a Mysa Diagnostic Sensor."""
 
-    def __init__(  # TODO: Refactor __init__ to reduce arguments
+    def __init__(
         self, coordinator, device_id, device_data, sensor_key, name_suffix,
         unit, state_class, device_class, entry
     ):
@@ -194,16 +200,16 @@ class MysaDiagnosticSensor(
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
             self._attr_entity_registry_enabled_default = False
     @property
-    def device_info(self):
+    def device_info(self) -> DeviceInfo:
         """Return device info."""
         state = self.coordinator.data.get(self._device_id)
         zone_id = state.get("Zone") if state else None
         zone_name = self._entry.options.get(f"zone_name_{zone_id}") if zone_id else None
-        info = {
-            "identifiers": {(DOMAIN, self._device_id)},
-            "manufacturer": "Mysa",
-            "model": self._device_data.get("Model"),
-        }
+        info = DeviceInfo(
+            identifiers={(DOMAIN, self._device_id)},
+            manufacturer="Mysa",
+            model=self._device_data.get("Model"),
+        )
         if zone_name:
             info["suggested_area"] = zone_name
         return info
@@ -222,7 +228,7 @@ class MysaDiagnosticSensor(
 
     @property
     def native_value(self):
-        """Return the state of the sensor."""  # TODO: Refactor to reduce branches
+        """Return the state of the sensor."""
         state = self.coordinator.data.get(self._device_id)
         if not state:
             return None
@@ -282,7 +288,7 @@ class MysaDiagnosticSensor(
                 return val
         return None
 
-class MysaZoneSensor(CoordinatorEntity, SensorEntity):
+class MysaZoneSensor(SensorEntity, CoordinatorEntity):
     """Representation of a Mysa Zone Sensor."""
 
     def __init__(self, coordinator, device_id, device_data, api):
@@ -295,17 +301,17 @@ class MysaZoneSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{device_id}_zone"
 
     @property
-    def device_info(self):
+    def device_info(self) -> DeviceInfo:
         """Return device info."""
         state = self.coordinator.data.get(self._device_id)
         zone_id = state.get("Zone") if state else None
         zone_name = self._api.get_zone_name(zone_id) if zone_id else None
 
-        info = {
-            "identifiers": {(DOMAIN, self._device_id)},
-            "manufacturer": "Mysa",
-            "model": self._device_data.get("Model"),
-        }
+        info = DeviceInfo(
+            identifiers={(DOMAIN, self._device_id)},
+            manufacturer="Mysa",
+            model=self._device_data.get("Model"),
+        )
         if zone_name:
             info["suggested_area"] = zone_name
         return info
@@ -333,7 +339,7 @@ class MysaZoneSensor(CoordinatorEntity, SensorEntity):
         }
 
 
-class MysaPowerSensor(CoordinatorEntity, SensorEntity):
+class MysaPowerSensor(SensorEntity, CoordinatorEntity):
     """Representation of a Mysa Power Sensor (Real or Simulated)."""
 
     def __init__(self, coordinator, device_id, device_data, api, entry):
@@ -350,13 +356,13 @@ class MysaPowerSensor(CoordinatorEntity, SensorEntity):
         self._attr_device_class = SensorDeviceClass.POWER
 
     @property
-    def device_info(self):
+    def device_info(self) -> DeviceInfo:
         """Return device info."""
-        return {
-            "identifiers": {(DOMAIN, self._device_id)},
-            "manufacturer": "Mysa",
-            "model": self._device_data.get("Model"),
-        }
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._device_id)},
+            manufacturer="Mysa",
+            model=self._device_data.get("Model"),
+        )
 
     def _extract_value(self, state, keys):
         """Helper to extract a value from state dictionary."""
@@ -433,14 +439,14 @@ class MysaPowerSensor(CoordinatorEntity, SensorEntity):
             mode = "Forced Simulated"
         elif current is None:
             mode = "Simulated"
-            
+
         attrs = {"tracking_mode": mode}
         if mode in ["Simulated", "Forced Simulated"]:
             attrs["configured_wattage"] = wattage
         return attrs
 
 
-class MysaCurrentSensor(CoordinatorEntity, SensorEntity):
+class MysaCurrentSensor(SensorEntity, CoordinatorEntity):
     """Representation of a Mysa Current Sensor (Simulated)."""
 
     def __init__(self, coordinator, device_id, device_data, api, entry):
@@ -458,13 +464,13 @@ class MysaCurrentSensor(CoordinatorEntity, SensorEntity):
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
-    def device_info(self):
+    def device_info(self) -> DeviceInfo:
         """Return device info."""
-        return {
-            "identifiers": {(DOMAIN, self._device_id)},
-            "manufacturer": "Mysa",
-            "model": self._device_data.get("Model"),
-        }
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._device_id)},
+            manufacturer="Mysa",
+            model=self._device_data.get("Model"),
+        )
 
     def _extract_value(self, state, keys):
         """Helper to extract a value from state dictionary."""
@@ -554,7 +560,7 @@ class MysaCurrentSensor(CoordinatorEntity, SensorEntity):
         return attrs
 
 
-class MysaEnergySensor(CoordinatorEntity, RestoreEntity, SensorEntity):
+class MysaEnergySensor(SensorEntity, RestoreEntity, CoordinatorEntity):
     """Integrates Power over time to provide native kWh tracking."""
 
     def __init__(self, coordinator, device_id, device_data, api, entry, power_sensor):
@@ -585,13 +591,13 @@ class MysaEnergySensor(CoordinatorEntity, RestoreEntity, SensorEntity):
         self._last_update = time.time()
 
     @property
-    def device_info(self):
+    def device_info(self) -> DeviceInfo:
         """Return device info."""
-        return {
-            "identifiers": {(DOMAIN, self._device_id)},
-            "manufacturer": "Mysa",
-            "model": self._device_data.get("Model"),
-        }
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._device_id)},
+            manufacturer="Mysa",
+            model=self._device_data.get("Model"),
+        )
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -621,7 +627,7 @@ class MysaEnergySensor(CoordinatorEntity, RestoreEntity, SensorEntity):
         }
 
 
-class MysaElectricityRateSensor(CoordinatorEntity, SensorEntity):
+class MysaElectricityRateSensor(SensorEntity, CoordinatorEntity):
     """Representation of the Electricity Rate for a device's home."""
 
     def __init__(self, coordinator, device_id, device_data, api, entry):
@@ -637,7 +643,8 @@ class MysaElectricityRateSensor(CoordinatorEntity, SensorEntity):
         # we try to be generic, or assume local currency units.
         # But 'monetary' device class usually requires ISO currency code in unit?
         # Actually 'monetary' is for total balance.
-        # Energy price is usually just invalid for device_class=monetary unless it is the total cost.
+        # Energy price is usually just invalid for device_class=monetary
+        # unless it is the total cost.
         # We will use no device class, but provide the unit.
         self._attr_native_unit_of_measurement = "$/kWh"  # Generic symbol per protocol
         self._attr_state_class = SensorStateClass.MEASUREMENT
@@ -645,13 +652,13 @@ class MysaElectricityRateSensor(CoordinatorEntity, SensorEntity):
         self._attr_icon = "mdi:currency-usd"
 
     @property
-    def device_info(self):
+    def device_info(self) -> DeviceInfo:
         """Return device info."""
-        return {
-            "identifiers": {(DOMAIN, self._device_id)},
-            "manufacturer": "Mysa",
-            "model": self._device_data.get("Model"),
-        }
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._device_id)},
+            manufacturer="Mysa",
+            model=self._device_data.get("Model"),
+        )
 
     @property
     def native_value(self):

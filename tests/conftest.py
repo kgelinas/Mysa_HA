@@ -4,11 +4,16 @@ Pytest configuration for Mysa integration tests.
 Shared fixtures and configuration for all tests.
 """
 
-import sys
 import os
+import sys
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
-# import pytest_homeassistant_custom_component.plugins  # Force load plugin
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.mysa.const import DOMAIN
+from custom_components.mysa.mysa_api import MysaApi
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 # Add custom_components to path for imports
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -18,10 +23,6 @@ MYSA_DIR = os.path.join(ROOT_DIR, "custom_components")
 sys.path.insert(0, MYSA_DIR)
 sys.path.insert(0, ROOT_DIR)
 
-# Module-level imports after path setup
-from custom_components.mysa.const import DOMAIN
-from pytest_homeassistant_custom_component.common import MockConfigEntry
-
 
 # ===========================================================================
 # Auto-use fixtures
@@ -29,7 +30,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 
 @pytest.fixture(autouse=True)
-def auto_enable_custom_integrations(recorder_mock, enable_custom_integrations):
+def auto_enable_custom_integrations(enable_custom_integrations):
     """Enable custom integrations defined in the test directory."""
     yield
 
@@ -95,7 +96,7 @@ def mock_mysa_api():
 @pytest.fixture
 def mock_api():
     """Create a fully mocked MysaApi instance."""
-    from custom_components.mysa.mysa_api import MysaApi
+    # MysaApi is imported at top level
 
     api = MagicMock(spec=MysaApi)
     api.authenticate = AsyncMock(return_value=True)
@@ -134,7 +135,7 @@ def mock_api():
 @pytest.fixture
 def mock_coordinator(hass, mock_config_entry):
     """Create a mock coordinator."""
-    from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+    # DataUpdateCoordinator is imported at top level
 
     async def async_update():
         return {
@@ -152,3 +153,24 @@ def mock_coordinator(hass, mock_config_entry):
         config_entry=mock_config_entry,
     )
     return coordinator
+
+
+# ===========================================================================
+# VCR / E2E fixtures
+# ===========================================================================
+
+
+@pytest.fixture
+def vcr_cassette_dir():
+    """Return the cassette directory for VCR tests."""
+    return os.path.join(TEST_DIR, "cassettes")
+
+
+@pytest.fixture
+async def mock_mqtt_broker():
+    """Create a mock MQTT broker for testing."""
+    from .mqtt_broker import MockMqttBroker
+    broker = MockMqttBroker()
+    await broker.start()
+    yield broker
+    await broker.stop()

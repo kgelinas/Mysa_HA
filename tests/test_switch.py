@@ -2,8 +2,7 @@
 Tests for Switch entities.
 """
 
-import pytest
-from unittest.mock import MagicMock, AsyncMock
+
 
 
 class TestMysaLockSwitch:
@@ -54,7 +53,7 @@ class TestMysaAutoBrightnessSwitch:
     def test_auto_brightness_enabled(self):
         """Test auto brightness enabled value."""
         enabled = True
-        assert enabled is True
+        assert enabled
 
     def test_auto_brightness_state_keys(self):
         """Test keys used for auto brightness state."""
@@ -174,15 +173,15 @@ class TestSwitchPendingState:
         # Simulate turn_on
         pending_state = True
 
-        assert pending_state is True
+        assert pending_state
 
     def test_pending_state_cleared_on_update(self):
         """Test pending state is cleared when MQTT update confirms."""
         pending_state = True
 
         # Simulate MQTT confirmation
-        if True:  # Got confirmed state from MQTT
-            pending_state = None
+        # if True:  # Got confirmed state from MQTT
+        pending_state = None
 
         assert pending_state is None
 
@@ -263,7 +262,6 @@ class TestSwitchEntitySetup:
 
     def test_lock_switch_created_for_all_devices(self):
         """Test lock switch is created for all device types."""
-        is_ac = True
         entities_for_all = ["MysaLockSwitch"]
 
         assert "MysaLockSwitch" in entities_for_all

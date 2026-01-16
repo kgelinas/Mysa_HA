@@ -655,12 +655,12 @@ class TestConfigFlowCoverage:
 
         flow = ConfigFlow()
         flow.hass = hass
-        
+
         # Mock entry with existing options
         entry = MagicMock()
         entry.options = {"simulated_energy": False}
         entry.entry_id = "test_id"
-        
+
         # Mock API
         api = MagicMock()
         # Device that is NOT AC (to trigger line 169)
@@ -668,18 +668,18 @@ class TestConfigFlowCoverage:
         api.devices = {"dev1": {"Name": "Heater", "Model": "BB-V2"}}
         api.zones = {"1": "Zone1"}
         api.is_ac_device.return_value = False
-        
+
         hass.data[DOMAIN] = {"test_id": {"api": api}}
-        
+
         handler = flow.async_get_options_flow(entry)
         handler.hass = hass
-        
+
         # Run step init
         result = await handler.async_step_init()
-        
+
         assert result["type"] == "form"
         schema = result["data_schema"]
-        
+
         # Verify Zone field (Line 184-190 coverage)
         # This proves the loop ran and added the field
         assert any(str(k) == "zone_name_1" for k in schema.schema)

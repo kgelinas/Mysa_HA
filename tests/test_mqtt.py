@@ -3,6 +3,8 @@ MQTT Module Coverage Tests.
 
 Tests for mqtt.py: packet builders and parsers, edge cases for full coverage.
 """
+# pylint: disable=too-many-lines
+# pylint: disable=redefined-outer-name
 
 import sys
 import os
@@ -15,6 +17,7 @@ sys.path.insert(0, ROOT_DIR)
 import pytest
 import struct
 import json
+from unittest.mock import MagicMock, AsyncMock, patch
 
 # Module-level imports after path setup
 from custom_components.mysa.mqtt import (
@@ -45,8 +48,6 @@ class TestImportFallback:
 
     def test_import_fallback(self):
         """Test fallback to direct imports when relative imports fail."""
-        import sys
-        from unittest.mock import patch, MagicMock
 
         # Save original modules
         original_modules = sys.modules.copy()
@@ -378,335 +379,6 @@ class TestParseOne:
         result = parse_one(bytearray())
 
         assert result is None
-        """Test remaining length 128-16383 (2 bytes)."""
-        result = _encode_remaining_length(200)
-        # 200 = 0x80 | (200 % 128) + (200 // 128)
-        assert len(result) == 2
-        assert result[0] & 0x80  # Continuation bit
-
-    def test_large_length(self):
-        """Test remaining length requiring 3+ bytes."""
-        result = _encode_remaining_length(20000)
-        assert len(result) >= 2
-        # First bytes should have continuation bit
-        assert result[0] & 0x80
-
-
-# ===========================================================================
-# SubscriptionSpec Tests
-# ===========================================================================
-
-
-class TestSubscriptionSpec:
-    """Test SubscriptionSpec."""
-
-    def test_remaining_len(self):
-        """Test remaining_len calculation."""
-        spec = SubscriptionSpec("test/topic", 1)
-
-        # 2 bytes for length + topic bytes + 1 for QoS
-        assert spec.remaining_len() == 3 + len("test/topic")
-
-    def test_to_bytes(self):
-        """Test to_bytes encoding."""
-        spec = SubscriptionSpec("test/topic", 1)
-        data = spec.to_bytes()
-
-        # Should have length prefix + topic + QoS
-        assert len(data) == 2 + len("test/topic") + 1
-
-
-# ===========================================================================
-# Packet Parser Tests
-# ===========================================================================
-
-
-class TestPacketParsers:
-    """Test packet parser functions."""
-
-    def test_parse_connack(self):
-        """Test parsing CONNACK packet."""
-        # CONNACK: type 0x20, length 2, session present, return code
-        data = bytearray([0x20, 0x02, 0x00, 0x00])
-        output = []
-        consumed = parse(data, output)
-
-        assert consumed == 4
-        assert len(output) == 1
-        assert isinstance(output[0], ConnackPacket)
-        assert output[0].return_code == 0
-
-    def test_parse_suback(self):
-        """Test parsing SUBACK packet."""
-        # SUBACK: type 0x90, length, packet_id, return codes
-        data = bytearray([0x90, 0x03, 0x00, 0x01, 0x01])
-        output = []
-        consumed = parse(data, output)
-
-        assert consumed == 5
-        assert isinstance(output[0], SubackPacket)
-        assert output[0].packet_id == 1
-
-    def test_parse_publish_qos0(self):
-        """Test parsing PUBLISH packet with QoS 0."""
-        # Build a simple PUBLISH packet
-        topic = b"test/topic"
-        payload = b"hello"
-        topic_len = len(topic)
-        remaining_len = 2 + topic_len + len(payload)
-        data = (
-            bytearray([0x30, remaining_len])
-            + struct.pack("!H", topic_len)
-            + topic
-            + payload
-        )
-
-        output = []
-        consumed = parse(data, output)
-
-        assert isinstance(output[0], PublishPacket)
-        assert output[0].topic == "test/topic"
-        assert output[0].payload == b"hello"
-        assert output[0].qos == 0
-        assert output[0].packetid is None
-
-    def test_parse_publish_qos1(self):
-        """Test parsing PUBLISH packet with QoS 1 (has packet_id)."""
-        topic = b"test/topic"
-        payload = b"hello"
-        topic_len = len(topic)
-        packet_id = 42
-        remaining_len = 2 + topic_len + 2 + len(payload)  # +2 for packet_id
-        # QoS 1 is flags 0x02
-        data = (
-            bytearray([0x32, remaining_len])
-            + struct.pack("!H", topic_len)
-            + topic
-            + struct.pack("!H", packet_id)
-            + payload
-        )
-
-        output = []
-        consumed = parse(data, output)
-
-        assert isinstance(output[0], PublishPacket)
-        assert output[0].qos == 1
-        assert output[0].packetid == 42
-
-    def test_parse_puback(self):
-        """Test parsing PUBACK packet."""
-        # PUBACK: type 0x40, length 2, packet_id
-        data = bytearray([0x40, 0x02, 0x00, 0x7B])  # packet_id = 123
-        output = []
-        consumed = parse(data, output)
-
-        assert consumed == 4
-        assert isinstance(output[0], PubackPacket)
-        assert output[0].packet_id == 123
-
-    def test_parse_pingresp(self):
-        """Test parsing PINGRESP packet."""
-        data = bytearray([0xD0, 0x00])
-        output = []
-        consumed = parse(data, output)
-
-        assert consumed == 2
-        assert isinstance(output[0], PingrespPacket)
-
-    def test_parse_unknown_type(self):
-        """Test parsing unknown packet type returns None."""
-        # Use an unhandled type (e.g., 0x70 = type 7)
-        data = bytearray([0x70, 0x00])
-        output = []
-        consumed = parse(data, output)
-
-        assert consumed == 2
-        assert len(output) == 0  # Unknown type not added
-
-    def test_parse_type_error(self):
-        """Test parse raises TypeError for non-bytearray."""
-        with pytest.raises(TypeError, match="data must be a bytearray"):
-            parse(b"bytes", [])
-
-    def test_parse_incomplete_header(self):
-        """Test parse returns early on incomplete header."""
-        data = bytearray([0x20])  # Only first byte, no remaining length
-        output = []
-        consumed = parse(data, output)
-
-        assert consumed == 0
-        assert len(output) == 0
-
-    def test_parse_incomplete_packet(self):
-        """Test parse returns early on incomplete packet body."""
-        # CONNACK header says 2 bytes remaining, but only provide 1
-        data = bytearray([0x20, 0x02, 0x00])  # Missing 1 byte
-        output = []
-        consumed = parse(data, output)
-
-        assert consumed == 0
-        assert len(output) == 0
-
-    def test_parse_multi_byte_remaining_length(self):
-        """Test parsing packet with multi-byte remaining length."""
-        # Create a packet with remaining length > 127 (requires continuation bit)
-        # We'll simulate this with remaining length 184 (0xB8)
-        # Encoded as: 0xB8, 0x01 (184 % 128 = 56, with continuation | 0x80 = 0xB8, then 184 // 128 = 1)
-        data = bytearray([0x30, 0xB8, 0x01])  # PUBLISH with length 184
-        # But we don't have enough data for remaining 184 bytes
-        output = []
-        consumed = parse(data, output)
-
-        assert consumed == 0  # Not enough data
-
-
-# ===========================================================================
-# parse_one Tests
-# ===========================================================================
-
-
-class TestParseOne:
-    """Test parse_one function."""
-
-    def test_parse_one_bytes(self):
-        """Test parse_one with bytes input."""
-        data = bytes([0x20, 0x02, 0x00, 0x00])  # CONNACK
-        result = parse_one(data)
-
-        assert isinstance(result, ConnackPacket)
-
-    def test_parse_one_bytearray(self):
-        """Test parse_one with bytearray input."""
-        data = bytearray([0xD0, 0x00])  # PINGRESP
-        result = parse_one(data)
-
-        assert isinstance(result, PingrespPacket)
-
-    def test_parse_one_empty(self):
-        """Test parse_one with empty data."""
-        result = parse_one(bytearray())
-
-        assert result is None
-
-        # ===========================================================================
-        # From test_mqtt.py
-        # ===========================================================================
-        # Topic: /test (5 bytes: 00 05 2f 74 65 73 74)
-        # Payload: hello
-        topic = "/test"
-        payload = b"hello"
-
-        # Build packet manually
-        topic_bytes = topic.encode()
-        topic_len = len(topic_bytes)
-
-        # Variable header: topic length (2 bytes) + topic
-        var_header = bytes([0, topic_len]) + topic_bytes
-
-        # Full remaining = var_header + payload
-        remaining = var_header + payload
-        remaining_len = len(remaining)
-
-        # Fixed header: 0x30 + remaining length
-        packet = bytes([0x30, remaining_len]) + remaining
-
-        result = parse_one(packet)
-
-        assert isinstance(result, PublishPacket)
-        assert result.topic == topic
-        assert result.payload == payload
-
-    def test_parse_connack_packet(self):
-        """Test parsing a CONNACK packet."""
-        from custom_components.mysa.mqtt import parse_one, ConnackPacket
-
-        # CONNACK: 0x20 0x02 0x00 0x00 (success)
-        packet = bytes([0x20, 0x02, 0x00, 0x00])
-
-        result = parse_one(packet)
-
-        assert isinstance(result, ConnackPacket)
-        assert result.return_code == 0
-
-    def test_parse_suback_packet(self):
-        """Test parsing a SUBACK packet."""
-        from custom_components.mysa.mqtt import parse_one, SubackPacket
-
-        # SUBACK: 0x90 0x03 0x00 0x01 0x00 (packet_id=1, QoS 0 granted)
-        packet = bytes([0x90, 0x03, 0x00, 0x01, 0x00])
-
-        result = parse_one(packet)
-
-        assert isinstance(result, SubackPacket)
-        assert result.packet_id == 1
-
-    def test_create_connect_packet(self):
-        """Test creating a CONNECT packet."""
-        from custom_components.mysa.mqtt import connect
-
-        client_id = "test-client"
-        keepalive = 60
-
-        packet = connect(client_id, keepalive)
-
-        assert isinstance(packet, bytes)
-        assert len(packet) > 0
-        # First byte should be 0x10 (CONNECT)
-        assert packet[0] == 0x10
-        # Should contain the client ID
-        assert client_id.encode() in packet
-
-    def test_create_subscribe_packet(self):
-        """Test creating a SUBSCRIBE packet."""
-        from custom_components.mysa.mqtt import subscribe, SubscriptionSpec
-
-        topics = [
-            SubscriptionSpec("/test/topic1", 0),
-            SubscriptionSpec("/test/topic2", 1),
-        ]
-
-        packet = subscribe(1, topics)
-
-        assert isinstance(packet, bytes)
-        assert len(packet) > 0
-        # First byte should be 0x82 (SUBSCRIBE with QoS 1)
-        assert packet[0] == 0x82
-
-    def test_create_publish_packet(self):
-        """Test creating a PUBLISH packet."""
-        from custom_components.mysa.mqtt import publish
-
-        topic = "/test/topic"
-        payload = b'{"test": "data"}'
-
-        packet = publish(topic, False, 1, False, packet_id=1, payload=payload)
-
-        assert isinstance(packet, bytes)
-        assert len(packet) > 0
-        # Should contain the topic
-        assert topic.encode() in packet
-        # Should contain the payload
-        assert payload in packet
-
-    def test_create_pingreq_packet(self):
-        """Test creating a PINGREQ packet."""
-        from custom_components.mysa.mqtt import pingreq
-
-        packet = pingreq()
-
-        # PINGREQ is always 0xC0 0x00
-        assert packet == bytes([0xC0, 0x00])
-
-    def test_create_disconnect_packet(self):
-        """Test creating a DISCONNECT packet."""
-        from custom_components.mysa.mqtt import disconnect
-
-        packet = disconnect()
-
-        # DISCONNECT is always 0xE0 0x00
-        assert packet == bytes([0xE0, 0x00])
-
-
 class TestMqttTopicBuilding:
     """Test MQTT topic building functions."""
 
@@ -873,7 +545,7 @@ class TestMqttPayloadParsing:
         assert extracted["lk"] == 1
 
 
-class TestMqttPacketTypes:
+class TestMqttPacketConstants:
     """Test MQTT packet type identification."""
 
     def test_connect_packet_type(self):
@@ -1618,7 +1290,6 @@ class TestMqttConnectionAenter:
     async def test_aenter_suback_failure(self):
         """Test __aenter__ raises error on non-SUBACK response."""
         from custom_components.mysa.mysa_mqtt import MqttConnection
-        from custom_components.mysa import mqtt
 
         conn = MqttConnection("wss://test", ["device1"])
 

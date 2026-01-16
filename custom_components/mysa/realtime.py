@@ -14,6 +14,7 @@ _LOGGER = logging.getLogger(__name__)
 
 class MysaRealtime:
     """Mysa MQTT Realtime Coordinator."""
+    # pylint: disable=too-many-instance-attributes,line-too-long
 
     def __init__(self, hass, get_signed_url_callback, on_update_callback):
         """Initialize the MQTT coordinator."""
@@ -269,6 +270,7 @@ class MysaRealtime:
         await self._send_one_off_command(device_id, payload, user_id, msg_type, src_type, wrap)
 
     async def _send_one_off_command(self, device_id, payload, user_id, msg_type, src_type, wrap):
+        # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
         """Connect, send, disconnect."""
         if not user_id:
             _LOGGER.error("Cannot send MQTT command: User ID missing")
@@ -360,6 +362,8 @@ class MysaRealtime:
                 # 4. Wait for response
                 try:
                     resp = await asyncio.wait_for(ws.recv(), timeout=2.0)
+                    if isinstance(resp, str):
+                        resp = resp.encode()
                     pkt = parse_mqtt_packet(resp)
                     if isinstance(pkt, mqtt.PublishPacket):
                         payload = json.loads(pkt.payload)
@@ -375,7 +379,4 @@ class MysaRealtime:
                 await ws.close()
 
         except Exception as e:
-            _LOGGER.error("Failed to send MQTT command: %s", e)
-
-
-
+            _LOGGER.error("Failed to send mqtt command: %s", e)

@@ -1,4 +1,5 @@
 """Device logic and constants for Mysa devices."""
+# pylint: disable=line-too-long, too-many-return-statements, too-many-branches, too-many-statements, too-many-locals
 import logging
 from .const import (
     AC_FAN_MODES,

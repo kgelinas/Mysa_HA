@@ -8,6 +8,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
@@ -35,8 +36,12 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class MysaNumber(CoordinatorEntity, NumberEntity):  # TODO: Refactor MysaNumber to reduce instance attributes, duplicate code, and implement abstract methods
-    """Base class for Mysa number entities."""
+class MysaNumber(CoordinatorEntity, NumberEntity):
+    """Base class for Mysa number entities.
+
+    TODO: Refactor MysaNumber to reduce instance attributes,
+    duplicate code, and implement abstract methods.
+    """
 
     _attr_native_min_value = 0
     _attr_native_max_value = 100
@@ -44,9 +49,10 @@ class MysaNumber(CoordinatorEntity, NumberEntity):  # TODO: Refactor MysaNumber 
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_mode = NumberMode.SLIDER
 
-    def __init__(  # TODO: Refactor __init__ to reduce arguments
+    def __init__(
         self, coordinator, device_id, device_data, api, entry, sensor_key, name_suffix
     ):
+        # TODO: Refactor __init__ to reduce arguments
         """Initialize."""
         super().__init__(coordinator)
         self._device_id = device_id
@@ -66,14 +72,12 @@ class MysaNumber(CoordinatorEntity, NumberEntity):  # TODO: Refactor MysaNumber 
         zone_id = state.get("Zone") if state else None
         zone_name = self._entry.options.get(f"zone_name_{zone_id}") if zone_id else None
 
-        info = {
-            "identifiers": {(DOMAIN, self._device_id)},
-            "manufacturer": "Mysa",
-            "model": self._device_data.get("Model"),
-        }
-        if zone_name:
-            info["suggested_area"] = zone_name
-        return info
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._device_id)},
+            manufacturer="Mysa",
+            model=self._device_data.get("Model"),
+            suggested_area=zone_name,
+        )
 
     def _extract_value(self, state, keys):
         """Helper to extract a value from state dictionary."""
@@ -116,12 +120,16 @@ class MysaNumber(CoordinatorEntity, NumberEntity):  # TODO: Refactor MysaNumber 
         return current_val
 
 
-class MysaMinBrightnessNumber(MysaNumber):  # TODO: Implement abstract methods
-    """Number entity for minimum brightness."""
+class MysaMinBrightnessNumber(MysaNumber):
+    """Number entity for minimum brightness.
+
+    TODO: Implement abstract methods.
+    """
 
     _attr_icon = "mdi:brightness-5"
 
-    def __init__(self, coordinator, device_id, device_data, api, entry):  # TODO: Refactor __init__ to reduce arguments
+    def __init__(self, coordinator, device_id, device_data, api, entry):
+        # TODO: Refactor __init__ to reduce arguments
         """Initialize."""
         super().__init__(
             coordinator, device_id, device_data, api, entry, "MinBrightness", "Minimum Brightness"
@@ -141,12 +149,16 @@ class MysaMinBrightnessNumber(MysaNumber):  # TODO: Implement abstract methods
         # Don't clear pending - let it expire or converge
 
 
-class MysaMaxBrightnessNumber(MysaNumber):  # TODO: Implement abstract methods
-    """Number entity for maximum brightness."""
+class MysaMaxBrightnessNumber(MysaNumber):
+    """Number entity for maximum brightness.
+
+    TODO: Implement abstract methods.
+    """
 
     _attr_icon = "mdi:brightness-7"
 
-    def __init__(self, coordinator, device_id, device_data, api, entry):  # TODO: Refactor __init__ to reduce arguments
+    def __init__(self, coordinator, device_id, device_data, api, entry):
+        # TODO: Refactor __init__ to reduce arguments
         """Initialize."""
         super().__init__(
             coordinator, device_id, device_data, api, entry, "MaxBrightness", "Maximum Brightness"

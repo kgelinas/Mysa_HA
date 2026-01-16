@@ -59,7 +59,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_create_entry(
                     title=user_input[CONF_USERNAME], data=user_input
                 )
-            except Exception:  # TODO: Catch specific exceptions instead of Exception
+            except Exception:
                 _LOGGER.exception("Unexpected exception")
                 errors["base"] = "invalid_auth"
 
@@ -73,7 +73,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await api.authenticate()
         return api
 
-    async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:  # TODO: Use or remove unused argument
+    async def async_step_reauth(
+        self, _entry_data: dict[str, Any]
+    ) -> ConfigFlowResult:
         """Handle configuration by re-auth."""
         self.entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
         return await self.async_step_reauth_confirm()
@@ -108,7 +110,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     await self.hass.config_entries.async_reload(self.entry.entry_id)
                     return self.async_abort(reason="reauth_successful")
 
-            except Exception:  # TODO: Catch specific exceptions instead of Exception
+            except Exception:
                 errors["base"] = "invalid_auth"
 
         default_username = self.entry.data[CONF_USERNAME] if self.entry else ""
@@ -124,7 +126,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
 
-class MysaOptionsFlowHandler(config_entries.OptionsFlow):  # TODO: Add more public methods or refactor
+class MysaOptionsFlowHandler(
+    config_entries.OptionsFlow
+):  # TODO: Add more public methods or refactor
     """Handle options flow for Mysa."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
