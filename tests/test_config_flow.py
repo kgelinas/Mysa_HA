@@ -666,7 +666,7 @@ class TestConfigFlowCoverage:
         # Device that is NOT AC (to trigger line 169)
         # Device with Name to trigger line 172
         api.devices = {"dev1": {"Name": "Heater", "Model": "BB-V2"}}
-        api.zones = [{"id": 1, "Name": "Zone1"}]
+        api.zones = {"1": "Zone1"}
         api.is_ac_device.return_value = False
         
         hass.data[DOMAIN] = {"test_id": {"api": api}}

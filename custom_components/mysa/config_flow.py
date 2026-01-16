@@ -138,14 +138,14 @@ class MysaOptionsFlowHandler(config_entries.OptionsFlow):  # TODO: Add more publ
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        # Get the API instance to find current devices and zones
+        api = None
         try:
             api = self.hass.data[DOMAIN][self._config_entry.entry_id]["api"]
             devices = api.devices
             zones = api.zones
         except (KeyError, AttributeError):
             devices = {}
-            zones = []
+            zones = {}
 
         device_options = {
             d_id: f"{d_data.get('Name', d_id)} ({d_id})"
@@ -165,24 +165,23 @@ class MysaOptionsFlowHandler(config_entries.OptionsFlow):  # TODO: Add more publ
         }
 
         # Add per-device wattage for heating thermostats
-        for d_id, d_data in devices.items():
-            if not api.is_ac_device(d_id):
-                safe_id = d_id.replace(":", "").lower()
-                key = f"wattage_{safe_id}"
-                name = d_data.get('Name', d_id)
-                schema_dict[
-                    vol.Optional(
-                        key,
-                        default=self._config_entry.options.get(key, 0),
-                        description=f"Wattage for {name}"
-                    )
-                ] = vol.All(vol.Coerce(int), vol.Range(min=0, max=5000))
+        if api:
+            for d_id, d_data in devices.items():
+                if not api.is_ac_device(d_id):
+                    safe_id = d_id.replace(":", "").lower()
+                    key = f"wattage_{safe_id}"
+                    name = d_data.get('Name', d_id)
+                    schema_dict[
+                        vol.Optional(
+                            key,
+                            default=self._config_entry.options.get(key, 0),
+                            description=f"Wattage for {name}"
+                        )
+                    ] = vol.All(vol.Coerce(int), vol.Range(min=0, max=5000))
 
         # Add zone renaming
-        # zones is a list of dicts: [{'id': 123, 'Name': 'Living Room', ...}]
-        for zone in zones:
-            z_id = zone.get('id')
-            z_name = zone.get('Name')
+        # zones is a dict: {'123': 'Living Room'}
+        for z_id, z_name in zones.items():
             if z_id:
                 key = f"zone_name_{z_id}"
                 current_val = self._config_entry.options.get(key, z_name)

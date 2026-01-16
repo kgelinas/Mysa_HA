@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 
+## [0.8.6] - 2026-01-15
+### Fixed
+- **Config Flow Crash**: Fixed `AttributeError` when configuring options, caused by incorrect handling of zone data structure.
+- **Pytest Warning**: Resolved deprecation warning for async tests in `tests/test_api.py`.
+
 ## [0.8.5] - 2026-01-15
 ### Added
 - **Standalone Debug Tool**: Added cross-platform build support for the `mysa_debug` tool. Users can now download single-file executables for Windows (`.exe`), Linux, and macOS from GitHub Actions/Releases without needing Python installed.
