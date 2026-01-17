@@ -42,3 +42,6 @@ mysa_auth.json
 htmlcov/
 coverage.xml
 .pytest_cache/
+
+# VCR cassettes (contain sensitive IDs)
+tests/cassettes/
