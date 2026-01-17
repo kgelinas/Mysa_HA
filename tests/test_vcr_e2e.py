@@ -11,7 +11,6 @@ Credentials are loaded from ~/.mysa_debug_auth.json (same as mysa_debug.py)
 import json
 import os
 import pytest
-import requests_mock
 from pathlib import Path
 from unittest.mock import patch, MagicMock, AsyncMock
 
@@ -90,15 +89,13 @@ def vcr_credentials():
 def mock_auth_for_vcr():
     """Mock authentication for VCR playback."""
     async def side_effect(self):
-        import requests
-        self._session = requests.Session()
         self._user_obj = MagicMock()
+        self._user_obj.id_claims = {"exp": 9999999999}
+        self._user_obj.id_token = "mock_token"
         return True
 
-    with patch("custom_components.mysa.client.MysaClient.authenticate", autospec=True) as mock_method, \
-         patch("custom_components.mysa.client.auther") as mock_auther:
+    with patch("custom_components.mysa.client.MysaClient.authenticate", autospec=True) as mock_method:
         mock_method.side_effect = side_effect
-        mock_auther.return_value = None
         yield mock_method
 
 
@@ -170,7 +167,8 @@ async def test_vcr_device_discovery(
     hass: HomeAssistant,
     vcr_credentials,
     mock_auth_for_vcr,
-    mock_realtime_for_vcr
+    mock_realtime_for_vcr,
+    aioclient_mock
 ):
     """
     Test device discovery using VCR cassettes.
@@ -189,37 +187,36 @@ async def test_vcr_device_discovery(
     # Playback mode - use recorded cassette
     cassette = load_cassette("device_discovery")
 
-    with requests_mock.Mocker() as m:
-        # Setup mocks from cassette
-        m.get(f"{BASE_URL}/users", json=cassette["users"])
-        m.get(f"{BASE_URL}/devices", json=cassette["devices"])
-        m.get(f"{BASE_URL}/devices/state", json=cassette["devices_state"])
-        m.get(f"{BASE_URL}/homes", json=cassette["homes"])
+    # Setup mocks from cassette
+    aioclient_mock.get(f"{BASE_URL}/users", json=cassette["users"])
+    aioclient_mock.get(f"{BASE_URL}/devices", json=cassette["devices"])
+    aioclient_mock.get(f"{BASE_URL}/devices/state", json=cassette["devices_state"])
+    aioclient_mock.get(f"{BASE_URL}/homes", json=cassette["homes"])
 
-        # Run config flow
-        config_entry = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": "user"}
-        )
+    # Run config flow
+    config_entry = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": "user"}
+    )
 
-        result = await hass.config_entries.flow.async_configure(
-            config_entry["flow_id"],
-            {CONF_USERNAME: username, CONF_PASSWORD: password},
-        )
+    result = await hass.config_entries.flow.async_configure(
+        config_entry["flow_id"],
+        {CONF_USERNAME: username, CONF_PASSWORD: password},
+    )
 
-        assert result["type"] == "create_entry"
-        await hass.async_block_till_done()
-        await hass.async_block_till_done()
+    assert result["type"] == "create_entry"
+    await hass.async_block_till_done()
+    await hass.async_block_till_done()
 
-        # Verify devices were discovered
-        entities = hass.states.async_entity_ids("climate")
-        assert len(entities) > 0, f"No climate entities found. Available: {hass.states.async_entity_ids()}"
+    # Verify devices were discovered
+    entities = hass.states.async_entity_ids("climate")
+    assert len(entities) > 0, f"No climate entities found. Available: {hass.states.async_entity_ids()}"
 
-        # Verify device count matches cassette
-        devices_list = cassette["devices"].get("Devices", cassette["devices"].get("DevicesObj", []))
-        if isinstance(devices_list, dict):
-            devices_list = list(devices_list.values())
-        expected_count = len(devices_list)
-        assert len(entities) == expected_count, f"Expected {expected_count} devices, found {len(entities)}"
+    # Verify device count matches cassette
+    devices_list = cassette["devices"].get("Devices", cassette["devices"].get("DevicesObj", []))
+    if isinstance(devices_list, dict):
+        devices_list = list(devices_list.values())
+    expected_count = len(devices_list)
+    assert len(entities) == expected_count, f"Expected {expected_count} devices, found {len(entities)}"
 
 
 @pytest.mark.vcr
@@ -228,7 +225,8 @@ async def test_vcr_state_sync(
     hass: HomeAssistant,
     vcr_credentials,
     mock_auth_for_vcr,
-    mock_realtime_for_vcr
+    mock_realtime_for_vcr,
+    aioclient_mock
 ):
     """
     Test state synchronization using VCR cassettes.
@@ -238,36 +236,35 @@ async def test_vcr_state_sync(
     username, password = vcr_credentials
     cassette = load_cassette("device_discovery")
 
-    with requests_mock.Mocker() as m:
-        m.get(f"{BASE_URL}/users", json=cassette["users"])
-        m.get(f"{BASE_URL}/devices", json=cassette["devices"])
-        m.get(f"{BASE_URL}/devices/state", json=cassette["devices_state"])
-        m.get(f"{BASE_URL}/homes", json=cassette["homes"])
+    aioclient_mock.get(f"{BASE_URL}/users", json=cassette["users"])
+    aioclient_mock.get(f"{BASE_URL}/devices", json=cassette["devices"])
+    aioclient_mock.get(f"{BASE_URL}/devices/state", json=cassette["devices_state"])
+    aioclient_mock.get(f"{BASE_URL}/homes", json=cassette["homes"])
 
-        # Setup integration
-        config_entry = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": "user"}
-        )
-        result = await hass.config_entries.flow.async_configure(
-            config_entry["flow_id"],
-            {CONF_USERNAME: username, CONF_PASSWORD: password},
-        )
-        await hass.async_block_till_done()
-        await hass.async_block_till_done()
+    # Setup integration
+    config_entry = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": "user"}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        config_entry["flow_id"],
+        {CONF_USERNAME: username, CONF_PASSWORD: password},
+    )
+    await hass.async_block_till_done()
+    await hass.async_block_till_done()
 
-        # Get first climate entity
-        entities = hass.states.async_entity_ids("climate")
-        assert entities, "No climate entities found"
+    # Get first climate entity
+    entities = hass.states.async_entity_ids("climate")
+    assert entities, "No climate entities found"
 
-        state = hass.states.get(entities[0])
-        assert state is not None
+    state = hass.states.get(entities[0])
+    assert state is not None
 
-        # Verify state attributes exist
-        assert "current_temperature" in state.attributes or state.attributes.get("current_temperature") is None
-        assert "temperature" in state.attributes  # Target temperature
+    # Verify state attributes exist
+    assert "current_temperature" in state.attributes or state.attributes.get("current_temperature") is None
+    assert "temperature" in state.attributes  # Target temperature
 
-        # State should be a valid HVAC mode
-        assert state.state in ("heat", "off", "cool", "auto", "unavailable")
+    # State should be a valid HVAC mode
+    assert state.state in ("heat", "off", "cool", "auto", "unavailable")
 
 
 @pytest.mark.vcr

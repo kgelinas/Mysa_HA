@@ -662,14 +662,26 @@ class TestSetupFlowAsync:
         from unittest.mock import patch
         from custom_components.mysa.mysa_api import MysaApi
 
+        # Mock aiohttp session
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json = AsyncMock(return_value={"User": {"Id": "test-uid"}})
+
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(return_value=mock_cm)
+
         with (
             patch("custom_components.mysa.client.login") as mock_login,
-            patch("custom_components.mysa.client.auther"),
-            patch("custom_components.mysa.client.requests.Session"),
+            patch("custom_components.mysa.client.async_get_clientsession", return_value=mock_session),
             patch("custom_components.mysa.client.Store") as mock_store,
         ):
             mock_user = MagicMock()
             mock_user.id_token = "test-token"
+            mock_user.id_claims = {"exp": 9999999999}
             mock_user.access_token = "test-access"
             mock_login.return_value = mock_user
 

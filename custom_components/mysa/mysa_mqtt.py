@@ -9,7 +9,7 @@ from __future__ import annotations
 import ssl
 import logging
 import asyncio
-from typing import TYPE_CHECKING, Any, Optional, Tuple, List, Union
+from typing import TYPE_CHECKING, Any, Optional, List, Union
 from urllib.parse import urlparse
 from uuid import uuid1
 
@@ -22,63 +22,19 @@ if TYPE_CHECKING:
 
 # Support both package imports (for HA) and direct imports (for debug tool)
 try:
-    from .mysa_auth import (
-        Cognito,
-        login,
-        sigv4_sign_mqtt_url,
-        IDENTITY_POOL_ID,
-    )
     from . import mqtt
     from .const import MQTT_KEEPALIVE, MQTT_USER_AGENT
 except ImportError:
-    from mysa_auth import (  # type: ignore[no-redef]
-        Cognito,
-        login,
-        sigv4_sign_mqtt_url,
-        IDENTITY_POOL_ID,
-    )
     import mqtt  # type: ignore[no-redef]
     from const import MQTT_KEEPALIVE, MQTT_USER_AGENT  # type: ignore[no-redef]
 
 if TYPE_CHECKING:
-    import botocore.credentials
+    import boto3
 
 _LOGGER = logging.getLogger(__name__)
 
 
-def refresh_and_sign_url(
-    user_obj: Cognito,
-    username: str,
-    password: str
-) -> Tuple[str, Cognito]:
-    """
-    Refresh tokens and get signed MQTT URL.
-    Falls back to full re-login if refresh fails.
 
-    Args:
-        user_obj: Authenticated Cognito user object
-        username: Mysa account email
-        password: Mysa account password
-
-    Returns:
-        tuple: (signed_url, user_obj) - may return new user_obj if re-auth happened
-    """
-    # Try to refresh tokens, fall back to full re-login if needed
-    try:
-        user_obj.renew_access_token()
-        _LOGGER.debug("Refreshed access token for MQTT URL signing")
-    except Exception as e:  # TODO: Catch specific exceptions instead of Exception
-        _LOGGER.warning("Token refresh failed (%s), attempting full re-authentication", e)
-        try:
-            user_obj = login(username, password)
-            _LOGGER.info("Re-authenticated successfully")
-        except Exception as login_err:
-            _LOGGER.error("Full re-authentication failed: %s", login_err)
-            raise
-    # Get fresh credentials and sign URL
-    cred = user_obj.get_credentials(identity_pool_id=IDENTITY_POOL_ID)
-    signed_url = sigv4_sign_mqtt_url(cred)
-    return signed_url, user_obj
 
 
 def build_subscription_topics(device_ids: List[str]) -> List[mqtt.SubscriptionSpec]:
@@ -143,7 +99,11 @@ async def connect_websocket(signed_url: str) -> WebSocketClientProtocol:
         WebSocket connection object
     """
     ws_url = get_websocket_url(signed_url)
-    ssl_context = ssl.create_default_context()
+
+    # Run synchronous SSL context creation in executor to avoid blocking event loop
+    loop = asyncio.get_running_loop()
+    ssl_context = await loop.run_in_executor(None, ssl.create_default_context)
+
     headers = {'user-agent': MQTT_USER_AGENT}
 
     try:

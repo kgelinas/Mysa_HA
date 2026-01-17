@@ -110,9 +110,9 @@ class MysaApi:
             return self.zone_overrides[str(zone_id)]
         return self.client.get_zone_name(zone_id)
 
-    def fetch_firmware_info(self, device_id):
+    async def fetch_firmware_info(self, device_id):
         """Fetch firmware update info."""
-        return self.client.fetch_firmware_info(device_id)
+        return await self.client.fetch_firmware_info(device_id)
 
     def get_electricity_rate(self, device_id):
         """Get electricity rate for a device."""

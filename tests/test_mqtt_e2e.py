@@ -11,7 +11,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 
 from homeassistant.core import HomeAssistant
 from homeassistant.const import CONF_USERNAME, CONF_PASSWORD
-import requests_mock
+
 
 from custom_components.mysa.const import DOMAIN
 from custom_components.mysa.mysa_auth import BASE_URL
@@ -62,15 +62,13 @@ async def mock_mqtt_broker():
 def mock_auth():
     """Mock authentication."""
     async def side_effect(self):
-        import requests
-        self._session = requests.Session()
         self._user_obj = MagicMock()
+        self._user_obj.id_claims = {"exp": 9999999999}
+        self._user_obj.id_token = "mock_token"
         return True
 
-    with patch("custom_components.mysa.client.MysaClient.authenticate", autospec=True) as mock_method, \
-         patch("custom_components.mysa.client.auther") as mock_auther:
+    with patch("custom_components.mysa.client.MysaClient.authenticate", autospec=True) as mock_method:
         mock_method.side_effect = side_effect
-        mock_auther.return_value = None
         yield mock_method
 
 
@@ -151,78 +149,78 @@ async def test_mqtt_state_update_injection(
     hass: HomeAssistant,
     mock_auth,
     mock_realtime_with_broker,
-    mock_mqtt_broker
+    mock_mqtt_broker,
+    aioclient_mock
 ):
     """
     Test injecting MQTT state updates and verifying entity state changes.
     """
-    with requests_mock.Mocker() as m:
-        # Setup HTTP mocks
-        m.get(f"{BASE_URL}/devices", json={"Devices": [MOCK_DEVICE]})
-        m.get(f"{BASE_URL}/devices/state", json={"DeviceStates": [MOCK_STATE]})
-        m.get(f"{BASE_URL}/users", json={"User": {"Id": "test-user"}})
-        m.get(f"{BASE_URL}/homes", json={"Homes": []})
+    # Setup HTTP mocks
+    aioclient_mock.get(f"{BASE_URL}/devices", json={"Devices": [MOCK_DEVICE]})
+    aioclient_mock.get(f"{BASE_URL}/devices/state", json={"DeviceStates": [MOCK_STATE]})
+    aioclient_mock.get(f"{BASE_URL}/users", json={"User": {"Id": "test-user"}})
+    aioclient_mock.get(f"{BASE_URL}/homes", json={"Homes": []})
 
-        # Setup integration
-        config_entry = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": "user"}
-        )
-        result = await hass.config_entries.flow.async_configure(
-            config_entry["flow_id"],
-            {CONF_USERNAME: "test@example.com", CONF_PASSWORD: "password"},
-        )
+    # Setup integration
+    config_entry = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": "user"}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        config_entry["flow_id"],
+        {CONF_USERNAME: "test@example.com", CONF_PASSWORD: "password"},
+    )
 
-        entry = result["result"]
-        await hass.async_block_till_done()
-        await hass.async_block_till_done()
+    entry = result["result"]
+    await hass.async_block_till_done()
+    await hass.async_block_till_done()
 
-        # Verify initial state
-        state = hass.states.get("climate.test_thermostat")
-        assert state is not None
-        initial_temp = state.attributes.get("temperature")
+    # Verify initial state
+    state = hass.states.get("climate.test_thermostat")
+    assert state is not None
+    initial_temp = state.attributes.get("temperature")
 
-        # Inject MQTT state update
-        new_setpoint = 24.0
-        state_update = create_mysa_state_update(
-            MOCK_DEVICE["Id"],
-            sp=new_setpoint,
-            stpt=new_setpoint,
-            ambTemp=21.5,
-            hum=50
-        )
+    # Inject MQTT state update
+    new_setpoint = 24.0
+    state_update = create_mysa_state_update(
+        MOCK_DEVICE["Id"],
+        sp=new_setpoint,
+        stpt=new_setpoint,
+        ambTemp=21.5,
+        hum=50
+    )
 
-        # Simulate the MQTT update through the API
-        api = hass.data[DOMAIN][entry.entry_id]["api"]
-        coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    # Simulate the MQTT update through the API
+    api = hass.data[DOMAIN][entry.entry_id]["api"]
+    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
 
-        # Disable coordinator callback to prevent HTTP refresh from overwriting MQTT update
-        # In production, coordinator_callback triggers async_request_refresh which fetches
-        # fresh HTTP data that would overwrite the MQTT state update
-        original_callback = api.coordinator_callback
-        api.coordinator_callback = None
+    # Disable coordinator callback to prevent HTTP refresh from overwriting MQTT update
+    # In production, coordinator_callback triggers async_request_refresh which fetches
+    # fresh HTTP data that would overwrite the MQTT state update
+    original_callback = api.coordinator_callback
+    api.coordinator_callback = None
 
-        # Update the API state cache with MQTT data
-        await api._on_mqtt_update(MOCK_DEVICE["Id"], state_update["body"]["state"])
+    # Update the API state cache with MQTT data
+    await api._on_mqtt_update(MOCK_DEVICE["Id"], state_update["body"]["state"])
 
-        # Restore callback
-        api.coordinator_callback = original_callback
+    # Restore callback
+    api.coordinator_callback = original_callback
 
-        # Manually set coordinator data from api.states
-        # (since we disabled the callback, we need to do this explicitly)
+    # Manually set coordinator data from api.states
+    # (since we disabled the callback, we need to do this explicitly)
+    coordinator.async_set_updated_data(api.states)
+    await hass.async_block_till_done()
+
+    # Force time forward to clear sticky state
+    import time
+    with patch("time.time", return_value=time.time() + 40):
+        # Re-set data to trigger entity update with cleared sticky state
         coordinator.async_set_updated_data(api.states)
         await hass.async_block_till_done()
 
-        # Force time forward to clear sticky state
-        import time
-        with patch("time.time", return_value=time.time() + 40):
-            # Re-set data to trigger entity update with cleared sticky state
-            coordinator.async_set_updated_data(api.states)
-            await hass.async_block_till_done()
-
-            # Verify state updated
-            state = hass.states.get("climate.test_thermostat")
-            assert state is not None
-            assert state.attributes.get("temperature") == new_setpoint
+        # Verify state updated
+        state = hass.states.get("climate.test_thermostat")
+        assert state is not None
+        assert state.attributes.get("temperature") == new_setpoint
 
 
 @pytest.mark.mqtt
@@ -231,52 +229,52 @@ async def test_mqtt_command_sent(
     hass: HomeAssistant,
     mock_auth,
     mock_realtime_with_broker,
+    aioclient_mock
 ):
     """
     Test that HA service calls result in correct MQTT commands.
     """
-    with requests_mock.Mocker() as m:
-        m.get(f"{BASE_URL}/devices", json={"Devices": [MOCK_DEVICE]})
-        m.get(f"{BASE_URL}/devices/state", json={"DeviceStates": [MOCK_STATE]})
-        m.get(f"{BASE_URL}/users", json={"User": {"Id": "test-user"}})
-        m.get(f"{BASE_URL}/homes", json={"Homes": []})
+    aioclient_mock.get(f"{BASE_URL}/devices", json={"Devices": [MOCK_DEVICE]})
+    aioclient_mock.get(f"{BASE_URL}/devices/state", json={"DeviceStates": [MOCK_STATE]})
+    aioclient_mock.get(f"{BASE_URL}/users", json={"User": {"Id": "test-user"}})
+    aioclient_mock.get(f"{BASE_URL}/homes", json={"Homes": []})
 
-        # Setup integration
-        config_entry = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": "user"}
-        )
-        result = await hass.config_entries.flow.async_configure(
-            config_entry["flow_id"],
-            {CONF_USERNAME: "test@example.com", CONF_PASSWORD: "password"},
-        )
-        await hass.async_block_till_done()
-        await hass.async_block_till_done()
+    # Setup integration
+    config_entry = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": "user"}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        config_entry["flow_id"],
+        {CONF_USERNAME: "test@example.com", CONF_PASSWORD: "password"},
+    )
+    await hass.async_block_till_done()
+    await hass.async_block_till_done()
 
-        # Call set_temperature service
-        await hass.services.async_call(
-            "climate",
-            "set_temperature",
-            {"entity_id": "climate.test_thermostat", "temperature": 23.0},
-            blocking=True,
-        )
+    # Call set_temperature service
+    await hass.services.async_call(
+        "climate",
+        "set_temperature",
+        {"entity_id": "climate.test_thermostat", "temperature": 23.0},
+        blocking=True,
+    )
 
-        # Verify MQTT command was sent
-        assert mock_realtime_with_broker.send_command.called
+    # Verify MQTT command was sent
+    assert mock_realtime_with_broker.send_command.called
 
-        # Check command payload
-        call_args = mock_realtime_with_broker.send_command.call_args_list
-        found_temp_cmd = False
-        for call in call_args:
-            args = call[0]
-            if len(args) >= 2:
-                payload = args[1]
-                if "cmd" in payload:
-                    cmd = payload["cmd"][0]
-                    if cmd.get("sp") == 23.0 or cmd.get("stpt") == 23.0:
-                        found_temp_cmd = True
-                        break
+    # Check command payload
+    call_args = mock_realtime_with_broker.send_command.call_args_list
+    found_temp_cmd = False
+    for call in call_args:
+        args = call[0]
+        if len(args) >= 2:
+            payload = args[1]
+            if "cmd" in payload:
+                cmd = payload["cmd"][0]
+                if cmd.get("sp") == 23.0 or cmd.get("stpt") == 23.0:
+                    found_temp_cmd = True
+                    break
 
-        assert found_temp_cmd, f"Temperature command not found in: {call_args}"
+    assert found_temp_cmd, f"Temperature command not found in: {call_args}"
 
 
 @pytest.mark.mqtt

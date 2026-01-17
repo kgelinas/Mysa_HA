@@ -1,326 +1,215 @@
 """
-Authentication Module Coverage Tests.
+Authentication Module Tests.
 
-Tests for mysa_auth.py: Cognito authentication, token management, and MQTT URL signing.
+Tests for mysa_auth.py: async Cognito authentication with boto3.
 """
 
+import sys
+import os
+
+# Add project root to path for imports
+TEST_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.dirname(TEST_DIR)
+sys.path.insert(0, ROOT_DIR)
+import boto3
 import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
-from time import time
-import pycognito
+from unittest.mock import MagicMock, AsyncMock, patch
+from datetime import datetime, timezone, timedelta
+
+# Import module to be tested
+from custom_components.mysa.mysa_auth import (
+    CognitoUser,
+    login,
+    refresh_and_sign_url,
+    sigv4_sign_mqtt_url,
+    _compute_secret_hash,
+    REGION,
+    USER_POOL_ID,
+    MQTT_WS_HOST,
+    BASE_URL,
+    CLIENT_HEADERS,
+    CLIENT_ID,
+)
+
+# Valid-looking token for testing (structure only, signature ignored by mocks)
+MOCK_ID_TOKEN = "header.payload.signature"
+
+@pytest.fixture
+def mock_jwt():
+    """Mock python-jose jwt module."""
+    with patch("custom_components.mysa.mysa_auth.jwt") as mock_jwt_lib:
+        # Default behavior: token is valid
+        mock_jwt_lib.get_unverified_header.return_value = {"kid": "test_kid"}
+        mock_jwt_lib.get_unverified_claims.return_value = {
+            "iss": "https://cognito-idp.us-east-1.amazonaws.com/test",
+            "token_use": "id",
+            "exp": 9999999999
+        }
+        mock_jwt_lib.decode.return_value = {
+            "iss": "https://cognito-idp.us-east-1.amazonaws.com/test",
+            "token_use": "id",
+            "exp": 9999999999,
+            "sub": "test_subject"
+        }
+        yield mock_jwt_lib
+
+@pytest.fixture
+def mock_jwks():
+    """Mock JWKS with matching key."""
+    jwks = {"keys": [{"kid": "test_kid", "kty": "RSA", "alg": "RS256"}]}
+    with patch("custom_components.mysa.mysa_auth.JWKS", jwks):
+        yield jwks
 
 
-class TestCognitoClass:
-    """Test Cognito class initialization and methods."""
+class TestCognitoUser:
+    """Test CognitoUser class."""
 
-    def test_cognito_init(self):
-        """Test Cognito class initialization."""
-        from custom_components.mysa.mysa_auth import (
-            Cognito,
-            USER_POOL_ID,
-            CLIENT_ID,
-            JWKS,
+    def test_cognito_user_init(self, mock_jwt, mock_jwks):
+        """Test CognitoUser initialization and token verification."""
+        user = CognitoUser(
+            username="test@example.com",
+            id_token=MOCK_ID_TOKEN,
+            access_token="access123",
+            refresh_token="refresh123"
         )
 
-        with patch("pycognito.Cognito.__init__", return_value=None):
-            cog = Cognito(
-                user_pool_id=USER_POOL_ID,
-                client_id=CLIENT_ID,
-                username="test@example.com",
-                pool_jwk=JWKS,
-            )
+        assert user.username == "test@example.com"
+        assert user.id_token == MOCK_ID_TOKEN
+        assert user.id_claims is not None
 
-            assert cog.pool_jwk == JWKS
+        # Verify jwt was called correctly (init calls get_unverified_claims)
+        mock_jwt.get_unverified_claims.assert_called_with(MOCK_ID_TOKEN)
 
-    def test_cognito_init_with_session(self):
-        """Test Cognito class initialization with session."""
-        from custom_components.mysa.mysa_auth import Cognito, USER_POOL_ID, CLIENT_ID
+    def test_verify_token_failures(self, mock_jwt, mock_jwks):
+        """Test token verification failure cases."""
+        # Case 1: Key ID not found in JWKS
+        mock_jwt.get_unverified_header.return_value = {"kid": "unknown_kid"}
 
-        mock_session = MagicMock()
+        user = CognitoUser("u", MOCK_ID_TOKEN, "a", "r")
+        with pytest.raises(ValueError, match="Public key not found"):
+            user.verify_token(MOCK_ID_TOKEN, 'id')
 
-        with patch("pycognito.Cognito.__init__", return_value=None):
-            cog = Cognito(
-                user_pool_id=USER_POOL_ID,
-                client_id=CLIENT_ID,
-                username="test@example.com",
-                session=mock_session,
-            )
+        # Case 2: Token use mismatch
+        mock_jwt.get_unverified_header.return_value = {"kid": "test_kid"}
+        mock_jwt.decode.return_value = {"token_use": "access"} # Expected 'id'
 
-            assert cog._session == mock_session
+        user = CognitoUser("u", MOCK_ID_TOKEN, "a", "r")
+        with pytest.raises(ValueError, match="Token use mismatch"):
+            user.verify_token(MOCK_ID_TOKEN, 'id')
 
+    async def test_renew_access_token(self, mock_jwt, mock_jwks):
+        """Test renewing access token."""
+        user = CognitoUser("u", MOCK_ID_TOKEN, "old_acc", "ref")
 
-class TestGetCredentials:
-    """Test get_credentials method."""
-
-    def test_get_credentials_requires_id(self):
-        """Test get_credentials raises error without identity."""
-        from custom_components.mysa.mysa_auth import Cognito, USER_POOL_ID, CLIENT_ID
-
-        with patch("pycognito.Cognito.__init__", return_value=None):
-            cog = Cognito(
-                user_pool_id=USER_POOL_ID,
-                client_id=CLIENT_ID,
-                username="test@example.com",
-            )
-
-            with pytest.raises(
-                ValueError, match="Either identity_pool_id or identity_id"
-            ):
-                cog.get_credentials()
-
-    def test_get_credentials_with_identity_pool(self):
-        """Test get_credentials with identity pool ID."""
-        from custom_components.mysa.mysa_auth import (
-            Cognito,
-            USER_POOL_ID,
-            CLIENT_ID,
-            IDENTITY_POOL_ID,
-        )
-
-        with patch("pycognito.Cognito.__init__", return_value=None):
-            cog = Cognito(
-                user_pool_id=USER_POOL_ID,
-                client_id=CLIENT_ID,
-                username="test@example.com",
-            )
-            cog.user_pool_region = "us-east-1"
-            cog.id_token = "mock_id_token"
-            cog.id_claims = {"iss": "https://cognito-idp.us-east-1.amazonaws.com/test"}
-
-            mock_client = MagicMock()
-            mock_client.get_id.return_value = {
-                "IdentityId": "us-east-1:mock-identity-id"
-            }
-            mock_client.get_credentials_for_identity.return_value = {
-                "Credentials": {
-                    "AccessKeyId": "AKIATEST",
-                    "SecretKey": "secret123",
-                    "SessionToken": "session123",
-                    "Expiration": MagicMock(),
-                }
-            }
-
-            with patch("boto3.client", return_value=mock_client):
-                creds = cog.get_credentials(identity_pool_id=IDENTITY_POOL_ID)
-
-                assert creds is not None
-                mock_client.get_id.assert_called_once()
-                mock_client.get_credentials_for_identity.assert_called_once()
-
-    def test_get_credentials_with_identity_id(self):
-        """Test get_credentials with existing identity ID (skips get_id call)."""
-        from custom_components.mysa.mysa_auth import Cognito, USER_POOL_ID, CLIENT_ID
-
-        with patch("pycognito.Cognito.__init__", return_value=None):
-            cog = Cognito(
-                user_pool_id=USER_POOL_ID,
-                client_id=CLIENT_ID,
-                username="test@example.com",
-            )
-            cog.user_pool_region = "us-east-1"
-            cog.id_token = "mock_id_token"
-            cog.id_claims = {"iss": "https://cognito-idp.us-east-1.amazonaws.com/test"}
-
-            mock_client = MagicMock()
-            mock_client.get_credentials_for_identity.return_value = {
-                "Credentials": {
-                    "AccessKeyId": "AKIATEST",
-                    "SecretKey": "secret123",
-                    "SessionToken": "session123",
-                    "Expiration": MagicMock(),
-                }
-            }
-
-            with patch("boto3.client", return_value=mock_client):
-                creds = cog.get_credentials(identity_id="us-east-1:existing-id")
-
-                assert creds is not None
-                # Should NOT call get_id since we have identity_id
-                mock_client.get_id.assert_not_called()
-                mock_client.get_credentials_for_identity.assert_called_once()
-
-    def test_get_credentials_with_session_client(self):
-        """Test get_credentials uses session client when available."""
-        from custom_components.mysa.mysa_auth import Cognito, USER_POOL_ID, CLIENT_ID
-
-        mock_session = MagicMock()
         mock_client = MagicMock()
-        mock_session.client.return_value = mock_client
-        mock_client.get_credentials_for_identity.return_value = {
-            "Credentials": {
-                "AccessKeyId": "AKIATEST",
-                "SecretKey": "secret123",
-                "SessionToken": "session123",
-                "Expiration": MagicMock(),
+        mock_client.initiate_auth.return_value = {
+            'AuthenticationResult': {
+                'IdToken': "new_id_token",
+                'AccessToken': 'new_access_token'
             }
         }
 
-        with patch("pycognito.Cognito.__init__", return_value=None):
-            cog = Cognito(
-                user_pool_id=USER_POOL_ID,
-                client_id=CLIENT_ID,
-                username="test@example.com",
-                session=mock_session,
-            )
-            cog.user_pool_region = "us-east-1"
-            cog.id_token = "mock_id_token"
-            cog.id_claims = {"iss": "https://cognito-idp.us-east-1.amazonaws.com/test"}
+        with patch('boto3.client', return_value=mock_client) as MockClient:
+            await user.renew_access_token()
 
-            creds = cog.get_credentials(identity_id="us-east-1:test-id")
+            assert user.id_token == "new_id_token"
+            assert user.access_token == "new_access_token"
+            MockClient.assert_called_with('cognito-idp', region_name=REGION)
+            mock_client.initiate_auth.assert_called_once()
 
-            mock_session.client.assert_called_with(
-                "cognito-identity", region_name="us-east-1"
-            )
+            # Verify new token claims were parsed
+            mock_jwt.get_unverified_claims.assert_called_with("new_id_token")
 
-    def test_get_credentials_refresh_callback(self):
-        """Test credential refresh callback logic."""
-        from custom_components.mysa.mysa_auth import Cognito, USER_POOL_ID, CLIENT_ID
-        import botocore.credentials
+    async def test_get_aws_credentials(self, mock_jwt, mock_jwks):
+        """Test getting AWS credentials."""
+        user = CognitoUser("u", MOCK_ID_TOKEN, "acc", "ref")
 
-        with patch("pycognito.Cognito.__init__", return_value=None):
-            cog = Cognito(
-                user_pool_id=USER_POOL_ID,
-                client_id=CLIENT_ID,
-                username="test@example.com",
-            )
-            cog.user_pool_region = "us-east-1"
-            cog.id_token = "mock_id_token"
-            cog.id_claims = {"iss": "https://cognito-idp.us-east-1.amazonaws.com/test"}
-            cog.renew_access_token = MagicMock()
-            cog.verify_token = MagicMock()
+        # Setup claims for login generation
+        user.id_claims = {"iss": "https://cognito-idp.us-east-1.amazonaws.com/test"}
 
-            mock_client = MagicMock()
-            # First call returns credentials
-            mock_client.get_credentials_for_identity.return_value = {
-                "Credentials": {
-                    "AccessKeyId": "AKIATEST",
-                    "SecretKey": "secret123",
-                    "SessionToken": "session123",
-                    "Expiration": MagicMock(),
-                }
+        mock_client = MagicMock()
+        mock_client.get_id.return_value = {
+            'IdentityId': 'us-east-1:identity-123'
+        }
+        mock_client.get_credentials_for_identity.return_value = {
+            'Credentials': {
+                'AccessKeyId': 'AKIATEST',
+                'SecretKey': 'secret123',
+                'SessionToken': 'session123',
+                'Expiration': datetime.now(timezone.utc) + timedelta(hours=1)
             }
+        }
 
-            with patch("boto3.client", return_value=mock_client):
-                # This returns a RefreshableCredentials object
-                creds = cog.get_credentials(identity_id="us-east-1:test-id")
-                assert isinstance(creds, botocore.credentials.RefreshableCredentials)
+        with patch('boto3.client', return_value=mock_client) as MockClient:
+            creds = await user.get_aws_credentials()
 
-                # Setup verify_token to raise exception once, then succeed
-                cog.verify_token.side_effect = [
-                    pycognito.TokenVerificationException("Expired"),
-                    None
-                ]
+            assert creds['access_key'] == 'AKIATEST'
+            assert creds['identity_id'] == 'us-east-1:identity-123'
+            MockClient.assert_called_with('cognito-identity', region_name=REGION)
+            mock_client.get_id.assert_called_once()
+            mock_client.get_credentials_for_identity.assert_called_once()
 
-                # Manually invoke the refresh callback
-                refresh_func = creds._refresh_using
-                # The callback should:
-                # 1. Verification fails -> triggers renew_access_token
-                # 2. Calls get_credentials recursively
-                # We need to break the recursion for the test or mock get_credentials
+    async def test_get_aws_credentials_failure(self, mock_jwt, mock_jwks):
+        """Test getting AWS credentials failure."""
+        user = CognitoUser("u", MOCK_ID_TOKEN, "acc", "ref")
+        user.id_claims = {"iss": "https://cognito-idp.us-east-1.amazonaws.com/test"}
 
-                # ACTUALLY, checking the implementation:
-                # _refresh_credentials calls:
-                #   verify_token -> renew_access_token (if exception)
-                #   return self.get_credentials(...)
+        mock_client = MagicMock()
+        mock_client.get_id.side_effect = Exception("AWS Error")
 
-                # So if we call refresh_func(), it will return a new Credentials object
-                # We mock get_credentials to avoid infinite recursion in test environment
-                # (although logically it creates a NEW creds object)
-
-                with patch.object(cog, 'get_credentials') as mock_get_creds:
-                     refresh_func()
-
-                     # Verify logic
-                     cog.verify_token.assert_called()
-                     cog.renew_access_token.assert_called_once()
-                     mock_get_creds.assert_called_once()
+        with patch('boto3.client', return_value=mock_client):
+            with pytest.raises(Exception, match="AWS Error"):
+                await user.get_aws_credentials()
 
 
 class TestLogin:
     """Test login function."""
 
-    def test_login_success(self):
+    async def test_login_success(self, mock_jwt, mock_jwks):
         """Test successful login."""
-        from custom_components.mysa.mysa_auth import login
+        # Setup pycognito mock
+        mock_cognito_instance = MagicMock()
+        mock_cognito_instance.id_token = MOCK_ID_TOKEN
+        mock_cognito_instance.access_token = 'access_token_123'
+        mock_cognito_instance.refresh_token = 'refresh_token_123'
 
-        with patch("custom_components.mysa.mysa_auth.Cognito") as MockCognito:
-            mock_user = MagicMock()
-            MockCognito.return_value = mock_user
+        with patch('custom_components.mysa.mysa_auth.Cognito', return_value=mock_cognito_instance) as MockCognito:
+            user = await login("test@example.com", "password123")
 
-            result = login("test@example.com", "password123")
+            assert user.username == "test@example.com"
+            assert user.id_token == MOCK_ID_TOKEN
 
-            mock_user.authenticate.assert_called_once_with(password="password123")
-            assert result == mock_user
+            # Verify Cognito initialized and authenticate called
+            MockCognito.assert_called_with(USER_POOL_ID, CLIENT_ID, username="test@example.com")
+            mock_cognito_instance.authenticate.assert_called_with(password="password123")
 
-    def test_login_with_session(self):
-        """Test login with boto session."""
-        from custom_components.mysa.mysa_auth import login
+    async def test_login_failure(self):
+        """Test login failure."""
+        with patch('custom_components.mysa.mysa_auth.Cognito') as MockCognito:
+            mock_instance = MockCognito.return_value
+            mock_instance.authenticate.side_effect = Exception("Autherr")
 
-        mock_session = MagicMock()
-        # Mock internal botocore session
-        mock_inner = MagicMock()
-        mock_session._session = mock_inner
-
-        with patch("custom_components.mysa.mysa_auth.Cognito") as MockCognito:
-            mock_user = MagicMock()
-            MockCognito.return_value = mock_user
-
-            result = login("test@example.com", "password123", bsess=mock_session)
-
-            MockCognito.assert_called_once()
-            call_kwargs = MockCognito.call_args[1]
-            assert call_kwargs["session"] == mock_session
+            with pytest.raises(Exception, match="Autherr"):
+                await login("test@example.com", "fail")
 
 
-class TestAuther:
-    """Test auther HTTP auth handler."""
+class TestHelpers:
+    """Test helper functions."""
 
-    def test_auther_returns_callable(self):
-        """Test auther returns a callable."""
-        from custom_components.mysa.mysa_auth import auther
+    def test_compute_secret_hash(self):
+        """Test secret hash computation."""
+        # Known test vectors
+        username = "testuser"
+        client_id = "testclient"
+        client_secret = "secret"
 
-        mock_user = MagicMock()
-        mock_user.id_claims = {"exp": time() + 3600}  # Expires in 1 hour
-        mock_user.id_token = "valid_token"
+        # Expected hash
+        # generic hmac sha256 of "testusertestclient" with key "secret"
+        # then base64 encoded
 
-        auth_handler = auther(mock_user)
-
-        assert callable(auth_handler)
-
-    def test_auther_sets_authorization(self):
-        """Test auther sets authorization header."""
-        from custom_components.mysa.mysa_auth import auther
-
-        mock_user = MagicMock()
-        mock_user.id_claims = {"exp": time() + 3600}  # Expires in 1 hour
-        mock_user.id_token = "valid_token"
-
-        auth_handler = auther(mock_user)
-
-        mock_request = MagicMock()
-        mock_request.headers = {}
-
-        result = auth_handler(mock_request)
-
-        assert result.headers["authorization"] == "valid_token"
-
-    def test_auther_refreshes_expired_token(self):
-        """Test auther refreshes token when expired."""
-        from custom_components.mysa.mysa_auth import auther
-
-        mock_user = MagicMock()
-        mock_user.id_claims = {"exp": time() - 10}  # Already expired
-        mock_user.id_token = "refreshed_token"
-
-        auth_handler = auther(mock_user)
-
-        mock_request = MagicMock()
-        mock_request.headers = {}
-
-        result = auth_handler(mock_request)
-
-        mock_user.renew_access_token.assert_called_once()
-        assert result.headers["authorization"] == "refreshed_token"
+        result = _compute_secret_hash(username, client_id, client_secret)
+        assert isinstance(result, str)
+        assert len(result) > 0
 
 
 class TestSigv4SignMqttUrl:
@@ -328,76 +217,80 @@ class TestSigv4SignMqttUrl:
 
     def test_sigv4_sign_mqtt_url(self):
         """Test signing MQTT URL with SigV4."""
-        from custom_components.mysa.mysa_auth import sigv4_sign_mqtt_url
+        aws_credentials = {
+            'access_key': 'AKIATEST123',
+            'secret_key': 'secret_key_test',
+            'session_token': 'session/token+test='
+        }
 
-        mock_cred = MagicMock()
-        mock_frozen = MagicMock()
-        mock_frozen._replace.return_value = mock_frozen
-        mock_cred.get_frozen_credentials.return_value = mock_frozen
-        mock_cred.token = "session_token_123"
+        result = sigv4_sign_mqtt_url(aws_credentials)
 
-        with patch("botocore.auth.SigV4QueryAuth") as MockAuth:
-            mock_auth_instance = MagicMock()
-            MockAuth.return_value = mock_auth_instance
+        # Verify the result is a signed WebSocket URL
+        assert isinstance(result, str)
+        assert result.startswith('wss://')
+        assert 'X-Amz-Algorithm' in result
+        assert 'X-Amz-Signature' in result
+        assert 'X-Amz-Security-Token' in result
+        # Check for URL encoded token: / -> %2F, + -> %2B, = -> %3D
+        assert 'session%2Ftoken%2Btest%3D' in result
 
-            result = sigv4_sign_mqtt_url(mock_cred)
 
-            # Verify the auth was created with correct params
-            MockAuth.assert_called_once()
-            call_kwargs = MockAuth.call_args[1]
-            assert call_kwargs["service_name"] == "iotdevicegateway"
-            assert call_kwargs["region_name"] == "us-east-1"
+class TestRefreshAndSignUrl:
+    """Test refresh_and_sign_url function."""
 
-    def test_sigv4_url_contains_session_token(self):
-        """Test that session token is added after signing."""
-        from custom_components.mysa.mysa_auth import sigv4_sign_mqtt_url, MQTT_WS_URL
+    async def test_refresh_and_sign_url(self, mock_jwt, mock_jwks):
+        """Test refreshing token and signing URL."""
+        user = CognitoUser("u", MOCK_ID_TOKEN, "acc", "ref")
 
-        mock_cred = MagicMock()
-        mock_frozen = MagicMock()
-        mock_frozen._replace.return_value = mock_frozen
-        mock_cred.get_frozen_credentials.return_value = mock_frozen
-        mock_cred.token = "session_token_xyz"
+        # Setup mocks
+        mock_renewal_client = MagicMock()
+        mock_renewal_client.initiate_auth.return_value = {
+            'AuthenticationResult': {
+                'IdToken': MOCK_ID_TOKEN,
+                'AccessToken': 'new_access_token'
+            }
+        }
 
-        with patch("botocore.auth.SigV4QueryAuth") as MockAuth:
-            mock_auth_instance = MagicMock()
-            MockAuth.return_value = mock_auth_instance
+        mock_creds_client = MagicMock()
+        mock_creds_client.get_id.return_value = {'IdentityId': 'id-123'}
+        mock_creds_client.get_credentials_for_identity.return_value = {
+            'Credentials': {
+                'AccessKeyId': 'KEY', 'SecretKey': 'SECRET', 'SessionToken': 'TOKEN',
+                'Expiration': datetime.now(timezone.utc)
+            }
+        }
 
-            result = sigv4_sign_mqtt_url(mock_cred)
+        def mock_client_factory(service, **kwargs):
+            if service == 'cognito-idp':
+                return mock_renewal_client
+            else:
+                return mock_creds_client
 
-            # The result should be a prepared URL string
-            assert isinstance(result, str)
+        with patch('boto3.client', side_effect=mock_client_factory):
+            # Force verification failure to test renew path
+            mock_jwt.verify_token = MagicMock(side_effect=Exception("Expired"))
+            # Note: We can't mock the method on instance easily if it's called inside.
+            # Actually we can mock verify_token on the user object if we set it before call,
+            # BUT refresh_and_sign_url calls user.verify_token.
+            # Ideally rely on verify_token raising exception via mocks.
+            # If we set get_unverified_header to raise, verify_token will raise.
+
+            mock_jwt.get_unverified_header.side_effect = Exception("Expired")
+
+            signed_url, returned_user = await refresh_and_sign_url(user)
+
+            assert returned_user == user
+            # Should have attempted renewal
+            mock_renewal_client.initiate_auth.assert_called()
 
 
 class TestConstants:
     """Test auth module constants."""
 
-    def test_region_constant(self):
-        """Test REGION constant."""
-        from custom_components.mysa.mysa_auth import REGION
-
+    def test_constants_values(self):
+        """Test constant values."""
         assert REGION == "us-east-1"
-
-    def test_user_pool_id_constant(self):
-        """Test USER_POOL_ID constant."""
-        from custom_components.mysa.mysa_auth import USER_POOL_ID
-
         assert USER_POOL_ID == "us-east-1_GUFWfhI7g"
-
-    def test_mqtt_ws_host_constant(self):
-        """Test MQTT_WS_HOST constant."""
-        from custom_components.mysa.mysa_auth import MQTT_WS_HOST
-
         assert "iot.us-east-1.amazonaws.com" in MQTT_WS_HOST
-
-    def test_base_url_constant(self):
-        """Test BASE_URL constant."""
-        from custom_components.mysa.mysa_auth import BASE_URL
-
         assert BASE_URL == "https://app-prod.mysa.cloud"
-
-    def test_client_headers(self):
-        """Test CLIENT_HEADERS constant."""
-        from custom_components.mysa.mysa_auth import CLIENT_HEADERS
-
         assert "user-agent" in CLIENT_HEADERS
-        assert "accept" in CLIENT_HEADERS

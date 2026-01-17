@@ -630,14 +630,13 @@ class TestMysaUpdate:
         from custom_components.mysa.update import MysaUpdate
 
         mock_api.hass = hass
-        mock_api.fetch_firmware_info = MagicMock(
+        mock_api.fetch_firmware_info = AsyncMock(
             return_value={
                 "installedVersion": "1.2.3",
                 "allowedVersion": "1.3.0",
                 "update": True,
             }
         )
-        hass.async_add_executor_job = AsyncMock(side_effect=lambda f, *args: f(*args))
 
         device_data = {
             "Id": "device1",
@@ -658,6 +657,7 @@ class TestMysaUpdate:
         from custom_components.mysa.update import MysaUpdate
 
         mock_api.hass = hass
+        mock_api.fetch_firmware_info = AsyncMock(side_effect=Exception("Network error"))
 
         device_data = {
             "Id": "device1",
@@ -667,20 +667,8 @@ class TestMysaUpdate:
         }
         entity = MysaUpdate(mock_api, "device1", device_data)
 
-        # Save original and patch for this test only
-        original_method = hass.async_add_executor_job
-
-        async def raise_error(*args):
-            raise Exception("Network error")
-
-        hass.async_add_executor_job = raise_error
-
-        try:
-            # Should not raise - the entity catches the exception
-            await entity.async_update()
-        finally:
-            # Restore original to avoid teardown issues
-            hass.async_add_executor_job = original_method
+        # Should not raise - the entity catches the exception
+        await entity.async_update()
 
 
 # ===========================================================================

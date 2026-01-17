@@ -8,20 +8,19 @@ import os
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
+# Mock pycognito globally for environment where it is not installed
+sys.modules["pycognito"] = MagicMock()
+
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.mysa.const import DOMAIN
-from custom_components.mysa.mysa_api import MysaApi
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-# Add custom_components to path for imports
+
+# Test directory paths (for reference, not for sys.path manipulation)
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(TEST_DIR)
-MYSA_DIR = os.path.join(ROOT_DIR, "custom_components")
 
-sys.path.insert(0, MYSA_DIR)
-sys.path.insert(0, ROOT_DIR)
 
 
 # ===========================================================================
@@ -41,6 +40,8 @@ def skip_notifications_fixture():
     with (
         patch("homeassistant.components.persistent_notification.async_create"),
         patch("homeassistant.components.persistent_notification.async_dismiss"),
+        patch("homeassistant.setup.async_process_deps_reqs", return_value=None),
+        patch("homeassistant.requirements.async_process_requirements", return_value=None),
     ):
         yield
 
@@ -53,11 +54,14 @@ def skip_notifications_fixture():
 @pytest.fixture
 def mock_config_entry(hass):
     """Create a standard mock config entry."""
+    from custom_components.mysa.const import DOMAIN
+
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={
             "username": "test@example.com",
             "password": "password123",
+            "device_id": "test_device_id",
         },
         entry_id="test_entry_id",
         title="Mysa Integration",
@@ -96,7 +100,7 @@ def mock_mysa_api():
 @pytest.fixture
 def mock_api():
     """Create a fully mocked MysaApi instance."""
-    # MysaApi is imported at top level
+    from custom_components.mysa.mysa_api import MysaApi
 
     api = MagicMock(spec=MysaApi)
     api.authenticate = AsyncMock(return_value=True)

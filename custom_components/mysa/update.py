@@ -76,9 +76,7 @@ class MysaUpdate(
         """Update the entity."""
         # This runs every SCAN_INTERVAL (4 hours)
         try:
-            info = await self._api.hass.async_add_executor_job(
-                self._api.fetch_firmware_info, self._device_id
-            )
+            info = await self._api.fetch_firmware_info(self._device_id)
 
 
             if info:

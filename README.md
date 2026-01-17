@@ -1,6 +1,6 @@
 # Mysa for Home Assistant
 
-[![Version](https://img.shields.io/badge/version-0.8.6-blue.svg)](https://github.com/kgelinas/Mysa_HA)
+[![Version](https://img.shields.io/badge/version-0.8.9-blue.svg)](https://github.com/kgelinas/Mysa_HA)
 
 ...
 
@@ -198,43 +198,10 @@ For developers interested in the Mysa API, see [docs/MYSA_PROTOCOL.md](docs/MYSA
 
 ## Development
 
-### Testing
-
-The integration includes a comprehensive test suite with **100% code coverage** for core modules.
-
-```bash
-# Run all tests
-pytest tests/ -v
-
-# Run with coverage report
-pytest tests/ --cov=custom_components/mysa --cov-report=term-missing
-```
-
-**Coverage by module:**
-| Module | Coverage |
-|:-------|:--------:|
-| `climate.py` | 100% |
-| `sensor.py` | 100% |
-| `binary_sensor.py` | 100% |
-| `switch.py` | 100% |
-| `number.py` | 100% |
-| `select.py` | 100% |
-| `update.py` | 100% |
-| `client.py` | 100% |
-| `config_flow.py` | 100% |
-| `mqtt.py` | 100% |
-| `mysa_auth.py` | 100% |
-| `mysa_mqtt.py` | 100% |
-| `mysa_api.py` | 100% |
-| `device.py` | 100% |
-| `realtime.py` | 100% |
-| `diagnostics.py` | 100% |
-| `system_health.py` | 100% |
-
-
 ### Dev Container
 
 A Dev Container configuration is included for VS Code. Open the project in VS Code and select "Reopen in Container" to get a pre-configured development environment with all dependencies.
+
 
 ## Requirements
 

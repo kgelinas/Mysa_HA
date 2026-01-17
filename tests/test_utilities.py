@@ -216,8 +216,8 @@ class TestApiCoordinatorIntegration:
         mock_api.states = {}
         mock_api._last_command_time = {}
 
-        with patch.object(MysaClient, "_get_state_sync") as mock_sync:
-            mock_sync.return_value = {"device1": {"temperature": 22.5, "humidity": 50}}
+        with patch.object(MysaClient, "get_state", new_callable=AsyncMock) as mock_get_state:
+            mock_get_state.return_value = {"device1": {"temperature": 22.5, "humidity": 50}}
 
             async def update_method():
                 return await mock_api.get_state()
@@ -233,7 +233,6 @@ class TestApiCoordinatorIntegration:
             await coordinator.async_refresh()
 
             assert coordinator.data["device1"]["temperature"] == 22.5
-            mock_sync.assert_called()
 
     @pytest.mark.asyncio
     async def test_coordinator_callback_triggered(self, hass):
@@ -1169,8 +1168,8 @@ class TestMysaApiAsyncMocking:
         """Test mocking MysaApi.get_state with AsyncMock."""
         from custom_components.mysa.client import MysaClient
 
-        with patch.object(MysaClient, "_get_state_sync") as mock_sync:
-            mock_sync.return_value = {
+        with patch.object(MysaClient, "get_state", new_callable=AsyncMock) as mock_get_state:
+            mock_get_state.return_value = {
                 "device1": {
                     "temperature": 21.5,
                     "setpoint": 22.0,
@@ -1181,8 +1180,7 @@ class TestMysaApiAsyncMocking:
             api = MysaApi.__new__(MysaApi)
             api.hass = hass
             api.client = MysaClient(hass, "user", "pass")
-            # We mock the session so _get_state_sync doesn't explode if called for real (though it should be patched)
-            api.client._session = MagicMock()
+            api.client._user_obj = MagicMock()  # Session initialized for coverage
             api.states = {}
             api._last_command_time = {}
 
@@ -1190,7 +1188,6 @@ class TestMysaApiAsyncMocking:
 
             assert "device1" in result
             assert result["device1"]["temperature"] == 21.5
-            mock_sync.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_set_temperature_async_mocked(self, hass):

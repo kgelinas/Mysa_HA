@@ -1,14 +1,12 @@
 """HTTP Client for Mysa."""
 import logging
-import boto3
-import requests  # type: ignore[import-untyped]
+from time import time
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .mysa_auth import (
-    Cognito, login, auther,
-    REGION, USER_POOL_ID, CLIENT_ID, JWKS,
+    CognitoUser, login, refresh_and_sign_url,
     CLIENT_HEADERS, BASE_URL,
 )
-from .mysa_mqtt import refresh_and_sign_url
 from .device import MysaDeviceLogic
 
 _LOGGER = logging.getLogger(__name__)
@@ -26,7 +24,6 @@ class MysaClient:
         self.username = username
         self.password = password
         self._user_obj = None
-        self._session = None
         self._user_id = None  # Mysa User UUID
         self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
         self.devices = {}
@@ -35,84 +32,96 @@ class MysaClient:
         self.zone_to_home = {}
         self.device_to_home = {}
         self.home_rates = {}
-        self._last_command_time = {} # Shared state need? Probably passed from top level
+        self._last_command_time = {}
 
     @property
     def is_connected(self) -> bool:
         """Return if API session is active."""
-        return self._session is not None
+        return self._user_obj is not None
 
     @property
     def user_id(self):
         """Return the user ID."""
         return self._user_id
 
+    async def _get_auth_headers(self) -> dict:
+        """Get authorization headers, refreshing token if needed."""
+        if not self._user_obj:
+            return {}
+
+        # Check if token needs refresh (within 5 seconds of expiry)
+        # pylint: disable=unsubscriptable-object
+        if self._user_obj.id_claims and time() > self._user_obj.id_claims['exp'] - 5:
+            # Renew token (now async, no executor needed)
+            await self._user_obj.renew_access_token()
+
+        headers = dict(CLIENT_HEADERS)
+        if self._user_obj.id_token:
+            headers['authorization'] = self._user_obj.id_token
+        return headers
+
     async def authenticate(self):
         """Authenticate with Mysa (Async)."""
         # 1. Load cached tokens
         cached_data = await self._store.async_load()
 
-        def do_sync_login():
-            bsess = boto3.session.Session(region_name=REGION)
-
-            # Try to restore session
-            if cached_data and isinstance(cached_data, dict):
-                id_token = cached_data.get("id_token")
-                refresh_token = cached_data.get("refresh_token")
-                if id_token and refresh_token:
+        # Try to restore session from cached tokens
+        if cached_data and isinstance(cached_data, dict):
+            id_token = cached_data.get("id_token")
+            access_token = cached_data.get("access_token")
+            refresh_token = cached_data.get("refresh_token")
+            if id_token and refresh_token and access_token:
+                try:
+                    # Create user object from cached tokens
+                    user = CognitoUser(
+                        username=self.username,
+                        id_token=id_token,
+                        access_token=access_token,
+                        refresh_token=refresh_token
+                    )
+                    # Verify token
                     try:
-                        u = Cognito(
-                            user_pool_id=USER_POOL_ID,
-                            client_id=CLIENT_ID,
-                            id_token=id_token,
-                            refresh_token=refresh_token,
-                            username=self.username,
-                            session=bsess,
-                            pool_jwk=JWKS
-                        )
-                        # Verify logic
-                        try:
-                            u.verify_token(u.id_token, "id_token", "id")
-                        except Exception:
-                            # Try refresh
-                            u.renew_access_token()
-
+                        user.verify_token(user.id_token, "id")
                         _LOGGER.debug("Restored credentials from storage")
-                        return u
-                    except Exception as e:
-                        _LOGGER.debug("Failed to restore credentials: %s", e)
+                        self._user_obj = user
+                    except Exception:
+                        # Try refresh
+                        _LOGGER.debug("Token expired, refreshing...")
+                        await user.renew_access_token()
+                        self._user_obj = user
+                        _LOGGER.debug("Successfully refreshed credentials")
+                except Exception as e:
+                    _LOGGER.debug("Failed to restore credentials: %s", e)
+                    self._user_obj = None
 
-            # Fallback to Password Login
+        # Fallback to Password Login if restoration failed
+        if not self._user_obj:
             _LOGGER.debug("Logging in with password...")
-            return login(self.username, self.password, bsess=bsess)
-
-        try:
-            self._user_obj = await self.hass.async_add_executor_job(do_sync_login)
-        except Exception as e:
-            _LOGGER.error("Authentication failed: %s", e)
-            raise
+            try:
+                self._user_obj = await login(self.username, self.password)
+            except Exception as e:
+                _LOGGER.error("Authentication failed: %s", e)
+                raise
 
         # 2. Save tokens back to Store
         if self._user_obj:
             await self._store.async_save({
                 "id_token": self._user_obj.id_token,
+                "access_token": self._user_obj.access_token,
                 "refresh_token": self._user_obj.refresh_token
             })
 
-        # 3. Setup Requests Session
-        self._session = requests.Session()
-        self._session.headers.update(CLIENT_HEADERS)
-        self._session.auth = auther(self._user_obj)
-
-        # 4. Fetch User ID (needed for MQTT commands)
+        # 3. Fetch User ID (needed for MQTT commands)
         try:
-            r = await self.hass.async_add_executor_job(
-                lambda: self._session.get(f"{BASE_URL}/users")
-            )
-            r.raise_for_status()
-            user_data = r.json()
-            self._user_id = user_data.get("User", {}).get("Id")
-            _LOGGER.debug("Fetched User ID: %s", self._user_id)
+            session = async_get_clientsession(self.hass)
+            async with session.get(
+                f"{BASE_URL}/users",
+                headers=await self._get_auth_headers()
+            ) as resp:
+                resp.raise_for_status()
+                user_data = await resp.json()
+                self._user_id = user_data.get("User", {}).get("Id")
+                _LOGGER.debug("Fetched User ID: %s", self._user_id)
         except Exception as e:
             _LOGGER.error("Failed to fetch User ID: %s", e)
 
@@ -120,18 +129,16 @@ class MysaClient:
 
     async def get_devices(self):
         """Get devices."""
-        return await self.hass.async_add_executor_job(self._get_devices_sync)
-
-    def _get_devices_sync(self):
-        """Get devices synchronously from HTTP API."""
-        if not self._session:
+        if not self._user_obj:
             raise RuntimeError("Session not initialized")
 
+        session = async_get_clientsession(self.hass)
         url = f"{BASE_URL}/devices"
-        r = self._session.get(url)
-        r.raise_for_status()
 
-        json_resp = r.json()
+        async with session.get(url, headers=await self._get_auth_headers()) as resp:
+            resp.raise_for_status()
+            json_resp = await resp.json()
+
         devices_raw = json_resp.get('DevicesObj', json_resp.get('Devices', []))
         if isinstance(devices_raw, list):
             self.devices = {d['Id']: d for d in devices_raw}
@@ -140,7 +147,7 @@ class MysaClient:
 
         # Auto-fetch homes/zones
         try:
-            self._fetch_homes_sync()
+            await self.fetch_homes()
         except Exception as e:
             _LOGGER.warning("Failed to fetch homes/zones: %s", e)
 
@@ -148,18 +155,16 @@ class MysaClient:
 
     async def fetch_homes(self):
         """Fetch homes and zones."""
-        return await self.hass.async_add_executor_job(self._fetch_homes_sync)
-
-    def _fetch_homes_sync(self):
-        """Fetch homes synchronously from HTTP API."""
-        if not self._session:
+        if not self._user_obj:
             raise RuntimeError("Session not initialized")
 
+        session = async_get_clientsession(self.hass)
         url = f"{BASE_URL}/homes"
-        r = self._session.get(url)
-        r.raise_for_status()
 
-        data = r.json()
+        async with session.get(url, headers=await self._get_auth_headers()) as resp:
+            resp.raise_for_status()
+            data = await resp.json()
+
         self.homes = data.get('Homes', data.get('homes', []))
 
         self.zones = {}
@@ -212,38 +217,43 @@ class MysaClient:
             return self.home_rates.get(home_id)
         return None
 
-    def fetch_firmware_info(self, device_id):
-        """Fetch firmware update info (Sync)."""
-        if not self._session:
+    async def fetch_firmware_info(self, device_id):
+        """Fetch firmware update info."""
+        if not self._user_obj:
             raise RuntimeError("Session not initialized")
 
+        session = async_get_clientsession(self.hass)
         url = f"{BASE_URL}/devices/update_available/{device_id}"
+
         try:
-            r = self._session.get(url, timeout=10)
-            r.raise_for_status()
-            return r.json()
+            async with session.get(
+                url,
+                headers=await self._get_auth_headers()
+            ) as resp:
+                resp.raise_for_status()
+                return await resp.json()
         except Exception as e:
             _LOGGER.debug("Failed to fetch firmware info for %s: %s", device_id, e)
             return None
 
     async def get_state(self, current_states=None):
         """Get full state of all devices."""
-        return await self.hass.async_add_executor_job(
-            self._get_state_sync, current_states
-        )
-
-    def _get_state_sync(self, current_states=None):
-        """Get full state (settings + live data) from HTTP API."""
         if current_states is None:
             current_states = {}
 
-        if not self._session:
+        if not self._user_obj:
             raise RuntimeError("Session not initialized")
 
+        session = async_get_clientsession(self.hass)
+
         # 1. Fetch live metrics
-        r_state = self._session.get(f"{BASE_URL}/devices/state")
-        r_state.raise_for_status()
-        state_json = r_state.json()
+        async with session.get(
+            f"{BASE_URL}/devices/state",
+            headers=await self._get_auth_headers()
+        ) as resp:
+            resp.raise_for_status()
+            state_json = await resp.json()
+
         new_states_raw = state_json.get('DeviceStatesObj', state_json.get('DeviceStates', []))
         if isinstance(new_states_raw, list):
             new_states = {d['Id']: d for d in new_states_raw}
@@ -251,9 +261,12 @@ class MysaClient:
             new_states = new_states_raw
 
         # 2. Fetch device settings
-        r_devices = self._session.get(f"{BASE_URL}/devices")
-        r_devices.raise_for_status()
-        devices_json = r_devices.json()
+        async with session.get(
+            f"{BASE_URL}/devices",
+            headers=await self._get_auth_headers()
+        ) as resp:
+            resp.raise_for_status()
+            devices_json = await resp.json()
 
         devices_raw = devices_json.get('DevicesObj', devices_json.get('Devices', []))
         if isinstance(devices_raw, list):
@@ -274,62 +287,57 @@ class MysaClient:
                 new_data = dev_info
 
             MysaDeviceLogic.normalize_state(new_data)
-
-            # Since we are returning the full new state for the coordinator to merge,
-            # we don't necessarily need to check _last_command_time here.
-            # Let's return the simplified merge and let caller handle staleness.
-            # The coordinator/api class will decide whether to overwrite MQTT state.
-
             result_states[device_id] = new_data
 
         return result_states
 
     async def get_signed_mqtt_url(self):
         """Get signed MQTT URL with fresh credentials."""
-        def _sign():
-            signed_url, new_user_obj = refresh_and_sign_url(
-                self._user_obj, self.username, self.password
-            )
-            # Update user object if it was refreshed
-            if new_user_obj is not self._user_obj:
-                self._user_obj = new_user_obj
-                # We could save to store here but it's async...
-                # For now just updating memory is fine for session continuity
-            return signed_url
-        return await self.hass.async_add_executor_job(_sign)
+        if not self._user_obj:
+            raise RuntimeError("Not authenticated")
+
+        signed_url, new_user_obj = await refresh_and_sign_url(self._user_obj)
+
+        # Update user object if it was refreshed
+        if new_user_obj is not self._user_obj:
+            self._user_obj = new_user_obj
+
+        return signed_url
 
     async def set_device_setting_http(self, device_id, settings: dict):
         """Set device settings via HTTP POST."""
-        if not self._session:
+        if not self._user_obj:
             raise RuntimeError("Session not initialized")
-        session = self._session
 
-        def do_post():
-            url = f"{BASE_URL}/devices/{device_id}"
-            r = session.post(url, json=settings)
-            r.raise_for_status()
-            return r.json()
+        session = async_get_clientsession(self.hass)
+        url = f"{BASE_URL}/devices/{device_id}"
 
         try:
-            result = await self.hass.async_add_executor_job(do_post)
-            _LOGGER.debug("Set device %s settings %s: %s", device_id, settings, result)
-            return result
+            async with session.post(
+                url,
+                json=settings,
+                headers=await self._get_auth_headers()
+            ) as resp:
+                resp.raise_for_status()
+                result = await resp.json()
+                _LOGGER.debug("Set device %s settings %s: %s", device_id, settings, result)
+                return result
         except Exception as e:
             _LOGGER.error("Failed to set device %s settings: %s", device_id, e)
             raise
 
     async def async_request(self, method, url, **kwargs):
         """Perform a request using the session."""
-        if not self._session:
+        if not self._user_obj:
             raise RuntimeError("Session not initialized")
-        session = self._session
 
-        def _do_req():
-            resp = session.request(method, url, **kwargs)
+        session = async_get_clientsession(self.hass)
+        headers = kwargs.pop('headers', {})
+        headers.update(await self._get_auth_headers())
+
+        async with session.request(method, url, headers=headers, **kwargs) as resp:
             resp.raise_for_status()
             return resp
-
-        return await self.hass.async_add_executor_job(_do_req)
 
     async def set_device_setting_silent(self, device_id, settings: dict):
         """Set device settings via HTTP POST without raising on error (best effort)."""

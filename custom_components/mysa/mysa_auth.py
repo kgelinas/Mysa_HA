@@ -1,31 +1,27 @@
 """
 Mysa Authentication Module
 
-Consolidated authentication and AWS utilities for Mysa devices.
-Handles Cognito authentication, token management, and MQTT URL signing.
+Async authentication and AWS utilities for Mysa devices using boto3.
 
-Based on mysotherm (https://github.com/dlenski/mysotherm) by @dlenski
+This module handles:
+1. Cognito User Pool authentication (SRP)
+2. AWS Credential retrieval (Cognito Identity)
+3. AWS SigV4 signing for MQTT WebSocket connection
 """
 from __future__ import annotations
-# pylint: disable=line-too-long
-import os
+
 import logging
-from functools import wraps
-from time import time
-from typing import Optional, Any, cast
+import asyncio
+import base64
+import hashlib
+import hmac
+from datetime import datetime, timezone
+from typing import Optional
+from urllib.parse import urlencode, quote
 
-# boto3 wastes 1 second trying to connect to EC2 metadata unless disabled
-os.environ['AWS_EC2_METADATA_DISABLED'] = 'true'
-
-# pylint: disable=wrong-import-position
-import requests  # type: ignore[import-untyped]
 import boto3
-import botocore
-import botocore.auth
-import botocore.awsrequest
-import botocore.credentials
-import pycognito
-import pycognito.exceptions
+from jose import jwt
+from pycognito import Cognito
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -40,6 +36,7 @@ REGION = 'us-east-1'
 JWKS = {
     "keys": [
         {
+            # pylint: disable=line-too-long
             "alg": "RS256",
             "e": "AQAB",
             "kid": "udQ2TtD4g3Jc3dORobozGYu/T3qqcCtJonq0dwcrF8g=",
@@ -48,6 +45,7 @@ JWKS = {
             "use": "sig"
         },
         {
+            # pylint: disable=line-too-long
             "alg": "RS256",
             "e": "AQAB",
             "kid": "f5vP7g+ehnb4PP+90i1WVsnUNfccQZVReBmaRvrHga0=",
@@ -86,125 +84,190 @@ BASE_URL = 'https://app-prod.mysa.cloud'
 
 
 # =============================================================================
-# Cognito Authentication
+# Cognito User Class
 # =============================================================================
 
-class Cognito(pycognito.Cognito):
-    """
-    Extended Cognito class that handles both cognito-idp (user auth) and
-    cognito-identity (AWS credentials) sides of authentication.
-    """
+class CognitoUser:
+    """Represents an authenticated Cognito user with tokens and AWS credentials."""
 
-    @wraps(pycognito.Cognito.__init__)  # type: ignore[misc]
-    def __init__(self,
-        session: Optional[boto3.session.Session] = None,
-        pool_jwk: Optional[dict] = None,
-        **kwargs
+    def __init__(
+        self,
+        username: str,
+        id_token: str,
+        access_token: str,
+        refresh_token: str,
     ):
+        self.username = username
+        self.id_token = id_token
+        self.access_token = access_token
+        self.refresh_token = refresh_token
+        self.id_claims: Optional[dict] = None
+        self.aws_credentials: Optional[dict] = None
 
-        self._session = session
-        super().__init__(session=session, **kwargs)
-        self.pool_jwk = pool_jwk
+        # Decode ID token to get claims
+        if id_token:
+            self.id_claims = jwt.get_unverified_claims(id_token)
 
-    def get_credentials(self,
-        identity_pool_id: Optional[str] = None,
-        identity_id: Optional[str] = None,
-        region: Optional[str] = None,
-    ) -> botocore.credentials.Credentials:
+    def verify_token(self, token: str, token_use: str) -> dict:
+        """Verify JWT token signature and claims."""
+        # Get kid from token header
+        headers = jwt.get_unverified_header(token)
+        kid = headers['kid']
+
+        # Find matching key in JWKS
+        key = None
+        for k in JWKS['keys']:
+            if k['kid'] == kid:
+                key = k
+                break
+
+        if not key:
+            raise ValueError(f"Public key not found for kid: {kid}")
+
+        # Verify token
+        claims = jwt.decode(
+            token,
+            key,
+            algorithms=['RS256'],
+            audience=CLIENT_ID if token_use == 'id' else None,
+            options={'verify_aud': token_use == 'id'}
+        )
+
+        # Verify token_use claim
+        if claims.get('token_use') != token_use:
+            raise ValueError(
+                f"Token use mismatch: expected {token_use}, got {claims.get('token_use')}"
+            )
+
+        return claims
+
+    async def renew_access_token(self) -> None:
+        """Refresh the access token using the refresh token."""
+        def _refresh():
+            client = boto3.client('cognito-idp', region_name=REGION)
+            return client.initiate_auth(
+                ClientId=CLIENT_ID,
+                AuthFlow='REFRESH_TOKEN_AUTH',
+                AuthParameters={
+                    'REFRESH_TOKEN': self.refresh_token
+                }
+            )
+
+        loop = asyncio.get_running_loop()
+        try:
+            response = await loop.run_in_executor(None, _refresh)
+
+            auth_result = response['AuthenticationResult']
+            self.id_token = auth_result['IdToken']
+            self.access_token = auth_result['AccessToken']
+            # Update claims
+            if self.id_token:
+                self.id_claims = jwt.get_unverified_claims(self.id_token)
+
+            _LOGGER.debug("Successfully renewed access token for %s", self.username)
+        except Exception as e:
+
+            _LOGGER.error("Failed to renew access token: %s", e)
+            raise
+
+    async def get_aws_credentials(self, identity_id: Optional[str] = None) -> dict:
         """Get AWS credentials from Cognito Identity pool."""
-        if not identity_pool_id and not identity_id:
-            raise ValueError("Either identity_pool_id or identity_id must be specified")
-
-        if region is None:
-            region = self.user_pool_region
-
-        if self._session:
-            client = self._session.client('cognito-identity', region_name=region)
-        else:
-            client = boto3.client('cognito-identity', region_name=region)
-        # Cast to Any because Pyrefly doesn't know specific service methods
-        client = cast(Any, client)
-
-        # pylint: disable=unsubscriptable-object
-        # pylint: disable=unsubscriptable-object
+        # Build logins dict
         assert self.id_claims is not None
         assert self.id_claims['iss'].startswith('https://')
         logins = {self.id_claims['iss'][8:]: self.id_token}
 
-        if not identity_id:
-            r = client.get_id(IdentityPoolId=identity_pool_id, Logins=logins)
-            identity_id = r['IdentityId']
-        r = client.get_credentials_for_identity(IdentityId=identity_id, Logins=logins)
-        c = r['Credentials']
+        def _get_credentials():
+            client = boto3.client('cognito-identity', region_name=REGION)
 
-        def _refresh_credentials():
-            try:
-                self.verify_token(self.id_token, "id_token", "id")
-            except pycognito.TokenVerificationException:
-                self.renew_access_token()
-            return self.get_credentials(identity_id=identity_id, region=region)
+            # Get identity ID if not provided
+            id_id = identity_id
+            if not id_id:
+                resp_id = client.get_id(
+                    IdentityPoolId=IDENTITY_POOL_ID,
+                    Logins=logins
+                )
+                id_id = resp_id['IdentityId']
 
-        return botocore.credentials.RefreshableCredentials(
-            c['AccessKeyId'],
-            c['SecretKey'],
-            c['SessionToken'],
-            c['Expiration'],
-            method='cognito-idp',
-            refresh_using=_refresh_credentials)
+            resp_creds = client.get_credentials_for_identity(
+                IdentityId=id_id,
+                Logins=logins
+            )
+
+            return id_id, resp_creds
+
+        loop = asyncio.get_running_loop()
+        try:
+            id_id, response = await loop.run_in_executor(None, _get_credentials)
+
+            credentials = response['Credentials']
+            self.aws_credentials = {
+                'access_key': credentials['AccessKeyId'],
+                'secret_key': credentials['SecretKey'],
+                'session_token': credentials['SessionToken'],
+                'expiration': credentials['Expiration'],
+                'identity_id': id_id
+            }
+            return self.aws_credentials
+        except Exception as e:
+            _LOGGER.error("Failed to get AWS credentials: %s", e)
+            raise
 
 
-def login(user: str, password: str, bsess: Optional[boto3.session.Session] = None) -> Cognito:
+# =============================================================================
+# Cognito Authentication Functions
+# =============================================================================
+
+def _compute_secret_hash(username: str, client_id: str, client_secret: str) -> str:
+    """Compute SECRET_HASH for Cognito authentication."""
+    message = bytes(username + client_id, 'utf-8')
+    secret = bytes(client_secret, 'utf-8')
+    dig = hmac.new(secret, msg=message, digestmod=hashlib.sha256).digest()
+    return base64.b64encode(dig).decode()
+
+
+async def login(username: str, password: str) -> CognitoUser:
     """
     Authenticate with Mysa using email and password.
 
     Args:
-        user: Mysa account email
+        username: Mysa account email
         password: Mysa account password
-        bsess: Optional boto3 session
 
     Returns:
-        Authenticated Cognito user object
+        Authenticated CognitoUser object
     """
-    u = Cognito(
-       user_pool_id=USER_POOL_ID,
-       client_id=CLIENT_ID,
-       username=user,
-       session=bsess,
-       pool_jwk=JWKS)
-    u.authenticate(password=password)
-    _LOGGER.debug('Successfully authenticated as user %s', user)
-    return u
 
+    def _authenticate():
+        u = Cognito(USER_POOL_ID, CLIENT_ID, username=username)
+        u.authenticate(password=password)
+        return u
 
-# =============================================================================
-# HTTP Authentication Helper
-# =============================================================================
+    loop = asyncio.get_running_loop()
 
-def auther(u: Cognito):
-    """
-    Create a requests auth handler that auto-refreshes tokens.
+    try:
+        # Run synchronous SRP authentication in executor
+        u = await loop.run_in_executor(None, _authenticate)
+    except Exception as e:
+        _LOGGER.error("Authentication failed: %s", e)
+        raise
 
-    Args:
-        u: Authenticated Cognito user object
+    user = CognitoUser(
+        username=username,
+        id_token=u.id_token,
+        access_token=u.access_token,
+        refresh_token=u.refresh_token
+    )
 
-    Returns:
-        Auth callable for requests.Session
-    """
-    def f(request: requests.PreparedRequest) -> requests.PreparedRequest:
-        # pylint: disable=unsubscriptable-object
-        if u.id_claims and time() > u.id_claims['exp'] - 5:
-            u.renew_access_token()
-        if u.id_token:
-            request.headers['authorization'] = u.id_token
-        return request
-    return f
+    _LOGGER.debug('Successfully authenticated as user %s', username)
+    return user
 
 
 # =============================================================================
 # MQTT URL Signing
 # =============================================================================
 
-def sigv4_sign_mqtt_url(cred: botocore.credentials.Credentials) -> str:
+def sigv4_sign_mqtt_url(aws_credentials: dict) -> str:
     """
     Sign MQTT WebSocket URL using AWS SigV4.
 
@@ -212,17 +275,95 @@ def sigv4_sign_mqtt_url(cred: botocore.credentials.Credentials) -> str:
     AFTER signing rather than being included in the signed URL.
 
     Args:
-        cred: AWS credentials from Cognito
+        aws_credentials: AWS credentials dict with access_key, secret_key, session_token
 
     Returns:
         Signed MQTT WebSocket URL
     """
-    req = botocore.awsrequest.AWSRequest('GET', MQTT_WS_URL)
-    # Strip session token before signing (Mysa's unusual approach)
-    botocore.auth.SigV4QueryAuth(
-        credentials=cred.get_frozen_credentials()._replace(token=None),
-        service_name='iotdevicegateway',
-        region_name='us-east-1').add_auth(req)
-    # Add session token after signing
-    req.params['X-Amz-Security-Token'] = cred.token
-    return req.prepare().url
+    # pylint: disable=too-many-locals
+    # Parse URL
+    method = 'GET'
+    service = 'iotdevicegateway'
+    host = MQTT_WS_HOST
+    canonical_uri = '/mqtt'
+
+    # Create timestamp
+    t = datetime.now(timezone.utc)
+    amz_date = t.strftime('%Y%m%dT%H%M%SZ')
+    date_stamp = t.strftime('%Y%m%d')
+
+    # Create canonical query string (without session token for signing)
+    canonical_querystring = urlencode({
+        'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
+        'X-Amz-Credential':
+            f"{aws_credentials['access_key']}/{date_stamp}/{REGION}/{service}/aws4_request",
+        'X-Amz-Date': amz_date,
+        'X-Amz-SignedHeaders': 'host',
+    })
+
+    # Create canonical headers
+    canonical_headers = f'host:{host}\n'
+    signed_headers = 'host'
+
+    # Create payload hash (empty for GET)
+    payload_hash = hashlib.sha256(b'').hexdigest()
+
+    # Create canonical request
+    canonical_request = (
+        f"{method}\n{canonical_uri}\n{canonical_querystring}\n"
+        f"{canonical_headers}\n{signed_headers}\n{payload_hash}"
+    )
+
+    # Create string to sign
+    algorithm = 'AWS4-HMAC-SHA256'
+    credential_scope = f"{date_stamp}/{REGION}/{service}/aws4_request"
+    string_to_sign = (
+        f"{algorithm}\n{amz_date}\n{credential_scope}\n"
+        f"{hashlib.sha256(canonical_request.encode('utf-8')).hexdigest()}"
+    )
+
+    # Calculate signature
+    def _sign(key, msg):
+        return hmac.new(key, msg.encode('utf-8'), hashlib.sha256).digest()
+
+    k_date = _sign(('AWS4' + aws_credentials['secret_key']).encode('utf-8'), date_stamp)
+    k_region = hmac.new(k_date, REGION.encode('utf-8'), hashlib.sha256).digest()
+    k_service = hmac.new(k_region, service.encode('utf-8'), hashlib.sha256).digest()
+    k_signing = hmac.new(k_service, b'aws4_request', hashlib.sha256).digest()
+
+    signature = hmac.new(k_signing, string_to_sign.encode('utf-8'), hashlib.sha256).hexdigest()
+
+    # Add signature to query string
+    signed_querystring = canonical_querystring + f'&X-Amz-Signature={signature}'
+
+    # Add session token AFTER signing (Mysa's unusual approach)
+    # Token must be URL encoded as it contains special characters
+    encoded_token = quote(aws_credentials["session_token"], safe='')
+    signed_querystring += f'&X-Amz-Security-Token={encoded_token}'
+
+    return f'wss://{host}{canonical_uri}?{signed_querystring}'
+
+
+async def refresh_and_sign_url(user: CognitoUser) -> tuple[str, CognitoUser]:
+    """
+    Refresh user tokens if needed and return signed MQTT URL.
+
+    Args:
+        user: CognitoUser object
+
+    Returns:
+        Tuple of (signed_url, user_object)
+    """
+    # Refresh token if needed
+    try:
+        user.verify_token(user.id_token, 'id')
+    except Exception:
+        await user.renew_access_token()
+
+    # Get AWS credentials
+    await user.get_aws_credentials()
+
+    # Sign URL
+    signed_url = sigv4_sign_mqtt_url(user.aws_credentials)
+
+    return (signed_url, user)
