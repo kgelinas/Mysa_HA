@@ -8,6 +8,7 @@
   "documentation": "https://github.com/kgelinas/Mysa_HA",
   "integration_type": "hub",
   "iot_class": "cloud_push",
+  "issue_tracker": "https://github.com/kgelinas/Mysa_HA/issues",
   "requirements": [
     "python-jose>=3.3.0",
     "websockets>=12.0",
