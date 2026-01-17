@@ -340,8 +340,8 @@ class TestMysaApi:  # pylint: disable=too-many-public-methods
         api.get_zone_name("z1")
         api.client.get_zone_name.assert_called_with("z1")
 
-        api.client.fetch_firmware_info = MagicMock()
-        api.fetch_firmware_info("dev1")
+        api.client.fetch_firmware_info = AsyncMock()
+        await api.fetch_firmware_info("dev1")
         api.client.fetch_firmware_info.assert_called_with("dev1")
 
         api.client.get_electricity_rate = MagicMock()
@@ -459,8 +459,8 @@ class TestMysaApi:  # pylint: disable=too-many-public-methods
 
             api = MysaApi("u", "p", hass)
 
-            api.client.fetch_firmware_info.return_value = {"fw": "1.0"}
-            assert api.fetch_firmware_info("dev1") == {"fw": "1.0"}
+            api.client.fetch_firmware_info = AsyncMock(return_value={"fw": "1.0"})
+            assert await api.fetch_firmware_info("dev1") == {"fw": "1.0"}
 
             api.client.get_electricity_rate.return_value = 0.1
             assert api.get_electricity_rate("dev1") == 0.1

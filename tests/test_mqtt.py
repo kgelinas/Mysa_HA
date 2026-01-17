@@ -43,6 +43,7 @@ from custom_components.mysa.mqtt import (
 )
 
 
+
 class TestImportFallback:
     """Test fallback imports when package relative imports fail."""
 
@@ -61,24 +62,26 @@ class TestImportFallback:
             triggered = {"val": False}
 
             def side_effect(name, globals=None, locals=None, fromlist=(), level=0):
-                # Trigger on relative import of mysa_auth
-                # Name might be 'mysa_auth' or fromlist might contain it
-                if level > 0 and ("mysa_auth" in fromlist or name == "mysa_auth"):
+                # Trigger on relative import of mqtt
+                if level > 0 and fromlist and "mqtt" in fromlist:
                     triggered["val"] = True
                     raise ImportError("Simulated relative import failure")
                 return real_import(name, globals, locals, fromlist, level)
 
             with patch("builtins.__import__", side_effect=side_effect):
-                # Prepare fallback mocks BEFORE import
-                mock_fallback_auth = MagicMock()
-                mock_fallback_auth.Cognito = "FALLBACK_COGNITO"
+                # Prepare fallback mocks
+                mock_mqtt = MagicMock()
+                mock_mqtt.connect = MagicMock(return_value="FALLBACK_CONNECT")
 
-                # Mock the fallback modules (mysa_auth, mqtt, const)
+                mock_const = MagicMock()
+                mock_const.MQTT_KEEPALIVE = 60
+                mock_const.MQTT_USER_AGENT = "test-agent"
+
+                # Mock the fallback modules (mqtt, const)
                 # These are ABSOLUTE imports in the fallback block
                 fallback_mocks = {
-                    "mysa_auth": mock_fallback_auth,
-                    "mqtt": MagicMock(),
-                    "const": MagicMock(),
+                    "mqtt": mock_mqtt,
+                    "const": mock_const,
                 }
 
                 with patch.dict(sys.modules, fallback_mocks):
@@ -87,12 +90,14 @@ class TestImportFallback:
                     # Verify we triggered the error
                     assert triggered["val"], "Relative import was not intercepted!"
 
-                    # Verify we used the fallback
-                    assert custom_components.mysa.mysa_mqtt.Cognito == "FALLBACK_COGNITO"
+                    # Verify we used the fallback by calling a function that uses mqtt module
+                    res = custom_components.mysa.mysa_mqtt.create_connect_packet()
+                    assert res == "FALLBACK_CONNECT"
 
         finally:
             # Restore original modules
             sys.modules.update(original_modules)
+
 
 
 
@@ -914,58 +919,61 @@ from unittest.mock import MagicMock, AsyncMock, patch
 class TestRefreshAndSignUrl:
     """Test refresh_and_sign_url function."""
 
-    def test_refresh_success(self):
+    @pytest.mark.asyncio
+    async def test_refresh_success(self):
         """Test successful token refresh."""
-        from custom_components.mysa.mysa_mqtt import refresh_and_sign_url
+        from custom_components.mysa.mysa_auth import refresh_and_sign_url
 
-        mock_user = MagicMock()
-        mock_user.renew_access_token = MagicMock()
-        mock_user.get_credentials = MagicMock(return_value=MagicMock())
+        mock_user = AsyncMock()
+        mock_user.verify_token = MagicMock()  # No exception = valid
+        mock_user.get_aws_credentials = AsyncMock(return_value={
+            'access_key': 'AKIATEST',
+            'secret_key': 'secret',
+            'session_token': 'token'
+        })
 
-        with patch("custom_components.mysa.mysa_mqtt.sigv4_sign_mqtt_url") as mock_sign:
+        with patch("custom_components.mysa.mysa_auth.sigv4_sign_mqtt_url") as mock_sign:
             mock_sign.return_value = "wss://signed-url"
 
-            url, user = refresh_and_sign_url(mock_user, "test@example.com", "pass")
+            url, user = await refresh_and_sign_url(mock_user)
 
-            mock_user.renew_access_token.assert_called_once()
             assert url == "wss://signed-url"
             assert user == mock_user
 
-    def test_refresh_failure_reauth(self):
-        """Test token refresh failure triggers re-authentication."""
-        from custom_components.mysa.mysa_mqtt import refresh_and_sign_url
+    @pytest.mark.asyncio
+    async def test_refresh_failure_reauth(self):
+        """Test token refresh failure catches and continues."""
+        from custom_components.mysa.mysa_auth import refresh_and_sign_url
 
-        mock_user = MagicMock()
-        mock_user.renew_access_token = MagicMock(side_effect=Exception("Token expired"))
+        mock_user = AsyncMock()
+        # Token is expired, trigger renewal
+        mock_user.verify_token = MagicMock(side_effect=Exception("Expired"))
+        mock_user.renew_access_token = AsyncMock()
+        mock_user.get_aws_credentials = AsyncMock(return_value={
+            'access_key': 'AKIATEST',
+            'secret_key': 'secret',
+            'session_token': 'token'
+        })
 
-        mock_new_user = MagicMock()
-        mock_new_user.get_credentials = MagicMock(return_value=MagicMock())
+        with patch("custom_components.mysa.mysa_auth.sigv4_sign_mqtt_url") as mock_sign:
+            mock_sign.return_value = "wss://new-signed-url"
 
-        with patch("custom_components.mysa.mysa_mqtt.login") as mock_login:
-            mock_login.return_value = mock_new_user
+            url, user = await refresh_and_sign_url(mock_user)
 
-            with patch(
-                "custom_components.mysa.mysa_mqtt.sigv4_sign_mqtt_url"
-            ) as mock_sign:
-                mock_sign.return_value = "wss://new-signed-url"
+            mock_user.renew_access_token.assert_called_once()
+            assert user == mock_user
 
-                url, user = refresh_and_sign_url(mock_user, "test@example.com", "pass")
-
-                mock_login.assert_called_once_with("test@example.com", "pass")
-                assert user == mock_new_user
-
-    def test_refresh_reauth_failure(self):
+    @pytest.mark.asyncio
+    async def test_refresh_reauth_failure(self):
         """Test re-authentication failure raises exception."""
-        from custom_components.mysa.mysa_mqtt import refresh_and_sign_url
+        from custom_components.mysa.mysa_auth import refresh_and_sign_url
 
-        mock_user = MagicMock()
-        mock_user.renew_access_token = MagicMock(side_effect=Exception("Token expired"))
+        mock_user = AsyncMock()
+        mock_user.verify_token = MagicMock(side_effect=Exception("Expired"))
+        mock_user.renew_access_token = AsyncMock(side_effect=Exception("Renew failed"))
 
-        with patch("custom_components.mysa.mysa_mqtt.login") as mock_login:
-            mock_login.side_effect = Exception("Auth failed")
-
-            with pytest.raises(Exception, match="Auth failed"):
-                refresh_and_sign_url(mock_user, "test@example.com", "pass")
+        with pytest.raises(Exception, match="Renew failed"):
+            await refresh_and_sign_url(mock_user)
 
 
 class TestGetWebsocketUrl:

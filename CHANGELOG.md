@@ -3,6 +3,17 @@
 All notable changes to this project will be documented in this file.
 
 
+## [0.8.9] - 2026-01-16
+### Fixed
+- **Update Sensor**: Fixed critical crash where firmware info was not properly awaited.
+- **E-Rate**: Correctly fetching Electricity Rate from home data (resolves "unknown" state).
+
+### Changed
+- **Dependencies**: Reworked library to use async version. Start time  should be better now.
+- **Testing**: Added comprehensive VCR (cassette) tests for recording/replaying API interactions.
+- **Documentation**: Created detailed testing guide in `docs/TESTING.md`.
+- **Version Requirements**: Updated minimum Home Assistant version to 2024.1.0 (required for `ConfigFlowResult`).
+
 ## [0.8.6] - 2026-01-15
 ### Fixed
 - **Config Flow Crash**: Fixed `AttributeError` when configuring options, caused by incorrect handling of zone data structure.
