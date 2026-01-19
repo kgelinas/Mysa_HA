@@ -387,14 +387,28 @@ class MysaPowerSensor(SensorEntity, CoordinatorEntity):
         # Check simulated energy flag
         force_simulated = getattr(self._api, "simulated_energy", False)
 
-        # 1. Try real data (Voltage * Current)
+        # Get duty cycle (used in both real and simulated calculations)
+        duty = self._extract_value(state, ["Duty", "dc", "DutyCycle"]) or 0
+        try:
+            duty_float = float(duty)
+            if duty_float > 1:
+                duty_float = duty_float / 100.0
+        except (ValueError, TypeError):
+            duty_float = 0.0
+
+        # 1. Try real data (Voltage * Current * DutyCycle)
+        # Note: Current sensor reports "last on" value, not instantaneous.
+        # We must multiply by duty cycle to get actual power consumption.
         if not force_simulated:
             voltage = self._extract_value(state, ["Voltage", "LineVoltage"])
             current = self._extract_value(state, ["Current"])
 
             if voltage and current:
                 try:
-                    return round(float(voltage) * float(current), 1)
+                    # Max power when heater is on
+                    max_power = float(voltage) * float(current)
+                    # Actual average power = max_power * duty cycle
+                    return round(max_power * duty_float, 1)
                 except (ValueError, TypeError):
                     pass
 
@@ -414,16 +428,10 @@ class MysaPowerSensor(SensorEntity, CoordinatorEntity):
                 wattage = 0
 
         if wattage > 0:
-            duty = self._extract_value(state, ["Duty", "dc", "DutyCycle"]) or 0
-            try:
-                duty_float = float(duty)
-                if duty_float > 1:
-                    duty_float = duty_float / 100.0
-                return round(wattage * duty_float, 1)
-            except (ValueError, TypeError):
-                pass
+            return round(wattage * duty_float, 1)
 
         return 0.0
+
 
     @property
     def extra_state_attributes(self):

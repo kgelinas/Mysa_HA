@@ -1,0 +1,16 @@
+{
+    "domain": "mysa_extended",
+    "name": "Mysa Extended",
+    "codeowners": [
+        "@gelke01"
+    ],
+    "config_flow": true,
+    "dependencies": [
+        "mysa"
+    ],
+    "documentation": "https://github.com/kgelinas/Mysa_HA",
+    "integration_type": "service",
+    "iot_class": "cloud_push",
+    "issue_tracker": "https://github.com/kgelinas/Mysa_HA/issues",
+    "version": "0.1.0"
+}

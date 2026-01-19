@@ -244,6 +244,39 @@ class TestMysaClient:
             devs = await client.get_devices()
             assert "d2" in devs
 
+    async def test_get_devices_ghost_filtering(self, mock_hass):
+        """Test get_devices filters out devices not assigned to a home."""
+        client = MysaClient(mock_hass, "u", "p")
+        client._user_obj = MagicMock()
+        client._user_obj.id_claims = {"exp": 9999999999}
+        client._user_obj.id_token = "token"
+
+        # /devices returns active device (d1) and ghost device (ghost_id)
+        mock_response = create_mock_response({
+            "DevicesObj": [
+                {"Id": "d1", "Name": "Active Device"},
+                {"Id": "ghost_id", "Name": "Ghost Device"}
+            ]
+        })
+
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(return_value=create_async_context_manager(mock_response))
+
+        # Mock fetch_homes to only map d1 to a home
+        async def mock_fetch_homes_side_effect():
+            client.device_to_home = {"d1": "h1"}
+            client.homes = [{"Id": "h1"}]
+            return client.homes
+
+        with patch("custom_components.mysa.client.async_get_clientsession", return_value=mock_session), \
+             patch.object(client, "fetch_homes", side_effect=mock_fetch_homes_side_effect):
+
+            devs = await client.get_devices()
+
+            # Assertions: d1 should be present, ghost_id should be filtered out
+            assert "d1" in devs
+            assert "ghost_id" not in devs
+
     async def test_get_devices_no_session(self, mock_hass):
         """Test get_devices raises if no session."""
         client = MysaClient(mock_hass, "u", "p")

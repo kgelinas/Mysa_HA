@@ -5,6 +5,10 @@ Mysa Debug Tool
 Interactive command-line utility for testing and debugging Mysa device
 communication via HTTP and MQTT protocols.
 
+Includes advanced features like "Magic Upgrade" for converting Lite devices
+to Full. For Home Assistant users, consider using the mysa_extended integration
+instead: https://github.com/kgelinas/Mysa_HA
+
 Usage:
     cd tools
     python mysa_debug.py
@@ -22,22 +26,23 @@ from datetime import datetime
 import requests
 
 # Add custom_components directory to path
+# Add project root directory to path to allow absolute imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
-mysa_path = os.path.join(parent_dir, 'custom_components', 'mysa')
-sys.path.insert(0, mysa_path)
+sys.path.insert(0, parent_dir)
 
 try:
-    from mysa_auth import (
-        login, auther,
-        REGION, CLIENT_HEADERS, BASE_URL,
+    from custom_components.mysa.mysa_auth import (
+        login, refresh_and_sign_url,
+        CLIENT_HEADERS, BASE_URL,
     )
-    from mysa_mqtt import (
-        refresh_and_sign_url, MqttConnection,
+    from custom_components.mysa.mysa_mqtt import (
+        MqttConnection,
     )
-    from const import MQTT_PING_INTERVAL
-    import mqtt
-    import boto3
+
+    from custom_components.mysa.const import MQTT_PING_INTERVAL
+    from custom_components.mysa import mqtt
+
 except ImportError as e:
     print(f"\nCRITICAL: Could not import required modules: {e}")
     print("Make sure you're running from the tools/ directory")
@@ -69,6 +74,7 @@ class MysaDebugTool:
         self.password = None
         self.sniff_mode = False
         self.sniff_filter = None  # Filter by device ID (None = all)
+        self.ghost_devices = {}
 
     async def run(self):
         print("\n" + "="*60)
@@ -96,8 +102,6 @@ class MysaDebugTool:
             pass
 
     async def authenticate(self):
-        bsess = boto3.session.Session(region_name=REGION)
-
         # Try saved credentials
         if os.path.exists(self.auth_path):
             try:
@@ -106,10 +110,10 @@ class MysaDebugTool:
                 print(f"Using saved credentials from {self.auth_path}")
                 self.username = saved['username']
                 self.password = saved['password']
-                self._user_obj = login(self.username, self.password, bsess=bsess)
+                self._user_obj = await login(self.username, self.password)
                 self.session = requests.Session()
-                self.session.auth = auther(self._user_obj)
                 self.session.headers.update(CLIENT_HEADERS)
+                self.session.headers['authorization'] = self._user_obj.id_token
 
                 # Get user ID
                 r = self.session.get(f"{BASE_URL}/users")
@@ -126,10 +130,10 @@ class MysaDebugTool:
         self.password = getpass.getpass("Mysa Password: ").strip()
 
         try:
-            self._user_obj = login(self.username, self.password, bsess=bsess)
+            self._user_obj = await login(self.username, self.password)
             self.session = requests.Session()
-            self.session.auth = auther(self._user_obj)
             self.session.headers.update(CLIENT_HEADERS)
+            self.session.headers['authorization'] = self._user_obj.id_token
 
             r = self.session.get(f"{BASE_URL}/users")
             r.raise_for_status()
@@ -147,24 +151,69 @@ class MysaDebugTool:
             return False
 
     async def fetch_devices(self):
-        print("Fetching devices...")
-        r = self.session.get(f"{BASE_URL}/devices")
-        r.raise_for_status()
-        data = r.json()
-        dev_list = data.get('DevicesObj', data.get('Devices', []))
-        if isinstance(dev_list, list):
-            self.devices = {d['Id']: d for d in dev_list}
-        else:
-            self.devices = dev_list
-        print(f"✓ Found {len(self.devices)} devices\n")
-        self.list_devices()
+        # pylint: disable=too-many-locals
+        print("Fetching devices using client...")
+        try:
+
+
+            # We need to manually do what client.get_devices does but with our session
+            r = self.session.get(f"{BASE_URL}/devices")
+            r.raise_for_status()
+            data = r.json()
+            dev_list = data.get('DevicesObj', data.get('Devices', []))
+
+            all_devices = {}
+            if isinstance(dev_list, list):
+                all_devices = {d['Id']: d for d in dev_list}
+            else:
+                all_devices = dev_list
+
+            # Fetch homes to filter ghosts
+            print("Fetching homes for validation...")
+            r_homes = self.session.get(f"{BASE_URL}/homes")
+            r_homes.raise_for_status()
+            data_homes = r_homes.json()
+            homes = data_homes.get('Homes', data_homes.get('homes', []))
+
+            valid_device_ids = set()
+            device_to_home = {}
+            for home in homes:
+                h_name = home.get('Name', 'Unknown Home')
+                for zone in home.get('Zones', []):
+                    z_name = zone.get('Name', 'Unknown Zone')
+                    for d_id in zone.get('DeviceIds', []):
+                        valid_device_ids.add(d_id)
+                        device_to_home[d_id] = f"{h_name} > {z_name}"
+
+            self.devices = {}
+            # self.ghost_devices = {} # Removed ghost filtering
+
+            for d_id, d in all_devices.items():
+                self.devices[d_id] = d
+                # Inject location info for display
+                d['_location'] = device_to_home.get(d_id)
+
+            print(f"\n✓ Found {len(self.devices)} devices")
+            print()
+
+            self.list_devices()
+
+        except Exception as e:
+            print(f"Error fetching devices: {e}")
 
     def list_devices(self):
-        for i, (did, d) in enumerate(self.devices.items(), 1):
-            model = d.get('Model', 'Unknown')
-            name = d.get('Name', 'Unnamed')
-            print(f"  {i}. {name} ({did}) - {model}")
-        print()
+        if not self.devices:
+            print("No active devices found.")
+        else:
+            print("--- Devices ---")
+            for i, (did, d) in enumerate(self.devices.items(), 1):
+                model = d.get('Model', 'Unknown')
+                name = d.get('Name', 'Unnamed')
+                loc = d.get('_location', '')
+                loc_str = f" [{loc}]" if loc else ""
+                print(f"  {i}. {name} ({did}) - {model}{loc_str}")
+
+
 
     async def command_loop(self):
         # Create prompt session if prompt_toolkit is available
@@ -693,9 +742,7 @@ class MysaDebugTool:
             try:
                 # Use shared token refresh logic
                 try:
-                    signed_url, new_user_obj = refresh_and_sign_url(
-                        self._user_obj, self.username, self.password
-                    )
+                    signed_url, new_user_obj = await refresh_and_sign_url(self._user_obj)
                     if new_user_obj is not self._user_obj:
                         self._user_obj = new_user_obj
                         print("✓ Re-authenticated successfully")

@@ -1,0 +1,54 @@
+upgrade_lite_device:
+  name: Upgrade Lite Device (Magic Upgrade)
+  description: >
+    Unlocks "Full" features on a Mysa Baseboard V2 Lite (BB-V2-0-L) by changing its model type to standard BB-V2-0.
+
+    ⚠️ WARNING: This modifies firmware settings and may void your warranty. Use at your own risk.
+    Requires power cycling the device afterwards.
+  fields:
+    device_id:
+      name: Device
+      description: The Mysa Lite device to upgrade.
+      required: true
+      selector:
+        device:
+          integration: mysa
+          manufacturer: Mysa
+
+downgrade_lite_device:
+  name: Revert Lite Device (Undo Upgrade)
+  description: >
+    Reverts a Mysa Baseboard V2 Lite device back to its original factory Model ID (BB-V2-0-L).
+    Use this if you need to reverse the "Magic Upgrade".
+
+    ⚠️ WARNING: This modifies firmware settings. Use at your own risk.
+    Requires power cycling the device afterwards.
+  fields:
+    device_id:
+      name: Device
+      description: The Mysa device to revert.
+      required: true
+      selector:
+        device:
+          integration: mysa
+          manufacturer: Mysa
+
+killer_ping:
+  name: Killer Ping (Restart to Pairing Mode)
+  description: >
+    Sends a special command that RESTARTS the device into PAIRING MODE.
+    The device will disconnect from your network and need to be re-paired using the Mysa app.
+
+    ⚠️⚠️ DANGER: This is a DESTRUCTIVE action! ⚠️⚠️
+    - The device will be DISCONNECTED from your network
+    - You will need to physically RE-PAIR the device
+    - Only use this if you need to move the device to a new network
+  fields:
+    device_id:
+      name: Device
+      description: The Mysa device to restart into pairing mode.
+      required: true
+      selector:
+        device:
+          integration: mysa
+          manufacturer: Mysa

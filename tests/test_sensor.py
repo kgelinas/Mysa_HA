@@ -1571,7 +1571,8 @@ class TestSensorCoverage:
             return {
                 "device1": {
                     "Voltage": 240,
-                    "Current": 10
+                    "Current": 10,
+                    "Duty": 100  # 100% duty cycle for full power
                 }
             }
         mock_coordinator.update_method = async_update
@@ -1582,7 +1583,7 @@ class TestSensorCoverage:
         mock_api.simulated_energy = False
         sensor = MysaPowerSensor(mock_coordinator, "device1", device_data, mock_api, mock_config_entry)
 
-        # 240 * 10 = 2400
+        # 240V * 10A * 100% duty = 2400W
         assert sensor.native_value == 2400.0
 
     async def test_power_sensor_exceptions(self, hass, mock_coordinator, mock_config_entry):

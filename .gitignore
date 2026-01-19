@@ -43,5 +43,5 @@ htmlcov/
 coverage.xml
 .pytest_cache/
 
-# VCR cassettes (contain sensitive IDs)
-tests/cassettes/
+# VCR cassettes are now safe to commit (anonymized)
+# See docs/VCR_ANONYMIZATION.md for details

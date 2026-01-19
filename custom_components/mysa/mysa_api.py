@@ -115,8 +115,21 @@ class MysaApi:
         return await self.client.fetch_firmware_info(device_id)
 
     def get_electricity_rate(self, device_id):
-        """Get electricity rate for a device."""
+        """Get electricity rate for a device.
+
+        Checks for a custom_erate override in the mysa_extended integration first.
+        Falls back to the cloud-provided rate if no override is set.
+        """
+        # Check for custom rate override from mysa_extended
+        extended_domain = "mysa_extended"
+        for entry in self.hass.config_entries.async_entries(extended_domain):
+            custom_rate = entry.options.get("custom_erate")
+            if custom_rate is not None:
+                return custom_rate
+
+        # Fall back to cloud-provided rate
         return self.client.get_electricity_rate(device_id)
+
 
     # State Management
     async def get_state(self):
@@ -169,7 +182,7 @@ class MysaApi:
         else:
             self.states[device_id].update(state_update)
 
-        _LOGGER.info("MQTT state update for %s", device_id)
+        _LOGGER.debug("MQTT state update for %s", device_id)
 
         # Trigger HA update
         if self.coordinator_callback:
@@ -422,6 +435,39 @@ class MysaApi:
         except Exception as e:
             _LOGGER.error("Magic Revert failed: %s", e)
             return False
+
+    async def async_send_killer_ping(self, device_id: str) -> bool:
+        """Send killer ping to restart device into pairing mode.
+
+        WARNING: This will disconnect the device from the network.
+        The device will need to be re-paired using the Mysa app.
+        """
+        device = self.devices.get(device_id)
+        if not device:
+            return False
+
+        _LOGGER.warning(
+            "Sending Killer Ping to %s - Device will restart into pairing mode!",
+            device_id
+        )
+
+        timestamp = int(time.time())
+        body = {
+            "Device": device_id.upper(),
+            "Timestamp": timestamp,
+            "MsgType": 5,
+            "EchoID": 1
+        }
+
+        try:
+            await self.realtime.send_command(
+                device_id, body, self.client.user_id, msg_type=5, wrap=False
+            )
+            return True
+        except Exception as e:
+            _LOGGER.error("Killer Ping failed: %s", e)
+            return False
+
 
     # Helpers
     def _update_state_cache(self, device_id, updates: dict):

@@ -3,6 +3,31 @@
 All notable changes to this project will be documented in this file.
 
 
+## [0.8.10] - 2026-01-19
+### Fixed
+- **Energy Calculation (Critical)**: Resolved 10x overestimation bug in power and energy sensors. The `Current` sensor reports the last-measured value when the heater was ON, not instantaneous current. Power is now correctly calculated as `Voltage × Current × DutyCycle%`.
+
+### Added
+- **API Reference**: New comprehensive HTTP API documentation (`docs/API_REFERENCE.md`) with full endpoint descriptions, response structures, and field explanations.
+- **Mysa Extended Integration**: New optional integration (`mysa_extended`) to house advanced or experimental features, starting with the "Magic Upgrade" services.
+- **Custom Electricity Rate**: Added `custom_erate` option to Mysa Extended to override the cloud-provided electricity rate for energy cost calculations.
+- **UI Config Flow**: Mysa Extended can now be added via the Home Assistant "Add Integration" UI.
+- **Killer Ping Service**: New `mysa_extended.killer_ping` service to restart a device into pairing mode (use with extreme caution).
+
+### Changed
+- **Service Migration**: Moved `upgrade_lite_device` and `downgrade_lite_device` services from the core `mysa` integration to `mysa_extended`. This keeps the core integration lean and focused on standard features.
+- **Documentation**: Simplified `docs/TESTING.md`.
+- **Test Retirement**: Removed VCR cassette-based end-to-end tests to reduce maintenance overhead. Core logic remains at 100% unit test coverage.
+- **Tooling**: Removed unused dependencies and cleaned up imports in `tools/mysa_debug.py`.
+
+### ⚠️ Migration Guide (v0.8.10)
+This release includes a major refactoring that splits the integration into two parts. Standard users do **not** need to do anything, but if you use advanced features, please read below:
+
+1. **Magic Upgrade Services**: If you previously used `mysa.upgrade_lite_device` or `mysa.downgrade_lite_device`, you must now install the `mysa_extended` component. These services have moved to the `mysa_extended` domain.
+2. **Installation**: Copy the `custom_components/mysa_extended` folder to your Home Assistant `config/custom_components/` directory and restart.
+3. **Automations**: Update any automations or scripts that called the old services to use `mysa_extended.upgrade_lite_device` or `mysa_extended.downgrade_lite_device`.
+4. **Energy Stats**: Due to the power calculation fix, your Energy dashboard may show a "spike" or change in behavior as it now reflects real usage instead of peak wattage. No action is required, but you can reset your energy sensors if you want a clean start.
+
 ## [0.8.9] - 2026-01-16
 ### Fixed
 - **Update Sensor**: Fixed critical crash where firmware info was not properly awaited.

@@ -49,7 +49,7 @@ async def async_setup_entry(
     for device_id, device_data in devices.items():
         # Use appropriate entity class based on device type
         if api.is_ac_device(device_id):
-            _LOGGER.info("Creating AC climate entity for %s", device_id)
+            _LOGGER.debug("Creating AC climate entity for %s", device_id)
             entities.append(MysaACClimate(coordinator, device_id, device_data, api, entry))
         else:
             entities.append(MysaClimate(coordinator, device_id, device_data, api, entry))

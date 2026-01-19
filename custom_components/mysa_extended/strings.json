@@ -1,0 +1,38 @@
+{
+    "title": "Mysa Extended",
+    "config": {
+        "step": {
+            "user": {
+                "description": "Mysa Extended provides advanced features. No configuration needed - it uses your existing Mysa integration."
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Mysa Extended Options",
+                "description": "Configure advanced settings. Leave fields empty to use defaults.",
+                "data": {
+                    "custom_erate": "Custom Electricity Rate ($/kWh)"
+                },
+                "data_description": {
+                    "custom_erate": "Override the electricity rate from your Mysa cloud account. Leave empty to use the cloud value."
+                }
+            }
+        }
+    },
+    "services": {
+        "upgrade_lite_device": {
+            "name": "Upgrade Lite Device",
+            "description": "Upgrade a Mysa Lite device to unlock Full features (WARNING: Experimental)"
+        },
+        "downgrade_lite_device": {
+            "name": "Revert Lite Device",
+            "description": "Revert an upgraded device back to Lite model"
+        },
+        "killer_ping": {
+            "name": "Killer Ping",
+            "description": "Restart device into pairing mode (DANGER: Device will be disconnected!)"
+        }
+    }
+}

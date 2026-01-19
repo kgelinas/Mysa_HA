@@ -148,6 +148,17 @@ class MysaClient:
         # Auto-fetch homes/zones
         try:
             await self.fetch_homes()
+            # Filter out ghost devices (devices not assigned to any home)
+            if self.devices and self.device_to_home:
+                filtered_devices = {}
+                for dev_id, dev in self.devices.items():
+                    if dev_id in self.device_to_home:
+                        filtered_devices[dev_id] = dev
+                    else:
+                        _LOGGER.warning(
+                            "Ignoring ghost device %s (not assigned to any home)", dev_id
+                        )
+                self.devices = filtered_devices
         except Exception as e:
             _LOGGER.warning("Failed to fetch homes/zones: %s", e)
 

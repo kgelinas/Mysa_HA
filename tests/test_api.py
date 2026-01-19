@@ -464,3 +464,66 @@ class TestMysaApi:  # pylint: disable=too-many-public-methods
 
             api.client.get_electricity_rate.return_value = 0.1
             assert api.get_electricity_rate("dev1") == 0.1
+
+    async def test_get_electricity_rate_with_custom_override(self, hass):
+        """Test get_electricity_rate with custom_erate override from mysa_extended."""
+        from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+        with patch("custom_components.mysa.mysa_api.MysaClient"), \
+             patch("custom_components.mysa.mysa_api.MysaRealtime"):
+
+            api = MysaApi("u", "p", hass)
+            api.client.get_electricity_rate.return_value = 0.15
+
+            # No mysa_extended entry → fallback to cloud rate
+            assert api.get_electricity_rate("dev1") == 0.15
+
+            # Add mysa_extended entry with custom rate
+            extended_entry = MockConfigEntry(
+                domain="mysa_extended",
+                data={},
+                options={"custom_erate": 0.25},
+            )
+            extended_entry.add_to_hass(hass)
+
+            # Should now return custom rate
+            assert api.get_electricity_rate("dev1") == 0.25
+
+            # Empty override → fallback
+            hass.config_entries.async_update_entry(extended_entry, options={})
+            assert api.get_electricity_rate("dev1") == 0.15
+
+    async def test_async_send_killer_ping_success(self, mock_api):
+        """Test async_send_killer_ping success."""
+        api = mock_api
+        api.realtime.send_command = AsyncMock()
+        api.devices = {"dev1": {"Name": "Test"}}
+        api.client.user_id = "user1"
+
+        result = await api.async_send_killer_ping("dev1")
+
+        assert result is True
+        api.realtime.send_command.assert_called_once()
+        call_args = api.realtime.send_command.call_args
+        assert call_args.kwargs.get("msg_type") == 5
+        assert call_args.kwargs.get("wrap") is False
+
+    async def test_async_send_killer_ping_device_not_found(self, mock_api):
+        """Test async_send_killer_ping with unknown device."""
+        api = mock_api
+        api.devices = {}
+
+        result = await api.async_send_killer_ping("unknown")
+
+        assert result is False
+
+    async def test_async_send_killer_ping_failure(self, mock_api):
+        """Test async_send_killer_ping handles exceptions."""
+        api = mock_api
+        api.realtime.send_command = AsyncMock(side_effect=Exception("MQTT error"))
+        api.devices = {"dev1": {"Name": "Test"}}
+        api.client.user_id = "user1"
+
+        result = await api.async_send_killer_ping("dev1")
+
+        assert result is False

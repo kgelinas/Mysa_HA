@@ -8,8 +8,13 @@ import os
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
-# Mock pycognito globally for environment where it is not installed
-sys.modules["pycognito"] = MagicMock()
+# Mock pycognito globally ONLY if not in VCR record mode
+MYSA_RECORD = os.environ.get("MYSA_RECORD", "0") == "1"
+if not MYSA_RECORD:
+    try:
+        import pycognito
+    except ImportError:
+        sys.modules["pycognito"] = MagicMock()
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -22,11 +27,9 @@ TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(TEST_DIR)
 
 
-
 # ===========================================================================
 # Auto-use fixtures
 # ===========================================================================
-
 
 @pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations):

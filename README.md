@@ -1,6 +1,6 @@
 # Mysa for Home Assistant
 
-[![Version](https://img.shields.io/badge/version-0.8.9-blue.svg)](https://github.com/kgelinas/Mysa_HA)
+[![Version](https://img.shields.io/badge/version-0.8.10-blue.svg)](https://github.com/kgelinas/Mysa_HA)
 
 ...
 
@@ -116,35 +116,34 @@ The Lite-to-Full conversion unlocks features in the **Mysa mobile app** (not Hom
 
 ### How to Upgrade (Magic Upgrade Service)
 
-You can unlock your device directly from Home Assistant using the new "Magic Upgrade" service.
+> [!IMPORTANT]
+> This feature requires the **Mysa Extended** integration to be installed.
 
-1.  Identify your **Mysa Baseboard V2 Lite (BB-V2-0-L)** device.
-2.  Go to **Developer Tools** > **Services** (or **Actions**).
-3.  Search for `mysa.upgrade_lite_device` (Upgrade Lite Device).
-4.  Select your Lite thermostat.
-5.  Click **Perform Action**.
-6.  **Power Cycle Required**: The device firmware has been updated. You MUST physically flip the breaker off and on (or unplug/wait/plug in) for the change to take effect.
+1.  **Install Mysa Extended**: Copy `custom_components/mysa_extended` to your Home Assistant `config/custom_components/` folder and restart.
+2.  Identify your **Mysa Baseboard V2 Lite (BB-V2-0-L)** device.
+3.  Go to **Developer Tools** > **Services** (or **Actions**).
+4.  Search for `mysa_extended.upgrade_lite_device` (Upgrade Lite Device).
+5.  Select your Lite thermostat.
+6.  Click **Perform Action**.
+7.  **Power Cycle Required**: The device firmware has been updated. You MUST physically flip the breaker off and on (or unplug/wait/plug in) for the change to take effect.
 
 **What happens?**
 - The integration sends a command to change the device's Model ID to `BB-V2-0` (Full).
-- It **automatically updates** your integration configuration to treat this device as an "Upgraded Lite" device (ensuring correct commands are sent).
+- It **automatically updates** your core Mysa integration configuration to treat this device as an "Upgraded Lite" device (ensuring correct commands are sent).
 
 > ⚠️ **Warning**: This modifies device firmware settings. Use at your own risk.
 
 ### How to Revert (Downgrade Service)
 
-If you need to return your device to its original factory state (Lite), you can use the "Revert Lite Device" service.
-
-1.  Identify the device.
-2.  Go to **Developer Tools** > **Services** (or **Actions**).
-3.  Search for `mysa.downgrade_lite_device`.
-4.  Select the device.
-5.  Click **Perform Action**.
-6.  **Power Cycle Required**: You MUST physically flip the breaker off and on (or unplug/wait/plug in).
+1.  Go to **Developer Tools** > **Services** (or **Actions**).
+2.  Search for `mysa_extended.downgrade_lite_device`.
+3.  Select the device.
+4.  Click **Perform Action**.
+5.  **Power Cycle Required**: You MUST physically flip the breaker off and on (or unplug/wait/plug in).
 
 **What happens?**
 - The integration sends a command to restore the device's Model ID to `BB-V2-0-L` (Lite).
-- It **automatically updates** your integration configuration to remove this device from the "Upgraded Lite" list.
+- It **automatically updates** your core integration configuration to remove this device from the "Upgraded Lite" list.
 
 > ⚠️ **Warning**: This modifies device firmware settings. Use at your own risk.
 
@@ -156,6 +155,32 @@ If you performed the upgrade using the debug tool or another method *before* thi
 3.  Click Submit
 
 This manually tells the integration to use Type 5 (Lite) commands for your customized device.
+
+### Custom Electricity Rate (Mysa Extended)
+
+If the electricity rate from your Mysa cloud account is incorrect or missing, you can override it:
+
+1.  Go to **Settings → Devices & Services → Mysa Extended → Configure**
+2.  Enter your custom rate in the **Custom Electricity Rate ($/kWh)** field
+3.  Click Submit
+
+This override applies to all Mysa devices and will be used instead of the cloud-provided rate.
+
+> **Note**: Leave this field empty to use the rate from your Mysa account.
+
+### Killer Ping (Restart to Pairing Mode)
+
+> [!CAUTION]
+> **DANGER**: This is a DESTRUCTIVE action! The device will be **disconnected from your network** and you will need to **physically re-pair** it using the Mysa app.
+
+Use this service only if you need to move a device to a new WiFi network:
+
+1.  Go to **Developer Tools** > **Services** (or **Actions**)
+2.  Search for `mysa_extended.killer_ping`
+3.  Select your device
+4.  Click **Perform Action**
+
+The device will restart into pairing mode. Look for the device's setup network (e.g., "Mysa-XXXX") to complete the pairing process in the Mysa app.
 
 ### Simulated Energy Sensors (All Lite Devices)
 
@@ -194,7 +219,10 @@ See [docs/MYSA_DEBUG.md](docs/MYSA_DEBUG.md) for usage details.
 
 ## Protocol Documentation
 
-For developers interested in the Mysa API, see [docs/MYSA_PROTOCOL.md](docs/MYSA_PROTOCOL.md).
+For developers interested in the Mysa protocols:
+
+- **HTTP API**: [docs/API_REFERENCE.md](docs/API_REFERENCE.md) - Complete HTTP endpoint documentation with request/response structures
+- **MQTT Protocol**: [docs/MYSA_PROTOCOL.md](docs/MYSA_PROTOCOL.md) - Real-time communication protocol details
 
 ## Development
 

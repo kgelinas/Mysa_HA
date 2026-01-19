@@ -1,5 +1,5 @@
 [run]
-source = custom_components/mysa
+source = custom_components
 omit =
     tests/*
     */site-packages/*

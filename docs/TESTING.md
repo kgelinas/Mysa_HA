@@ -19,60 +19,18 @@ pytest tests/ --cov=custom_components.mysa --cov-report=term-missing
 pytest tests/test_auth.py -v
 ```
 
-## VCR Testing (HTTP Recording/Replay)
+## Test Structure
 
-VCR tests allow us to record real API interactions once and replay them in CI without requiring actual Mysa credentials.
-
-### What is VCR?
-
-VCR (Video Cassette Recorder) is a testing pattern that:
-- Records HTTP requests/responses to "cassettes" (JSON files)
-- Replays them in future test runs
-- Ensures consistent, fast tests without external dependencies
-
-### Running VCR Tests
-
-**Playback Mode (Default):**
-```bash
-pytest tests/test_vcr_e2e.py -v
 ```
-Uses pre-recorded cassettes from `tests/cassettes/`.
-
-**Recording Mode (requires real credentials):**
-```bash
-MYSA_RECORD=1 pytest tests/test_vcr_e2e.py -v
+tests/
+├── conftest.py          # Shared fixtures
+├── test_auth.py         # Authentication tests
+├── test_client.py       # HTTP client tests
+├── test_mqtt.py         # MQTT protocol tests
+├── test_climate.py      # Climate platform tests
+├── test_sensor.py       # Sensor platform tests
+└── ...                  # Other platform-specific tests
 ```
-
-### Setting Up Credentials for Recording
-
-Create `~/.mysa_debug_auth.json`:
-```json
-{
-  "username": "your-email@example.com",
-  "password": "your-password"
-}
-```
-
-> **Security:** This file is in `.gitignore` and never committed. Cassettes automatically filter sensitive data.
-
-### Available VCR Tests
-
-| Test | Description |
-|------|-------------|
-| `test_vcr_device_discovery` | Tests full device discovery flow |
-| `test_vcr_state_sync` | Verifies state parsing from API |
-| `test_cassette_no_sensitive_data` | Ensures no credentials leaked |
-
-### Cassette Files
-
-Located in `tests/cassettes/*.json`:
-- `device_discovery.json` - Full device setup flow
-
-**Sensitive data filtering:**
-- Passwords → `"FILTERED"`
-- Access tokens → `"FILTERED"`
-- ID tokens → `"FILTERED"`
-- Refresh tokens → `"FILTERED"`
 
 ## Pre-commit Hooks
 
@@ -86,19 +44,6 @@ Checks include:
 - Trailing whitespace
 - JSON/YAML validation
 - Test coverage enforcement
-
-## Test Structure
-
-```
-tests/
-├── cassettes/           # VCR recordings
-├── conftest.py          # Shared fixtures
-├── test_auth.py         # Authentication tests
-├── test_client.py       # HTTP client tests
-├── test_mqtt.py         # MQTT protocol tests
-├── test_vcr_e2e.py      # End-to-end VCR tests
-└── ...                  # Platform-specific tests
-```
 
 ## Writing New Tests
 
@@ -117,20 +62,26 @@ async def test_my_feature():
     assert result == expected
 ```
 
-### VCR Test Example
-```python
-@pytest.mark.vcr
-@pytest.mark.asyncio
-async def test_vcr_my_feature(vcr_credentials, aioclient_mock):
-    """Test using VCR cassettes."""
-    if RECORD_MODE:
-        # Recording logic
-        pass
+### Mocking API Responses
 
-    # Playback logic
-    cassette = load_cassette("my_feature")
-    aioclient_mock.get(url, json=cassette["response"])
-    # ... test code
+Use `aioclient_mock` to mock HTTP responses. See [API_REFERENCE.md](API_REFERENCE.md) for the expected response structures.
+
+```python
+@pytest.mark.asyncio
+async def test_with_mocked_api(aioclient_mock):
+    """Test with mocked HTTP responses."""
+    aioclient_mock.get(
+        "https://app-prod.mysa.cloud/users",
+        json={
+            "User": {
+                "Id": "test-user-id",
+                "AllowedDevices": ["device-1"],
+                "ERate": "0.10"
+            }
+        }
+    )
+
+    # Your test code here
 ```
 
 ## Continuous Integration
@@ -140,15 +91,9 @@ Tests run automatically on:
 - Pushes to main
 - Pre-commit hooks (local)
 
-Coverage requirement: **100%** for modified files.
+Coverage requirement: **100%** for all source files.
 
 ## Troubleshooting
-
-### "Cassette not found" Error
-Run with `MYSA_RECORD=1` to create the cassette, or skip VCR tests:
-```bash
-pytest tests/ -v -m "not vcr"
-```
 
 ### Import Errors
 Ensure custom components path is correct:
@@ -162,3 +107,26 @@ Check which lines are missing:
 pytest --cov=custom_components.mysa --cov-report=html
 open htmlcov/index.html
 ```
+
+### Authentication Issues
+If tests are failing due to authentication:
+1. Check that mock fixtures are being used correctly
+2. Verify that `aioclient_mock` is mocking the correct endpoints
+3. Check the test's fixture dependencies
+
+## Test Categories
+
+Tests are organized by component and marked with pytest markers:
+
+| Marker | Description |
+|--------|-------------|
+| `@pytest.mark.asyncio` | Async tests |
+| `@pytest.mark.unit` | Fast, isolated unit tests |
+| `@pytest.mark.integration` | Tests requiring Home Assistant fixtures |
+| `@pytest.mark.slow` | Tests that take longer to run |
+| `@pytest.mark.mqtt` | Tests requiring mock MQTT broker |
+
+## Related Documentation
+
+- [API_REFERENCE.md](API_REFERENCE.md) - HTTP API response structures
+- [MYSA_PROTOCOL.md](MYSA_PROTOCOL.md) - MQTT protocol and commands
