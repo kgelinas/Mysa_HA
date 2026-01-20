@@ -7,36 +7,70 @@
                 "data": {
                     "username": "Nom d'utilisateur (Courriel)",
                     "password": "Mot de passe"
+                },
+                "data_description": {
+                    "username": "L'adresse courriel associ\u00e9e \u00e0 votre compte Mysa.",
+                    "password": "Le mot de passe de votre compte Mysa."
                 }
             },
             "reauth_confirm": {
-                "title": "Ré-authentifier Mysa",
+                "title": "R\u00e9-authentifier Mysa",
                 "description": "Le mot de passe pour {username} est invalide. Veuillez entrer le nouveau mot de passe.",
                 "data": {
                     "username": "Nom d'utilisateur (Courriel)",
                     "password": "Mot de passe"
+                },
+                "data_description": {
+                    "username": "L'adresse courriel associ\u00e9e \u00e0 votre compte Mysa.",
+                    "password": "Le nouveau mot de passe de votre compte Mysa."
                 }
             }
         },
         "error": {
             "invalid_auth": "Authentification invalide",
             "unknown": "Erreur inattendue",
-            "reauth_account_mismatch": "L'adresse courriel fournie ne correspond pas à la configuration existante."
+            "reauth_account_mismatch": "L'adresse courriel fournie ne correspond pas \u00e0 la configuration existante."
         },
         "abort": {
-            "single_instance_allowed": "Une seule configuration de Mysa est autorisée.",
-            "reauth_successful": "La ré-authentification a réussi."
+            "single_instance_allowed": "Une seule configuration de Mysa est autoris\u00e9e.",
+            "reauth_successful": "La r\u00e9-authentification a r\u00e9ussi."
         }
     },
     "options": {
         "step": {
             "init": {
                 "title": "Options Mysa",
-                "description": "Configurer les paramètres avancés des appareils.",
+                "description": "Configurer les param\u00e8tres avanc\u00e9s des appareils.",
                 "data": {
-                    "upgraded_lite_devices": "Appareils Lite mis à niveau (Forcer Type 5)",
-                    "estimated_max_current": "Courant maximum estimé (Ampères)"
+                    "upgraded_lite_devices": "Appareils Lite mis \u00e0 niveau (Forcer Type 5)",
+                    "estimated_max_current": "Courant maximum estim\u00e9 (Amp\u00e8res)",
+                    "simulated_energy": "Forcer l'\u00e9nergie simul\u00e9e"
+                },
+                "data_description": {
+                    "upgraded_lite_devices": "S\u00e9lectionnez les appareils que vous avez mis \u00e0 niveau de Lite \u00e0 Full \u00e0 l'aide de la fonctionnalit\u00e9 'Magic Upgrade'.",
+                    "estimated_max_current": "Courant estim\u00e9 (Amp\u00e8res) pour les appareils Lite pour le calcul de l'\u00e9nergie simul\u00e9e.",
+                    "simulated_energy": "Forcer tous les appareils \u00e0 utiliser le calcul de puissance simul\u00e9e bas\u00e9 sur le cycle de service."
                 }
+            }
+        }
+    },
+    "services": {
+        "upgrade_lite_device": {
+            "name": "Mettre \u00e0 niveau l'appareil Lite",
+            "description": "Met \u00e0 niveau un thermostat Mysa Lite vers les fonctionnalit\u00e9s compl\u00e8tes (Magic Upgrade)."
+        },
+        "downgrade_lite_device": {
+            "name": "R\u00e9tablir l'appareil Lite",
+            "description": "R\u00e9tablit un thermostat Mysa des fonctionnalit\u00e9s compl\u00e8tes vers Lite."
+        }
+    },
+    "entity": {
+        "sensor": {
+            "ip_address": {
+                "name": "Adresse IP"
+            },
+            "serial_number": {
+                "name": "Num\u00e9ro de s\u00e9rie"
             }
         }
     }

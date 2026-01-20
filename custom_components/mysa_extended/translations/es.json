@@ -1,0 +1,88 @@
+{
+    "title": "Mysa Extendido",
+    "config": {
+        "step": {
+            "user": {
+                "description": "Mysa Extendido proporciona funciones avanzadas. No se necesita configuración: utiliza su integración Mysa existente."
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Opciones de Mysa Extendido",
+                "description": "Configure ajustes avanzados. Deje los campos vacíos para usar los valores predeterminados.",
+                "data": {
+                    "custom_erate": "Tarifa de electricidad personalizada ($/kWh)"
+                }
+            }
+        }
+    },
+    "services": {
+        "upgrade_lite_device": {
+            "name": "Actualizar dispositivo Lite (Actualización Mágica)",
+            "description": "Desbloquea funciones \"Completas\" en un Mysa Baseboard V2 Lite (BB-V2-0-L) cambiando su tipo de modelo al estándar BB-V2-0.\n\n⚠️ ADVERTENCIA: Esto modifica la configuración del firmware y puede anular su garantía. Úselo bajo su propio riesgo.\nRequiere apagar y encender el dispositivo después.",
+            "fields": {
+                "device_id": {
+                    "name": "Dispositivo",
+                    "description": "El dispositivo Mysa Lite para actualizar."
+                }
+            }
+        },
+        "downgrade_lite_device": {
+            "name": "Revertir dispositivo Lite (Deshacer actualización)",
+            "description": "Revierte un dispositivo Mysa Baseboard V2 Lite a su ID de modelo de fábrica original (BB-V2-0-L).\nÚselo si necesita revertir la \"Actualización Mágica\".\n\n⚠️ ADVERTENCIA: Esto modifica la configuración del firmware. Úselo bajo su propio riesgo.\nRequiere apagar y encender el dispositivo después.",
+            "fields": {
+                "device_id": {
+                    "name": "Dispositivo",
+                    "description": "El dispositivo Mysa para revertir."
+                }
+            }
+        },
+        "killer_ping": {
+            "name": "Ping Asesino (Reiniciar en modo de emparejamiento)",
+            "description": "Envía un comando especial que REINICIA el dispositivo en MODO DE EMPAREJAMIENTO.\nEl dispositivo se desconectará de su red y deberá volver a emparejarse usando la aplicación Mysa.\n\n⚠️⚠️ PELIGRO: ¡Esta es una acción DESTRUCTIVA! ⚠️⚠️\n- El dispositivo se DESCONECTARÁ de su red\n- Deberá volver a EMPAREJAR físicamente el dispositivo\n- Use esto solo si necesita mover el dispositivo a una nueva red",
+            "fields": {
+                "device_id": {
+                    "name": "Dispositivo",
+                    "description": "El dispositivo Mysa para reiniciar en modo de emparejamiento."
+                }
+            }
+        }
+    },
+    "exceptions": {
+        "device_not_found": {
+            "message": "Dispositivo {device_id} no encontrado."
+        },
+        "mysa_integration_not_loaded": {
+            "message": "Integración Mysa no cargada."
+        },
+        "mysa_integration_not_found_for_device": {
+            "message": "Integración Mysa no encontrada para {device_id}."
+        },
+        "mysa_data_invalid": {
+            "message": "Datos de Mysa no encontrados o inválidos."
+        },
+        "mysa_api_not_initialized": {
+            "message": "API de Mysa no inicializada."
+        },
+        "upgrade_failed": {
+            "message": "Error en la actualización de hardware para el dispositivo {device_id}."
+        },
+        "upgrade_error": {
+            "message": "Error en la actualización: {error}"
+        },
+        "downgrade_failed": {
+            "message": "Error en la reversión de hardware para el dispositivo {device_id}."
+        },
+        "downgrade_error": {
+            "message": "Error en la reversión: {error}"
+        },
+        "killer_ping_failed": {
+            "message": "Fallo de Ping Asesino para el dispositivo {device_id}."
+        },
+        "killer_ping_error": {
+            "message": "Error de Ping Asesino: {error}"
+        }
+    }
+}

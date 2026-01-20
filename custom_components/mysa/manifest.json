@@ -12,7 +12,9 @@
   "requirements": [
     "python-jose>=3.3.0",
     "websockets>=12.0",
-    "pycognito>=2024.5.1"
+    "pycognito>=2024.5.1",
+    "boto3>=1.34.0",
+    "botocore>=1.34.0"
   ],
-  "version": "0.8.10"
+  "version": "0.9.0"
 }

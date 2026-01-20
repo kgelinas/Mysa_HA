@@ -1,0 +1,88 @@
+{
+    "title": "Mysa Étendu",
+    "config": {
+        "step": {
+            "user": {
+                "description": "Mysa Étendu fournit des fonctionnalités avancées. Aucune configuration nécessaire - il utilise votre intégration Mysa existante."
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Options Mysa Étendu",
+                "description": "Configurez les paramètres avancés. Laissez les champs vides pour utiliser les valeurs par défaut.",
+                "data": {
+                    "custom_erate": "Tarif d'électricité personnalisé ($/kWh)"
+                }
+            }
+        }
+    },
+    "services": {
+        "upgrade_lite_device": {
+            "name": "Mettre à niveau l'appareil Lite (Mise à niveau magique)",
+            "description": "Débloque les fonctionnalités \"Complètes\" sur un Mysa Baseboard V2 Lite (BB-V2-0-L) en changeant son type de modèle en BB-V2-0 standard.\n\n⚠️ ATTENTION : Cela modifie les paramètres du micrologiciel et peut annuler votre garantie. À utiliser à vos risques et périls.\nNécessite un redémarrage électrique de l'appareil par la suite.",
+            "fields": {
+                "device_id": {
+                    "name": "Appareil",
+                    "description": "L'appareil Mysa Lite à mettre à niveau."
+                }
+            }
+        },
+        "downgrade_lite_device": {
+            "name": "Rétablir l'appareil Lite (Annuler la mise à niveau)",
+            "description": "Rétablit un appareil Mysa Baseboard V2 Lite à son ID de modèle d'usine d'origine (BB-V2-0-L).\nUtilisez ceci si vous devez annuler la \"Mise à niveau magique\".\n\n⚠️ ATTENTION : Cela modifie les paramètres du micrologiciel. À utiliser à vos risques et périls.\nNécessite un redémarrage électrique de l'appareil par la suite.",
+            "fields": {
+                "device_id": {
+                    "name": "Appareil",
+                    "description": "L'appareil Mysa à rétablir."
+                }
+            }
+        },
+        "killer_ping": {
+            "name": "Ping Tueur (Redémarrage en mode appairage)",
+            "description": "Envoie une commande spéciale qui REDÉMARRE l'appareil en MODE APPAIRAGE.\nL'appareil se déconnectera de votre réseau et devra être ré-appairé à l'aide de l'application Mysa.\n\n⚠️⚠️ DANGER : C'est une action DESTRUCTRICE ! ⚠️⚠️\n- L'appareil sera DÉCONNECTÉ de votre réseau\n- Vous devrez physiquement RÉ-APPAIRER l'appareil\n- N'utilisez ceci que si vous devez déplacer l'appareil vers un nouveau réseau",
+            "fields": {
+                "device_id": {
+                    "name": "Appareil",
+                    "description": "L'appareil Mysa à redémarrer en mode appairage."
+                }
+            }
+        }
+    },
+    "exceptions": {
+        "device_not_found": {
+            "message": "Appareil {device_id} introuvable."
+        },
+        "mysa_integration_not_loaded": {
+            "message": "Intégration Mysa non chargée."
+        },
+        "mysa_integration_not_found_for_device": {
+            "message": "Intégration Mysa introuvable pour {device_id}."
+        },
+        "mysa_data_invalid": {
+            "message": "Données Mysa introuvables ou invalides."
+        },
+        "mysa_api_not_initialized": {
+            "message": "API Mysa non initialisée."
+        },
+        "upgrade_failed": {
+            "message": "La mise à niveau matérielle a échoué pour l'appareil {device_id}."
+        },
+        "upgrade_error": {
+            "message": "Mise à niveau échouée : {error}"
+        },
+        "downgrade_failed": {
+            "message": "Le rétablissement matériel a échoué pour l'appareil {device_id}."
+        },
+        "downgrade_error": {
+            "message": "Rétablissement échoué : {error}"
+        },
+        "killer_ping_failed": {
+            "message": "Échec du Ping Tueur pour l'appareil {device_id}."
+        },
+        "killer_ping_error": {
+            "message": "Erreur du Ping Tueur : {error}"
+        }
+    }
+}

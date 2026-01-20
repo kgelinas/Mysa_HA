@@ -7,21 +7,29 @@
                 "data": {
                     "username": "Benutzername (E-Mail)",
                     "password": "Passwort"
+                },
+                "data_description": {
+                    "username": "Die mit Ihrem Mysa-Konto verkn\u00fcpfte E-Mail-Adresse.",
+                    "password": "Ihr Mysa-Passwort."
                 }
             },
             "reauth_confirm": {
                 "title": "Mysa erneut authentifizieren",
-                "description": "Das Passwort für {username} ist ungültig. Bitte geben Sie das neue Passwort ein.",
+                "description": "Das Passwort f\u00fcr {username} ist ung\u00fcltig. Bitte geben Sie das neue Passwort ein.",
                 "data": {
                     "username": "Benutzername (E-Mail)",
                     "password": "Passwort"
+                },
+                "data_description": {
+                    "username": "Die mit Ihrem Mysa-Konto verkn\u00fcpfte E-Mail-Adresse.",
+                    "password": "Ihr neues Mysa-Passwort."
                 }
             }
         },
         "error": {
-            "invalid_auth": "Ungültige Authentifizierung",
+            "invalid_auth": "Ung\u00fcltige Authentifizierung",
             "unknown": "Unerwarteter Fehler",
-            "reauth_account_mismatch": "Die angegebene E-Mail-Adresse stimmt nicht mit der vorhandenen Konfiguration überein."
+            "reauth_account_mismatch": "Die angegebene E-Mail-Adresse stimmt nicht mit der vorhandenen Konfiguration \u00fcberein."
         },
         "abort": {
             "single_instance_allowed": "Nur eine einzige Mysa-Konfiguration ist erlaubt.",
@@ -32,11 +40,37 @@
         "step": {
             "init": {
                 "title": "Mysa Optionen",
-                "description": "Erweiterte Geräteeinstellungen konfigurieren.",
+                "description": "Erweiterte Ger\u00e4teeinstellungen konfigurieren.",
                 "data": {
-                    "upgraded_lite_devices": "Aufgerüstete Lite-Geräte (Typ 5 erzwingen)",
-                    "estimated_max_current": "Geschätzter maximaler Strom (Ampere)"
+                    "upgraded_lite_devices": "Aufger\u00fcstete Lite-Ger\u00e4te (Typ 5 erzwingen)",
+                    "estimated_max_current": "Gesch\u00e4tzter maximaler Strom (Ampere)",
+                    "simulated_energy": "Simulierte Energie erzwingen"
+                },
+                "data_description": {
+                    "upgraded_lite_devices": "W\u00e4hlen Sie Ger\u00e4te aus, die Sie mit der 'Magic Upgrade'-Funktion von Lite auf Full aktualisiert haben.",
+                    "estimated_max_current": "Gesch\u00e4tzter Strom (Ampere) f\u00fcr Lite-Ger\u00e4te zur Berechnung der simulierten Energie.",
+                    "simulated_energy": "Erzwingt f\u00fcr alle Ger\u00e4te die simulierte Leistungsberechnung basierend auf dem Arbeitszyklus."
                 }
+            }
+        }
+    },
+    "services": {
+        "upgrade_lite_device": {
+            "name": "Lite-Ger\u00e4t aufr\u00fcsten",
+            "description": "R\u00fcstet ein Mysa Lite-Thermostat auf volle Funktionen auf (Magic Upgrade)."
+        },
+        "downgrade_lite_device": {
+            "name": "Lite-Ger\u00e4t zur\u00fccksetzen",
+            "description": "Setzt ein Mysa-Thermostat von vollen Funktionen auf Lite zur\u00fcck."
+        }
+    },
+    "entity": {
+        "sensor": {
+            "ip_address": {
+                "name": "IP-Adresse"
+            },
+            "serial_number": {
+                "name": "Seriennummer"
             }
         }
     }

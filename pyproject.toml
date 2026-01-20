@@ -1,0 +1,40 @@
+[tool.pylint.messages_control]
+disable = [
+    "format",
+    "missing-module-docstring",
+    "missing-class-docstring",
+    "missing-function-docstring",
+    "invalid-name",
+    "too-few-public-methods",
+    "too-many-instance-attributes",
+]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+check_untyped_defs = true
+disallow_any_generics = true
+ignore_missing_imports = true
+warn_return_any = true
+strict_optional = true
+warn_no_return = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = [
+    "boto3.*",
+    "jose.*",
+    "pycognito.*",
+    "voluptuous.*"
+]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "tools.*"
+ignore_errors = true

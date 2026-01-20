@@ -3,6 +3,9 @@ import logging
 import asyncio
 import json
 import time
+from typing import Any, Callable, Dict, List, Optional, cast
+from homeassistant.core import HomeAssistant
+
 from . import mqtt
 from .mysa_mqtt import (
     build_subscription_topics, parse_mqtt_packet,
@@ -10,35 +13,55 @@ from .mysa_mqtt import (
 )
 from .const import MQTT_PING_INTERVAL
 
+# Type hint for callback
+# on_update_callback(device_id, state_update, resolve_safe_id=False)
+UpdateCallback = Callable[[str, Dict[str, Any], Optional[bool]], Any]
+SignedUrlCallback = Callable[[], Any]
+
 _LOGGER = logging.getLogger(__name__)
+
 
 class MysaRealtime:
     """Mysa MQTT Realtime Coordinator."""
-    # pylint: disable=too-many-instance-attributes,line-too-long
+    # pylint: disable=too-many-instance-attributes
+    # Justification: Class maintains complex MQTT state and connection parameters.
 
-    def __init__(self, hass, get_signed_url_callback, on_update_callback):
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        get_signed_url_callback: SignedUrlCallback,
+        on_update_callback: UpdateCallback
+    ) -> None:
         """Initialize the MQTT coordinator."""
         self.hass = hass
         self._get_signed_url = get_signed_url_callback
         self._on_update = on_update_callback
 
-        self._mqtt_listener_task = None
+        self._mqtt_listener_task: Optional[asyncio.Task[None]] = None
         self._mqtt_connected = asyncio.Event()
-        self._mqtt_ws = None
+        self._mqtt_ws: Any = None  # ws object from `connect_websocket`
         self._mqtt_should_reconnect = True
-        self._mqtt_reconnect_delay = 5
-        self._devices_ids = [] # List of device IDs to subscribe to
+        self._mqtt_reconnect_delay = 1.0
+        self._devices_ids: List[str] = []  # List of device IDs to subscribe to
 
     @property
     def is_running(self) -> bool:
         """Return if MQTT listener is running."""
         return bool(self._mqtt_listener_task and not self._mqtt_listener_task.done())
 
-    def set_devices(self, device_ids):
+    async def wait_until_connected(self, timeout: float = 10.0) -> bool:
+        """Wait for MQTT connection to be established."""
+        try:
+            await asyncio.wait_for(self._mqtt_connected.wait(), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            return False
+
+    def set_devices(self, device_ids: List[str]) -> None:
         """Update list of devices to subscribe to."""
         self._devices_ids = device_ids
 
-    async def start(self):
+    async def start(self) -> None:
         """Start the persistent MQTT listener."""
         if self._mqtt_listener_task is not None:
             _LOGGER.debug("MQTT listener already running")
@@ -48,7 +71,7 @@ class MysaRealtime:
         self._mqtt_listener_task = asyncio.create_task(self._mqtt_listener_loop())
         _LOGGER.info("Started MQTT listener task")
 
-    async def stop(self):
+    async def stop(self) -> None:
         """Stop the persistent MQTT listener."""
         self._mqtt_should_reconnect = False
 
@@ -64,7 +87,7 @@ class MysaRealtime:
         self._mqtt_connected.clear()
         _LOGGER.info("Stopped MQTT listener")
 
-    async def _close_websocket(self):
+    async def _close_websocket(self) -> None:
         """Close the WebSocket connection cleanly."""
         if self._mqtt_ws:
             try:
@@ -75,32 +98,52 @@ class MysaRealtime:
                 pass
             self._mqtt_ws = None
 
-    async def _mqtt_listener_loop(self):
+    async def _mqtt_listener_loop(self) -> None:
         """Main MQTT listener loop with automatic reconnection."""
         reconnect_delay = self._mqtt_reconnect_delay
+        prev_delay = 0.0
+        first_failure_logged = False
 
         while self._mqtt_should_reconnect:
             try:
                 await self._mqtt_listen()
                 _LOGGER.info("MQTT connection closed normally")
                 reconnect_delay = self._mqtt_reconnect_delay
+                prev_delay = 0.0
+                first_failure_logged = False  # Reset on normal closure (if ever)
             except asyncio.CancelledError:
                 _LOGGER.debug("MQTT listener task cancelled")
                 raise
-            except Exception as e:
-                _LOGGER.debug(
-                    "MQTT connection lost: %s, reconnecting in %ds", e, reconnect_delay
-                )
+            except Exception as e:  # pylint: disable=broad-except
+                # Justification: Catch-all to ensure the listener loop keeps running despite
+                # unexpected errors.
+                if not first_failure_logged:
+                    _LOGGER.warning(
+                        "MQTT connection lost: %s. Will retry in background (reconnecting in %ds)",
+                        e,
+                        int(reconnect_delay),
+                    )
+                    first_failure_logged = True
+                else:
+                    _LOGGER.debug(
+                        "MQTT connection lost: %s, reconnecting in %ds", e, int(reconnect_delay)
+                    )
+
                 self._mqtt_connected.clear()
                 await asyncio.sleep(reconnect_delay)
-                reconnect_delay = min(reconnect_delay * 2, 60)
 
-    async def _mqtt_listen(self):
+                # Fibonacci backoff
+                next_delay = reconnect_delay + (prev_delay if 'prev_delay' in locals() else 0)
+                prev_delay = reconnect_delay
+                reconnect_delay = min(next_delay, 60.0)
+
+    async def _mqtt_listen(self) -> None:
         """Establish MQTT connection and listen for updates."""
         # Get signed URL via callback
         signed_url = await self._get_signed_url()
 
-        _LOGGER.info("Connecting to MQTT for persistent listening...")
+        # If we are here, we are attempting to connect.
+        _LOGGER.debug("Connecting to MQTT for persistent listening...")
 
         # Connect
         ws = await connect_websocket(signed_url)
@@ -114,7 +157,8 @@ class MysaRealtime:
             _LOGGER.debug(
                 "MQTT listen error (will reconnect): %s", listen_error, exc_info=True
             )
-            raise
+            # Make sure we re-raise so the loop handles retry logic
+            raise listen_error
         finally:
             self._mqtt_ws = None
             self._mqtt_connected.clear()
@@ -123,7 +167,7 @@ class MysaRealtime:
             except Exception:
                 pass
 
-    async def _perform_mqtt_handshake(self, ws):
+    async def _perform_mqtt_handshake(self, ws: Any) -> None:
         """Perform MQTT connect and subscribe handshake."""
         # Connect
         connect_pkt = create_connect_packet()
@@ -152,7 +196,7 @@ class MysaRealtime:
 
                 _LOGGER.info("Subscribed to %d device topics", len(self._devices_ids))
 
-    async def _run_mqtt_loop(self, ws):
+    async def _run_mqtt_loop(self, ws: Any) -> None:
         """Run the main MQTT message and keepalive loop."""
         last_ping = time.time()
         ping_interval = MQTT_PING_INTERVAL
@@ -166,10 +210,11 @@ class MysaRealtime:
 
                 try:
                     pkt = parse_mqtt_packet(msg)
-                    if isinstance(pkt, mqtt.PublishPacket):
-                        await self._process_mqtt_publish(pkt)
-                    elif hasattr(pkt, 'pkt_type') and pkt.pkt_type == mqtt.MQTT_PACKET_PINGRESP:
-                        _LOGGER.debug("Received PINGRESP")
+                    if pkt:
+                        if isinstance(pkt, mqtt.PublishPacket):
+                            await self._process_mqtt_publish(pkt)
+                        elif hasattr(pkt, 'pkt_type') and pkt.pkt_type == mqtt.MQTT_PACKET_PINGRESP:
+                            _LOGGER.debug("Received PINGRESP")
                 except Exception as parse_error:
                     _LOGGER.warning("Error parsing MQTT packet: %s", parse_error, exc_info=True)
 
@@ -188,7 +233,7 @@ class MysaRealtime:
                     _LOGGER.error("Failed to send keepalive ping: %s", e, exc_info=True)
                     raise
 
-    async def _process_mqtt_publish(self, pkt):
+    async def _process_mqtt_publish(self, pkt: Any) -> None:
         """Process an MQTT publish packet."""
         try:
             payload = json.loads(pkt.payload)
@@ -201,84 +246,183 @@ class MysaRealtime:
             if len(topic_parts) >= 4:
                 safe_id = topic_parts[3]
                 # We need to map safe_id back to real ID if they differ (colons)
-                # Currently simple normalization is done in api.py
-                # Here we might need the map.
-                # For now let's pass the safe_id or try to resolve.
-                # Ideally the callback handles resolution or we assume standard format.
-                # In mapping: safe_device_id = device_id.replace(":", "").lower()
-                device_id = safe_id # Pass safe ID to callback, let it resolve?
-                # Or pass raw topic.
+                # Currently simple normalization is done in api.py.
+                # Here we default to safe_id.
+                device_id = safe_id
 
             if device_id:
                 # Extract state
                 state_update = self._extract_state_update(payload)
                 if state_update:
-                    await self._on_update(device_id, state_update)
+                    await self._on_update(device_id, state_update, True)
 
         except Exception as e:
             _LOGGER.error("Error processing MQTT publish: %s", e, exc_info=True)
 
-    def _extract_state_update(self, payload):
+    def _extract_state_update(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Extract state update from payload."""
-        msg_type = payload.get('msg')
-        if msg_type not in [40, 44]:
+        msg_type_raw = payload.get('msg') or payload.get('MsgType')
+        try:
+            msg_type = int(msg_type_raw) if msg_type_raw is not None else None
+        except (ValueError, TypeError):
+            msg_type = None
+
+        if msg_type == 10:
+            return self._extract_boot_info(payload)
+        if msg_type == 4:
+            return self._extract_log_info(payload)
+        if msg_type == 61:
+            return {"FirmwareVersion": str(payload.get("version", ""))}
+
+        msg_ts = payload.get('time') or payload.get('Timestamp')
+        update: Dict[str, Any] = {}
+
+        if msg_type == 30 and payload.get('body'):
+            update = self._extract_body_state(payload['body']) or {}
+        else:
+            body = payload.get('body')
+            if body:
+                update = self._extract_body_state(body) or {}
+
+        # Timestamp and metadata
+        if msg_ts:
+            try:
+                update['Timestamp'] = int(msg_ts)
+            except (ValueError, TypeError):
+                pass
+
+        # Merge top-level metadata
+        if (ip := payload.get('ip')) and 'ip' not in update:
+            update['ip'] = ip
+        if not update.get('FirmwareVersion'):
+            if (ver := payload.get('version') or payload.get('ver')):
+                update['FirmwareVersion'] = str(ver)
+
+        return update if update else None
+
+    def _extract_boot_info(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract info from MsgType 10."""
+        update = {}
+        if payload.get('ip'):
+            update['ip'] = payload.get('ip')
+        if payload.get('version'):
+            update['FirmwareVersion'] = str(payload.get('version'))
+        elif payload.get('ver'):
+            update['FirmwareVersion'] = str(payload.get('ver'))
+
+        return update
+
+    def _extract_log_info(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Extract info from MsgType 4."""
+        message = payload.get('Message', '')
+        update = {}
+        if "Local IP:" in message:
+            temp = message.split("Local IP:")[-1]
+            if "Device Serial:" in temp:
+                temp = temp.split("Device Serial:")[0]
+            update["ip"] = temp.strip()
+        if "Device Serial:" in message:
+            temp = message.split("Device Serial:")[-1]
+            if "Local IP:" in temp:
+                temp = temp.split("Local IP:")[0]
+            update["serial_number"] = temp.strip()
+
+        return update if update else None
+
+    def _extract_body_state(self, body: Any) -> Optional[Dict[str, Any]]:
+        """Extract state from body."""
+        if not isinstance(body, dict):
             return None
 
-        body = payload.get('body', {})
         state_update = body.get('state', {})
+        if state_update:
+            return cast(Dict[str, Any], state_update)
 
-        if not state_update and 'cmd' in body:
-            cmd_list = body.get('cmd', [])
-            if cmd_list and isinstance(cmd_list, list):
-                for cmd_item in cmd_list:
-                    if isinstance(cmd_item, dict):
-                        state_update.update(cmd_item)
+        cmd_list = body.get('cmd')
+        if isinstance(cmd_list, list):
+            combined = {}
+            for item in cmd_list:
+                if isinstance(item, dict):
+                    combined.update(item)
+            return combined
 
-        if not state_update:
-            state_update = body
+        # Fallback: if no state/cmd, use body itself
+        return cast(Dict[str, Any], body)
 
-        return state_update
-
-    async def send_command(self, device_id, payload, user_id=None, msg_type=44, src_type=100, wrap=True):
+    async def send_command(
+        self,
+        device_id: str,
+        payload: Dict[str, Any],
+        user_id: Optional[str] = None,
+        msg_type: int = 44,
+        src_type: int = 100,
+        wrap: bool = True
+    ) -> None:
         """Send a command to a device."""
-        if not self._mqtt_ws:
-            await self._send_one_off_command(device_id, payload, user_id, msg_type, src_type, wrap)
+        if not user_id:
+            _LOGGER.error("Cannot send MQTT command: User ID missing")
             return
 
-        # We probably need to handle the one-off connection logic `_send_mqtt_command` did
-        # IF the persistent listener is NOT required for sending commands.
-        # But `mysa_api.py` `_send_mqtt_command` connects, sends, disconnects if NOT using persistent?
-        # ACTUALLY `_send_mqtt_command` in original code ALWAYS did a Connect/Send/Disconnect cycle.
-        # It did NOT use the persistent connection.
-        # However, it would satisfy "Benefit: easier to maintain" if we reused the connection if available?
-        # The user request says "split...".
-        # If I look at `mysa_api.py`, `_send_mqtt_command` creates a NEW websocket connection every time.
-        # This is inefficient but robust.
-        # If I want to match original behavior EXACTLY, I should implement the "Connect-Send-Disconnect" logic here too,
-        # separate from the listener loop.
-        #
-        # OR, better: If `_mqtt_ws` is open, use it? Use `send_command` on the active socket?
-        # The original code `_send_mqtt_command` mentions:
-        # "Connect to MQTT, send command, and disconnect."
-        # And `start_mqtt_listener` starts a SEPARATE task for listening.
-        # So they are independent.
-        #
-        # Let's implement `send_one_off_command` for that pattern.
-        # And `send_publish` for using the active connection if we wanted to improve it later.
-        # For safety/regression avoidance, I will implement `send_one_off_command` that replicates `_send_mqtt_command`.
+        # If we have a persistent connection, use it!
+        if self._mqtt_ws:
+            _LOGGER.debug("Sending MQTT command via persistent connection to %s", device_id)
+            try:
+                # 1. Prepare message
+                timestamp = int(time.time())
+                timestamp_ms = int(time.time() * 1000)
 
+                if wrap:
+                    outer_payload = {
+                        "Timestamp": timestamp,
+                        "body": payload,
+                        "dest": {"ref": device_id, "type": 1},
+                        "id": timestamp_ms,
+                        "msg": msg_type,
+                        "resp": 2,  # Request response
+                        "src": {"ref": user_id, "type": src_type},
+                        "time": timestamp,
+                        "ver": "1.0"
+                    }
+                else:
+                    outer_payload = payload
+
+                json_payload = json.dumps(outer_payload)
+                safe_device_id = device_id.replace(":", "").lower()
+                topic = f"/v1/dev/{safe_device_id}/in"
+
+                # 2. Publish
+                # Note: We use QoS 1 for commands to ensure delivery
+                pub_pkt = mqtt.publish(
+                    topic, False, 1, False, packet_id=7, payload=json_payload.encode()
+                )
+                await self._mqtt_ws.send(pub_pkt)
+                return  # Success
+            except Exception as e:
+                _LOGGER.warning(
+                    "Failed to send via persistent connection, falling back to one-off: %s", e
+                )
+                # Fall through to one-off fallback
+
+        # Fallback to one-off
         await self._send_one_off_command(device_id, payload, user_id, msg_type, src_type, wrap)
 
-    async def _send_one_off_command(self, device_id, payload, user_id, msg_type, src_type, wrap):
+    async def _send_one_off_command(
+        self,
+        device_id: str,
+        payload: Dict[str, Any],
+        user_id: Optional[str],
+        msg_type: int,
+        src_type: int,
+        wrap: bool
+    ) -> None:
         # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+        # Justification: Internal helper method requiring all connection parameters.
         """Connect, send, disconnect."""
         if not user_id:
             _LOGGER.error("Cannot send MQTT command: User ID missing")
             return
 
         signed_url = await self._get_signed_url()
-        # Note: `urlparse` import needed if I need to manipulate scheme, but `connect_websocket` handles it?
-        # `connect_websocket` takes the signed HTTPS url and converts to WSS.
 
         # Construct payload
         timestamp = int(time.time())
@@ -291,7 +435,7 @@ class MysaRealtime:
                 "dest": {"ref": device_id, "type": 1},
                 "id": timestamp_ms,
                 "msg": msg_type,
-                "resp": 2, # Request response
+                "resp": 2,  # Request response
                 "src": {"ref": user_id, "type": src_type},
                 "time": timestamp,
                 "ver": "1.0"
@@ -305,59 +449,27 @@ class MysaRealtime:
 
         _LOGGER.debug("Sending one-off MQTT command to %s", topic)
 
-        # We need to reimplement the "Connect, Sub, Pub, Wait Response" flow
-        # This seems duplicative of the listener but it's what was there.
-        # I should put this in `MysaRealtime` as a method.
-
-
-        # Note: `connect_websocket` helper does this replacement but also sets header hacks.
-        # Let's use `connect_websocket` but it returns the `connect` context manager if I recall?
-        # No, `connect_websocket` awaits `websockets.connect`.
-
-        # Wait, `connect_websocket` in `mysa_mqtt.py` returns a connected socket?
-        # Let's check `mysa_mqtt.py` content if I can...
-        # I recall looking at `mysa_api.py` imports: `from .mysa_mqtt import connect_websocket`.
-        # And `_mqtt_listen` used `ws = await connect_websocket(signed_url)`.
-
-        # But `_send_mqtt_command` in `mysa_api.py` MANUALLY called `websockets.connect` with `additional_headers` logic.
-        # Does `connect_websocket` include that logic?
-        # I should probably verify `mysa_mqtt.py` content to be sure or just import it.
-        # If `connect_websocket` handles the header hacks, I should use it.
-        # If not, I should copy the logic.
-
-        # Given `mysa_api.py` import `connect_websocket` I assume it unifies logic?
-        # BUT `mysa_api.py` `_send_mqtt_command` explicitly had the try/except block for `additional_headers`.
-        # This suggests `connect_websocket` might NOT have been used there, or was added later?
-        # In `mysa_api.py` line 1098: `ws = await connect_websocket(signed_url)` is used for the LISTENER.
-        # In line 527: `async with websockets.connect(...) as ws:` is used for COMMANDS.
-
-        # I should probably consolidate this into `connect_websocket` or `MysaRealtime`.
-        # I'll stick to using `connect_websocket` if possible, assuming it encapsulates the connection logic.
-        # If `connect_websocket` is shared, it's better.
-
         try:
-            # Use the helper!
             ws = await connect_websocket(signed_url)
             try:
                 # 1. Connect
                 await ws.send(create_connect_packet())
-                await ws.recv() # Connack
+                await ws.recv()  # Connack
 
                 # 2. Subscribe (to get response)
                 sub_topics = [
                     mqtt.SubscriptionSpec(f'/v1/dev/{safe_device_id}/out', 0x01),
-                    mqtt.SubscriptionSpec(f'/v1/dev/{safe_device_id}/in', 0x01), # Why /in? Mirror?
-                    mqtt.SubscriptionSpec(f'/v1/dev/{safe_device_id}/batch', 0x01)
+                    mqtt.SubscriptionSpec(f'/v1/dev/{safe_device_id}/in', 0x01),
                 ]
                 await ws.send(mqtt.subscribe(1, sub_topics))
-                await ws.recv() # Suback
+                await ws.recv()  # Suback
 
                 # 3. Publish
                 pub_pkt = mqtt.publish(
                     topic, False, 1, False, packet_id=2, payload=json_payload.encode()
                 )
                 await ws.send(pub_pkt)
-                await ws.recv() # Puback
+                await ws.recv()  # Puback
 
                 # 4. Wait for response
                 try:
@@ -366,12 +478,11 @@ class MysaRealtime:
                         resp = resp.encode()
                     pkt = parse_mqtt_packet(resp)
                     if isinstance(pkt, mqtt.PublishPacket):
-                        payload = json.loads(pkt.payload)
+                        resp_payload = json.loads(pkt.payload)
                         # Process response
-                        state_update = self._extract_state_update(payload)
+                        state_update = self._extract_state_update(resp_payload)
                         if state_update:
-                            # We can invoke callback even for one-off commands to update state
-                            await self._on_update(device_id, state_update, resolve_safe_id=True)
+                            await self._on_update(device_id, state_update, True)
                 except asyncio.TimeoutError:
                     pass
 

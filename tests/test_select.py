@@ -3,6 +3,7 @@ Tests for Select entities.
 """
 
 import pytest
+from typing import Any
 from unittest.mock import MagicMock, AsyncMock
 
 
@@ -81,7 +82,7 @@ class TestHorizontalSwingFromCapabilities:
 
     def test_options_fallback_when_no_caps(self):
         """Test fallback to default options when no caps available."""
-        supported_caps = {}
+        supported_caps: dict[str, Any] = {}
 
         modes = supported_caps.get("modes", {})
         horizontal_swings = []
@@ -115,7 +116,7 @@ class TestHorizontalSwingState:
 
     def test_state_from_mqtt_simple(self):
         """Test reading horizontal swing state from simple MQTT value."""
-        state = {"SwingStateHorizontal": 3}
+        state: dict[str, Any] = {"SwingStateHorizontal": 3}
 
         val = state.get("SwingStateHorizontal")
 
@@ -123,7 +124,7 @@ class TestHorizontalSwingState:
 
     def test_state_from_mqtt_nested(self):
         """Test reading horizontal swing state from nested MQTT value."""
-        state = {"SwingStateHorizontal": {"v": 3, "t": 1704067200}}
+        state: dict[str, Any] = {"SwingStateHorizontal": {"v": 3, "t": 1704067200}}
 
         val = state.get("SwingStateHorizontal")
         if isinstance(val, dict):
@@ -133,7 +134,7 @@ class TestHorizontalSwingState:
 
     def test_state_default_when_missing(self):
         """Test default value when no state available."""
-        state = {}
+        state: dict[str, Any] = {}
 
         val = state.get("SwingStateHorizontal")
         if val is None:
@@ -178,7 +179,7 @@ class TestHorizontalSwingPendingState:
 
     def test_pending_option_cleared_on_confirm(self):
         """Test pending option is cleared when MQTT confirms."""
-        pending_option = "center"
+        pending_option: str | None = "center"
 
         # MQTT confirms the change
         if True:  # Got confirmed value from MQTT
@@ -195,7 +196,7 @@ class TestHorizontalSwingCommands:
         device_id = "device1"
         position = 3  # center
 
-        command = {
+        command: dict[str, Any] = {
             "did": device_id,
             "cmd": [{"swh": position}],
         }
@@ -233,7 +234,7 @@ class TestSelectEntitySetup:
 
     def test_no_entities_for_empty_device_list(self):
         """Test no entities created for empty device list."""
-        devices = {}
+        devices: dict[str, Any] = {}
         entities = []
 
         for device_id, device_data in devices.items():

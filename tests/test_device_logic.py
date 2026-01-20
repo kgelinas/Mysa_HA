@@ -76,7 +76,6 @@ class TestMysaDeviceLogic:
         assert state["Brightness"] == 50
         assert state["Lock"] == 1
         assert state["Connected"] is True
-        assert state["Zone"] == "zone1"
         assert state["ProximityMode"] is True
         assert state["AutoBrightness"] is True
         assert state["EcoMode"] is True
@@ -107,6 +106,59 @@ class TestMysaDeviceLogic:
         assert state["Lock"] == 1
         assert state["ProximityMode"] is True
         assert state["EcoMode"] is False # 1 is Off
+
+    def test_normalize_state_ecomode_variants(self):
+        """Test all variants that normalize to EcoMode."""
+        # ecoMode=0 (ON)
+        state = {"ecoMode": 0}
+        MysaDeviceLogic.normalize_state(state)
+        assert state["EcoMode"] is True
+
+        # ecoMode=1 (OFF)
+        state = {"ecoMode": 1}
+        MysaDeviceLogic.normalize_state(state)
+        assert state["EcoMode"] is False
+
+        # eco (short key)
+        state = {"eco": 0}
+        MysaDeviceLogic.normalize_state(state)
+        assert state["EcoMode"] is True
+
+        # it (IsThermostatic short key)
+        state = {"it": 1}
+        MysaDeviceLogic.normalize_state(state)
+        assert state["EcoMode"] is True
+
+        # IsThermostatic
+        state = {"IsThermostatic": True}
+        MysaDeviceLogic.normalize_state(state)
+        assert state["EcoMode"] is True
+
+    def test_normalize_state_infloor_sensor_mode(self):
+        """Test normalization of SensorMode and Infloor variants."""
+        # Test sm and if
+        state = {"sm": 1, "if": 22.5}
+        MysaDeviceLogic.normalize_state(state)
+        assert state["SensorMode"] == 1
+        assert state["Infloor"] == 22.5
+
+        # Test SensorMode and Infloor
+        state = {"SensorMode": 0, "Infloor": 21.0}
+        MysaDeviceLogic.normalize_state(state)
+        assert state["SensorMode"] == 0
+        assert state["Infloor"] == 21.0
+
+        # Test ControlMode and flrSnsrTemp
+        state = {"ControlMode": 1, "flrSnsrTemp": 23.5}
+        MysaDeviceLogic.normalize_state(state)
+        assert state["SensorMode"] == 1
+        assert state["Infloor"] == 23.5
+
+        # Test dict variants
+        state = {"sm": {"v": 1}, "if": {"v": 24.0}}
+        MysaDeviceLogic.normalize_state(state)
+        assert state["SensorMode"] == 1
+        assert state["Infloor"] == 24.0
 
     def test_normalize_state_nested_v(self):
         # Key: {"v": value}
@@ -193,3 +245,97 @@ class TestMysaDeviceLogic:
         MysaDeviceLogic.normalize_state(state)
         # Should skip MinBrightness and pick up mnbr
         assert state["MinBrightness"] == 10
+
+
+    def test_normalize_state_exceptions(self):
+        """Test exception handling in normalize_state."""
+        # TstatMode invalid value (lines 192-193 of device.py)
+        state = {
+            "TstatMode": "invalid"
+        }
+        MysaDeviceLogic.normalize_state(state)
+        # Should keep "invalid" string (except caught)
+        assert state["TstatMode"] == "invalid"
+
+    def test_get_device_info_mac_formatting(self):
+        """Test MAC address formatting in get_device_info."""
+        from homeassistant.helpers.device_registry import CONNECTION_NETWORK_MAC
+        from custom_components.mysa.const import DOMAIN
+
+        # 12-char hex string should be formatted with colons
+        info = MysaDeviceLogic.get_device_info("aabbccddeeff", {})
+        # Note: indentifiers uses DOMAIN, connections uses CONNECTION_NETWORK_MAC ("mac")
+        assert info["connections"] == {(CONNECTION_NETWORK_MAC, "aa:bb:cc:dd:ee:ff")}
+
+        # Already formatted should be kept
+        info2 = MysaDeviceLogic.get_device_info("aa:bb:cc:dd:ee:ff", {})
+        assert info2["connections"] == {(CONNECTION_NETWORK_MAC, "aa:bb:cc:dd:ee:ff")}
+
+        # Non-12-char should be ignored (just passed through)
+        info3 = MysaDeviceLogic.get_device_info("short", {})
+        assert info3["connections"] == {(CONNECTION_NETWORK_MAC, "short")}
+
+    def test_normalize_state_firmware(self):
+        """Test FirmwareVersion normalization."""
+        # Test 'fv'
+        state = {"fv": "1.2.3"}
+        MysaDeviceLogic.normalize_state(state)
+        assert state["FirmwareVersion"] == "1.2.3"
+
+        # Test 'ver'
+        state = {"ver": "2.0.0"}
+        MysaDeviceLogic.normalize_state(state)
+        assert state["FirmwareVersion"] == "2.0.0"
+
+        # Test 'fwVersion'
+        state = {"fwVersion": "3.4.5"}
+        MysaDeviceLogic.normalize_state(state)
+        assert state["FirmwareVersion"] == "3.4.5"
+
+    def test_normalize_state_ac_conflict_flat(self):
+        """Test that internal AC key '2' overrides generic 'mode'."""
+        # Generic mode says Auto (2), Internal engine says Cool (4)
+        state = {
+            "mode": 2,
+            "2": 4,
+            "ambTemp": 21.0
+        }
+        MysaDeviceLogic.normalize_state(state)
+        # Should favor Cool (4)
+        assert state["Mode"] == 4
+        assert state["ACMode"] == 4
+
+    def test_normalize_state_ac_conflict_nested(self):
+        """Test that nested ACState key '2' overrides generic 'mode'."""
+        state = {
+            "mode": 2,
+            "ACState": {
+                "2": 4,
+                "3": 22.0
+            }
+        }
+        MysaDeviceLogic.normalize_state(state)
+        assert state["Mode"] == 4
+        assert state["ACMode"] == 4
+        assert state["ACTemp"] == 22.0
+        assert state["stpt"] == 22.0
+
+    def test_normalize_state_flat_ac_keys(self):
+        """Test logic handles flattened keys (1-5) from MsgType 30."""
+        state = {
+            "mode": 2, # Generic Auto
+            "1": 1,  # Power On
+            "2": 4,  # Mode Cool
+            "3": 21.5, # Temp
+            "4": 2, # Fan Med (assuming 2=Med)
+            "5": 0 # Swing Off
+        }
+        MysaDeviceLogic.normalize_state(state)
+
+        assert state["ACPower"] == 1
+        assert state["ACMode"] == 4
+        assert state["Mode"] == 4
+        assert state["ACTemp"] == 21.5
+        assert state["stpt"] == 21.5
+        assert state["FanSpeed"] == 2
+        assert state["SwingState"] == 0

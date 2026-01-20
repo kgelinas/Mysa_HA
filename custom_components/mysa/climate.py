@@ -1,11 +1,14 @@
 """Climate platform for Mysa."""
 # pylint: disable=abstract-method, too-many-lines, too-many-public-methods
+# Justification:
+# abstract-method: HA Entity properties implement the required abstracts.
+# too-many-lines/methods: Climate entity handles complex HVAC logic and many protocol features.
 import logging
 import time
-from typing import Any
+from typing import Any, Dict, List, Optional, cast
 
-from homeassistant.components.climate import (
-    ClimateEntity,
+from homeassistant.components.climate import ClimateEntity
+from homeassistant.components.climate.const import (
     ClimateEntityFeature,
     HVACMode,
     HVACAction,
@@ -17,11 +20,12 @@ from homeassistant.const import (
     PRECISION_TENTHS,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import (
-    CoordinatorEntity,
+    CoordinatorEntity, DataUpdateCoordinator
 )
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 
 from .const import (
     DOMAIN,
@@ -29,22 +33,26 @@ from .const import (
     AC_FAN_MODES, AC_FAN_MODES_REVERSE,
     AC_SWING_MODES,
 )
+from . import MysaData
+from .mysa_api import MysaApi
+from .device import MysaDeviceLogic
+
+PARALLEL_UPDATES = 0
 
 _LOGGER = logging.getLogger(__name__)
 
+
 async def async_setup_entry(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
+    _hass: HomeAssistant,
+    entry: ConfigEntry[MysaData],
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Mysa climate devices."""
-    data = hass.data[DOMAIN][entry.entry_id]
-    coordinator = data["coordinator"]
-    api = data["api"]
+    coordinator = entry.runtime_data.coordinator
+    api = entry.runtime_data.api
 
     # Get devices to create entities
     devices = await api.get_devices()
-
     entities: list[ClimateEntity] = []
     for device_id, device_data in devices.items():
         # Use appropriate entity class based on device type
@@ -57,50 +65,52 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class MysaClimate(ClimateEntity, CoordinatorEntity):
+class MysaClimate(
+    ClimateEntity,
+    CoordinatorEntity[DataUpdateCoordinator[Dict[str, Any]]]
+):
     """Representation of a Mysa Thermostat."""
 
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
-    _attr_supported_features = (
-        ClimateEntityFeature.TARGET_TEMPERATURE |
-        ClimateEntityFeature.TURN_OFF |
-        ClimateEntityFeature.TURN_ON
-    )  # type: ignore
+    _attr_supported_features: Any = (
+        ClimateEntityFeature.TARGET_TEMPERATURE
+        | ClimateEntityFeature.TURN_OFF
+        | ClimateEntityFeature.TURN_ON
+    )
     _attr_min_temp = 5.0
     _attr_max_temp = 30.0
     _attr_precision = PRECISION_TENTHS
     _attr_target_temperature_step = 0.5
 
-    def __init__(self, coordinator, device_id, device_data, api, entry):
+    _attr_has_entity_name = True
+    _attr_name = None
+    _attr_translation_key = "thermostat"
+
+    def __init__(
+        self,
+        coordinator: DataUpdateCoordinator[Dict[str, Any]],
+        device_id: str,
+        device_data: Dict[str, Any],
+        api: MysaApi,
+        entry: ConfigEntry[MysaData]
+    ) -> None:
         """Initialize."""
         super().__init__(coordinator)
         self._device_id = device_id
         self._device_data = device_data
         self._api = api
         self._entry = entry
-        self._attr_name = device_data.get("Name", "Mysa Thermostat")
         self._attr_unique_id = device_id
-        self._pending_updates = {}
+        self._pending_updates: Dict[str, Dict[str, Any]] = {}
+        self._has_logged_sensortemp_warning = False
 
     @property
     def device_info(self) -> DeviceInfo:
         """Return device info."""
         state = self._get_state_data()
-        zone_id = state.get("Zone") if state else None
-        zone_name = self._api.get_zone_name(zone_id) if zone_id else None
+        return MysaDeviceLogic.get_device_info(self._device_id, self._device_data, state)
 
-        info = DeviceInfo(
-            identifiers={(DOMAIN, self._device_id)},
-            name=self._attr_name,
-            manufacturer="Mysa",
-            model=self._device_data.get("Model"),
-            sw_version=self._device_data.get("FirmwareVersion"),
-        )
-        if zone_name:
-            info["suggested_area"] = zone_name
-        return info
-
-    def _get_value(self, key):
+    def _get_value(self, key: str) -> Any:
         """Get value from state, handling both dict (v/t) and direct value."""
         if self.coordinator.data is None:
             return None
@@ -113,22 +123,60 @@ class MysaClimate(ClimateEntity, CoordinatorEntity):
         return val
 
     @property
-    def current_temperature(self):
+    def current_temperature(self) -> Optional[float]:
         """Return current temperature."""
         state = self._get_state_data()
         if not state:
             return None
 
-        # Priority: MQTT keys then HTTP keys
-        val = self._extract_value(state, ["ambTemp", "ambient_t", "CorrectedTemp", "SensorTemp"])
+        # Determine which temperature to use
+        # For Infloor devices, follow SensorMode preference (0=Ambient/Air, 1=Floor)
+        model = str(self._device_data.get("Model", ""))
+        is_infloor = "INF-V1" in model or "Floor" in model
+        sensor_mode = state.get("SensorMode")
 
-        _LOGGER.debug("Device %s current_temp raw value: %s", self._device_id, val)
+        if is_infloor and sensor_mode == 1:
+            # Floor Mode: prioritize Infloor temp
+            primary_keys = ["Infloor", "if", "flrSnsrTemp"]
+            _LOGGER.debug("Device %s is in Floor Mode, using Infloor sensor", self._device_id)
+        else:
+            # Ambient Mode or non-Infloor device: prioritize Ambient temp
+            primary_keys = ["CorrectedTemp", "ambTemp", "ambient_t"]
+
+        val = self._extract_value(state, primary_keys)
+
+        if val is None:
+            # Fallback to SensorTemp if primary choice is unavailable
+            val = self._extract_value(state, ["SensorTemp"])
+            if val is not None:
+                if not self._has_logged_sensortemp_warning:
+                    _LOGGER.warning(
+                        "Device %s is using 'SensorTemp' as a temperature fallback. "
+                        "Note: This raw sensor value is often inaccurate/elevated due to "
+                        "heat from the device's own electronics.",
+                        self._device_id
+                    )
+                    self._has_logged_sensortemp_warning = True
+        else:
+            # We found a primary key, reset the warning flag
+            self._has_logged_sensortemp_warning = False
+
+        _LOGGER.debug(
+            "Device %s current_temp raw value: %s (mode: %s)",
+            self._device_id,
+            val,
+            sensor_mode,
+        )
         if val is not None:
-            return float(val) if val != 0 else None
+            try:
+                f_val = float(val)
+                return f_val if f_val != 0 else None
+            except (ValueError, TypeError):
+                pass
         return None
 
     @property
-    def target_temperature(self):
+    def target_temperature(self) -> Optional[float]:
         """Return target temperature."""
         state = self._get_state_data()
         if not state:
@@ -139,10 +187,11 @@ class MysaClimate(ClimateEntity, CoordinatorEntity):
 
         _LOGGER.debug("Device %s target_temp raw value: %s", self._device_id, val)
         current = float(val) if val is not None else None
-        return self._get_sticky_value("target_temperature", current)
+        val = self._get_sticky_value("target_temperature", current)
+        return float(val) if val is not None else None
 
     @property
-    def current_humidity(self):
+    def current_humidity(self) -> Optional[float]:
         """Return humidity."""
         state = self._get_state_data()
         if not state:
@@ -150,29 +199,34 @@ class MysaClimate(ClimateEntity, CoordinatorEntity):
 
         val = self._extract_value(state, ["hum", "Humidity"])
         if val is not None:
-            return val
+            return float(val)
         return None
 
-    def _get_state_data(self):
+    def _get_state_data(self) -> Optional[Dict[str, Any]]:
         """Helper to get state data from coordinator."""
         if self.coordinator.data is None:
             return None
-        return self.coordinator.data.get(self._device_id)
+        return cast(Optional[Dict[str, Any]], self.coordinator.data.get(self._device_id))
 
-    def _extract_value(self, state, keys):
+    def _extract_value(self, state: Optional[Dict[str, Any]], keys: List[str]) -> Any:
         """Helper to extract a value from state dictionary."""
+        if state is None:
+            return None
         for key in keys:
             val = state.get(key)
             if val is not None:
                 if isinstance(val, dict):
                     v = val.get('v')
                     if v is None:
+                        # Fallback for some structures like ACState
+                        # But typically 'v' is what we want.
+                        # Or if it's a device object inside zone?
                         v = val.get('Id')
                     return v
                 return val
         return None
 
-    def _get_sticky_value(self, attr_name, cloud_value):
+    def _get_sticky_value(self, attr_name: str, cloud_value: Any) -> Any:
         """Get value using sticky optimistic logic."""
         pending = self._pending_updates.get(attr_name)
         if pending:
@@ -203,7 +257,7 @@ class MysaClimate(ClimateEntity, CoordinatorEntity):
 
         return cloud_value
 
-    def _set_sticky_value(self, attr_name, value):
+    def _set_sticky_value(self, attr_name: str, value: Any) -> None:
         """Set sticky value."""
         self._pending_updates[attr_name] = {'value': value, 'ts': time.time()}
         self.async_write_ha_state()
@@ -216,7 +270,7 @@ class MysaClimate(ClimateEntity, CoordinatorEntity):
             return HVACMode.HEAT  # Default fallback
 
         # Priority: MQTT key (md) then user-confirmed source (TstatMode) then generic (Mode)
-        mode_id = self._extract_value(state, ["md", "TstatMode", "Mode"])
+        mode_id = self._extract_value(state, ["md", "mode", "TstatMode", "Mode"])
 
         # Determine Enum result
         if mode_id == 1:
@@ -245,7 +299,26 @@ class MysaClimate(ClimateEntity, CoordinatorEntity):
         if not state:
             return HVACAction.IDLE
 
-        # Priority: MQTT key (dc) then Cloud key (Duty, dtyCycle, DutyCycle)
+        # User Request: Dynamic Idle/Heating based on temperature setpoint
+        current_str = self._extract_value(state, ["ambTemp", "CorrectedTemp", "SensorTemp"])
+        target_str = self._extract_value(state, ["stpt", "SetPoint"])
+
+        if current_str is not None and target_str is not None:
+            try:
+                current = float(current_str)
+                target = float(target_str)
+
+                # If actively heating mode is on
+                if self.hvac_mode == HVACMode.HEAT:
+                    # If we are below target, we are heating (or trying to)
+                    if current < target:
+                        return HVACAction.HEATING
+                    # If we are over or equal, we are idle
+                    return HVACAction.IDLE
+            except (ValueError, TypeError):
+                pass
+
+        # Fallback: Priority checking Duty Cycle if temps unavailable
         duty = self._extract_value(state, ["dc", "Duty", "dtyCycle", "DutyCycle"])
         if duty is not None and float(duty) > 0:
             return HVACAction.HEATING
@@ -253,30 +326,21 @@ class MysaClimate(ClimateEntity, CoordinatorEntity):
         return HVACAction.IDLE
 
     @property
-    def extra_state_attributes(self):
+    def extra_state_attributes(self) -> Dict[str, Any]:
         """Return extra state attributes."""
-        state = self._get_state_data()
-        zone_id = state.get("Zone") if state else None
-
-        # Get friendly name from API mapping
-        zone_name = None
-        if zone_id:
-            zone_name = self._api.get_zone_name(zone_id)
-
         return {
             "model": self._device_data.get("Model"),
-            "zone_id": zone_id,
-            "zone_name": zone_name if zone_name else "Unassigned",
         }
 
     @property
-    def hvac_modes(self):
+    def hvac_modes(self) -> List[HVACMode]:
         """Return supported hvac modes."""
         return [HVACMode.HEAT, HVACMode.OFF]
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set new target temperature."""
-        if (temp := kwargs.get(ATTR_TEMPERATURE)) is None:
+        temp = kwargs.get(ATTR_TEMPERATURE)
+        if temp is None:
             return
         try:
             # Optimistic update
@@ -285,7 +349,14 @@ class MysaClimate(ClimateEntity, CoordinatorEntity):
             await self._api.set_target_temperature(self._device_id, temp)
             self.async_write_ha_state()
         except Exception as e:
-            _LOGGER.error("Failed to set temperature: %s", e)
+            if "target_temperature" in self._pending_updates:
+                del self._pending_updates["target_temperature"]
+            self.async_write_ha_state()
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_temperature_failed",
+                translation_placeholders={"error": str(e)},
+            ) from e
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set new target hvac mode."""
@@ -293,10 +364,17 @@ class MysaClimate(ClimateEntity, CoordinatorEntity):
             # Optimistic update
             self._set_sticky_value("hvac_mode", hvac_mode)
 
-            await self._api.set_hvac_mode(self._device_id, hvac_mode)
+            await self._api.set_hvac_mode(self._device_id, str(hvac_mode))
             self.async_write_ha_state()
         except Exception as e:
-            _LOGGER.error("Failed to set HVAC mode: %s", e)
+            if "hvac_mode" in self._pending_updates:
+                del self._pending_updates["hvac_mode"]
+            self.async_write_ha_state()
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_hvac_mode_failed",
+                translation_placeholders={"error": str(e)},
+            ) from e
 
     async def async_turn_off(self) -> None:
         """Turn the entity off."""
@@ -310,22 +388,30 @@ class MysaClimate(ClimateEntity, CoordinatorEntity):
 class MysaACClimate(MysaClimate):
     """Mysa AC Climate Entity with fan and swing mode support."""
 
-    _attr_supported_features = (
-        ClimateEntityFeature.TARGET_TEMPERATURE |
-        ClimateEntityFeature.TURN_OFF |
-        ClimateEntityFeature.TURN_ON |
-        ClimateEntityFeature.FAN_MODE |
-        ClimateEntityFeature.SWING_MODE
+    _attr_supported_features: Any = (
+        ClimateEntityFeature.TARGET_TEMPERATURE
+        | ClimateEntityFeature.TURN_OFF
+        | ClimateEntityFeature.TURN_ON
+        | ClimateEntityFeature.FAN_MODE
+        | ClimateEntityFeature.SWING_MODE
     )
     # AC temperature range (from SupportedCaps)
     _attr_min_temp = 16.0
     _attr_max_temp = 31.0
     _attr_target_temperature_step = 1.0  # AC typically uses 1 degree steps
 
-    def __init__(self, coordinator, device_id, device_data, api, entry):
+    def __init__(
+        self,
+        coordinator: DataUpdateCoordinator[Dict[str, Any]],
+        device_id: str,
+        device_data: Dict[str, Any],
+        api: MysaApi,
+        entry: ConfigEntry[MysaData]
+    ) -> None:
         """Initialize AC climate entity."""
         super().__init__(coordinator, device_id, device_data, api, entry)
-        self._attr_name = device_data.get("Name", "Mysa AC")
+        # self._attr_name = None # Inherits None from MysaClimate
+        # which is correct for primary entity
 
         # Get supported capabilities from device data
         self._supported_caps = device_data.get("SupportedCaps", {})
@@ -333,12 +419,15 @@ class MysaACClimate(MysaClimate):
         # Build dynamic mode/fan/swing lists from SupportedCaps
         self._build_supported_options()
 
-    def _build_supported_options(self):
+        # Track last used mode for smart turn-on
+        self._last_mode: Optional[HVACMode] = None
+
+    def _build_supported_options(self) -> None:
         """Build lists of supported modes from SupportedCaps."""
         # Default supported modes if not in SupportedCaps
-        self._supported_hvac_modes = [HVACMode.OFF]
-        self._supported_fan_modes = ["auto"]
-        self._supported_swing_modes = ["auto"]
+        self._supported_hvac_modes: List[HVACMode] = [HVACMode.OFF]
+        self._supported_fan_modes: List[str] = ["auto"]
+        self._supported_swing_modes: List[str] = ["auto"]
 
         modes = self._supported_caps.get("modes", {})
 
@@ -352,12 +441,15 @@ class MysaACClimate(MysaClimate):
         }
 
         for mode_key in modes.keys():
-            mode_int = int(mode_key)
-            if mode_int in mode_mapping:
-                self._supported_hvac_modes.append(mode_mapping[mode_int])
+            try:
+                mode_int = int(mode_key)
+                if mode_int in mode_mapping:
+                    self._supported_hvac_modes.append(mode_mapping[mode_int])
+            except ValueError:
+                pass
 
         # Get fan speeds from first available mode's capabilities
-        for mode_key, mode_caps in modes.items():
+        for mode_caps in modes.values():
             fan_speeds = mode_caps.get("fanSpeeds", [])
             if fan_speeds:
                 self._supported_fan_modes = []
@@ -368,7 +460,7 @@ class MysaACClimate(MysaClimate):
                 break
 
         # Get swing positions from first available mode's capabilities
-        for mode_key, mode_caps in modes.items():
+        for mode_caps in modes.values():
             vertical_swings = mode_caps.get("verticalSwing", [])
             if vertical_swings:
                 self._supported_swing_modes = []
@@ -383,19 +475,19 @@ class MysaACClimate(MysaClimate):
                       self._supported_fan_modes, self._supported_swing_modes)
 
     @property
-    def hvac_modes(self):
+    def hvac_modes(self) -> List[HVACMode]:
         """Return supported hvac modes for AC."""
         return self._supported_hvac_modes
 
     @property
-    def hvac_mode(self):
+    def hvac_mode(self) -> HVACMode | None:
         """Return current hvac mode for AC."""
         state = self._get_state_data()
         if not state:
             return HVACMode.OFF
 
         # Get mode from TstatMode or ACMode
-        mode_id = self._extract_value(state, ["md", "TstatMode", "ACMode", "Mode"])
+        mode_id = self._extract_value(state, ["md", "mode", "TstatMode", "ACMode", "Mode"])
 
         # Map Mysa mode to HA mode
         mode_mapping = {
@@ -423,8 +515,9 @@ class MysaACClimate(MysaClimate):
     def hvac_action(self) -> HVACAction:
         """Return hvac action for AC."""
         mode = self.hvac_mode
+        action = HVACAction.IDLE
 
-        mode_to_action = {
+        mode_to_action: Dict[HVACMode | None, HVACAction] = {
             HVACMode.OFF: HVACAction.OFF,
             HVACMode.COOL: HVACAction.COOLING,
             HVACMode.HEAT: HVACAction.HEATING,
@@ -432,25 +525,40 @@ class MysaACClimate(MysaClimate):
             HVACMode.FAN_ONLY: HVACAction.FAN,
         }
 
-        if action := mode_to_action.get(mode):
-            return action
+        if mapped_action := mode_to_action.get(mode):
+            return mapped_action
 
         if mode == HVACMode.HEAT_COOL:
-            # For auto mode, determine based on temperature difference
-            state = self._get_state_data()
-            if state:
-                current = self._extract_value(state, ["ambTemp", "CorrectedTemp", "SensorTemp"])
-                target = self._extract_value(state, ["stpt", "SetPoint"])
-                if current and target:
-                    if float(current) > float(target):
-                        return HVACAction.COOLING
-                    if float(current) < float(target):
-                        return HVACAction.HEATING
-            return HVACAction.IDLE
-        return HVACAction.IDLE
+            state = self._get_state_data() or {}
+            current = self._extract_value(state, ["ambTemp", "CorrectedTemp", "SensorTemp"])
+            target = self._extract_value(state, ["stpt", "SetPoint"])
+
+            # 1. Check for IDLE (Temperature Satisfied)
+            if current is not None and target is not None:
+                try:
+                    # If within 1.0 degree deadband, consider IDLE
+                    if abs(float(current) - float(target)) < 1.0:
+                        return HVACAction.IDLE
+                except (ValueError, TypeError):
+                    pass
+
+            ac_mode = state.get("ACMode")
+            # 2. Check internal ACMode (3=Heat, 4=Cool)
+            if ac_mode == 3:
+                action = HVACAction.HEATING
+            elif ac_mode == 4:
+                action = HVACAction.COOLING
+            # 3. Fallback based on temperature difference if ACMode is missing
+            elif current and target:
+                if float(current) > float(target):
+                    action = HVACAction.COOLING
+                elif float(current) < float(target):
+                    action = HVACAction.HEATING
+
+        return action
 
     @property
-    def fan_modes(self):
+    def fan_modes(self) -> List[str]:
         """Return supported fan modes."""
         return self._supported_fan_modes
 
@@ -471,7 +579,7 @@ class MysaACClimate(MysaClimate):
         return str(self._get_sticky_value("fan_mode", cloud_val))
 
     @property
-    def swing_modes(self):
+    def swing_modes(self) -> List[str]:
         """Return supported swing modes."""
         return self._supported_swing_modes
 
@@ -492,7 +600,7 @@ class MysaACClimate(MysaClimate):
         return str(self._get_sticky_value("swing_mode", cloud_val))
 
     @property
-    def extra_state_attributes(self):
+    def extra_state_attributes(self) -> Dict[str, Any]:
         """Return extra state attributes for AC."""
         attrs = super().extra_state_attributes
         state = self._get_state_data()
@@ -509,11 +617,20 @@ class MysaACClimate(MysaClimate):
         try:
             # Optimistic update
             self._set_sticky_value("hvac_mode", hvac_mode)
+            if hvac_mode != HVACMode.OFF:
+                self._last_mode = hvac_mode
 
-            await self._api.set_hvac_mode(self._device_id, hvac_mode)
+            await self._api.set_hvac_mode(self._device_id, str(hvac_mode))
             self.async_write_ha_state()
         except Exception as e:
-            _LOGGER.error("Failed to set AC HVAC mode: %s", e)
+            if "hvac_mode" in self._pending_updates:
+                del self._pending_updates["hvac_mode"]
+            self.async_write_ha_state()
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_ac_hvac_mode_failed",
+                translation_placeholders={"error": str(e)},
+            ) from e
 
     async def async_set_target_temperature(self, temperature: float) -> None:
         """Set new target temperature."""
@@ -530,7 +647,14 @@ class MysaACClimate(MysaClimate):
             await self._api.set_target_temperature(self._device_id, temp)
             self.async_write_ha_state()
         except Exception as e:
-            _LOGGER.error("Failed to set AC target temperature: %s", e)
+            if "target_temperature" in self._pending_updates:
+                del self._pending_updates["target_temperature"]
+            self.async_write_ha_state()
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_ac_temperature_failed",
+                translation_placeholders={"error": str(e)},
+            ) from e
 
     async def async_set_fan_mode(self, fan_mode: str) -> None:
         """Set new fan mode."""
@@ -546,7 +670,14 @@ class MysaACClimate(MysaClimate):
             await self._api.set_ac_fan_speed(self._device_id, fan_mode)
             self.async_write_ha_state()
         except Exception as e:
-            _LOGGER.error("Failed to set AC fan mode: %s", e)
+            if "fan_mode" in self._pending_updates:
+                del self._pending_updates["fan_mode"]
+            self.async_write_ha_state()
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_ac_fan_mode_failed",
+                translation_placeholders={"error": str(e)},
+            ) from e
 
     async def async_set_swing_mode(self, swing_mode: str) -> None:
         """Set new swing mode (vertical)."""
@@ -557,9 +688,23 @@ class MysaACClimate(MysaClimate):
             await self._api.set_ac_swing_mode(self._device_id, swing_mode)
             self.async_write_ha_state()
         except Exception as e:
-            _LOGGER.error("Failed to set AC swing mode: %s", e)
+            if "swing_mode" in self._pending_updates:
+                del self._pending_updates["swing_mode"]
+            self.async_write_ha_state()
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_ac_swing_mode_failed",
+                translation_placeholders={"error": str(e)},
+            ) from e
 
     async def async_turn_on(self) -> None:
-        """Turn the AC on (to cool mode by default)."""
-        # Default to cool mode when turning on, or last used mode if available
-        await self.async_set_hvac_mode(HVACMode.COOL)
+        """Turn the AC on (restoring last mode if available)."""
+        target_mode = self._last_mode
+
+        if target_mode is None or target_mode == HVACMode.OFF or target_mode not in self.hvac_modes:
+            # Try to use Auto if available, else Heat, else Cool
+            target_mode = HVACMode.HEAT_COOL
+            if HVACMode.HEAT_COOL not in self.hvac_modes:
+                target_mode = HVACMode.HEAT if HVACMode.HEAT in self.hvac_modes else HVACMode.COOL
+
+        await self.async_set_hvac_mode(target_mode)

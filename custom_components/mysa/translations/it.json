@@ -7,14 +7,22 @@
                 "data": {
                     "username": "Nome utente (Email)",
                     "password": "Password"
+                },
+                "data_description": {
+                    "username": "L'indirizzo email associato al tuo account Mysa.",
+                    "password": "La password del tuo account Mysa."
                 }
             },
             "reauth_confirm": {
                 "title": "Riautenticazione Mysa",
-                "description": "La password per {username} non è valida. Si prega di inserire la nuova password.",
+                "description": "La password per {username} non \u00e8 valida. Si prega di inserire la nuova password.",
                 "data": {
                     "username": "Nome utente (Email)",
                     "password": "Password"
+                },
+                "data_description": {
+                    "username": "L'indirizzo email associato al tuo account Mysa.",
+                    "password": "La tua nuova password dell'account Mysa."
                 }
             }
         },
@@ -24,8 +32,8 @@
             "reauth_account_mismatch": "L'email fornita non corrisponde alla configurazione esistente."
         },
         "abort": {
-            "single_instance_allowed": "È consentita una sola configurazione Mysa.",
-            "reauth_successful": "La riautenticazione è avvenuta con successo."
+            "single_instance_allowed": "\u00c8 consentita una sola configurazione Mysa.",
+            "reauth_successful": "La riautenticazione \u00e8 avvenuta con successo."
         }
     },
     "options": {
@@ -35,8 +43,34 @@
                 "description": "Configura impostazioni avanzate del dispositivo.",
                 "data": {
                     "upgraded_lite_devices": "Dispositivi Lite aggiornati (Forza Tipo 5)",
-                    "estimated_max_current": "Corrente massima stimata (Ampere)"
+                    "estimated_max_current": "Corrente massima stimata (Ampere)",
+                    "simulated_energy": "Forza Energia Simulata"
+                },
+                "data_description": {
+                    "upgraded_lite_devices": "Seleziona i dispositivi che hai aggiornato da Lite a Full utilizzando la funzione 'Magic Upgrade'.",
+                    "estimated_max_current": "Corrente stimata (Ampere) per dispositivi Lite per il calcolo dell'energia simulata.",
+                    "simulated_energy": "Forza tutti i dispositivi a utilizzare il calcolo della potenza simulata basato sul ciclo di lavoro."
                 }
+            }
+        }
+    },
+    "services": {
+        "upgrade_lite_device": {
+            "name": "Aggiorna dispositivo Lite",
+            "description": "Aggiorna un termostato Mysa Lite alle funzionalit\u00e0 complete (Magic Upgrade)."
+        },
+        "downgrade_lite_device": {
+            "name": "Ripristina dispositivo Lite",
+            "description": "Ripristina un termostato Mysa dalle funzionalit\u00e0 complete a Lite."
+        }
+    },
+    "entity": {
+        "sensor": {
+            "ip_address": {
+                "name": "Indirizzo IP"
+            },
+            "serial_number": {
+                "name": "Numero di serie"
             }
         }
     }

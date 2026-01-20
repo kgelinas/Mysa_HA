@@ -14,7 +14,9 @@ repos:
         entry: pylint
         language: system
         types: [python]
-        exclude: ^tests/
+        # Exclude tests as they often violate standard linting rules (accessing protected members, etc)
+        # Exclude tests and tools
+        exclude: ^(tests|tools)/
         args: ["custom_components/mysa"]
 
       - id: pytest
@@ -23,3 +25,12 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
+
+      - id: mypy
+        name: mypy
+        entry: mypy
+        language: system
+        types: [python]
+        # Exclude tools as they use dynamic imports not compatible with strict package typing
+        exclude: ^tools/
+        args: ["--explicit-package-bases"]

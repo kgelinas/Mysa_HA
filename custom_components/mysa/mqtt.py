@@ -12,7 +12,7 @@ Adapted and simplified for the Mysa Home Assistant integration.
 """
 import struct
 from dataclasses import dataclass
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Any
 
 # MQTT 3.1.1 Packet Types
 MQTT_PACKET_CONNECT = 1
@@ -154,6 +154,7 @@ def publish(  # TODO: Refactor to reduce arguments
 ) -> bytes:
     """Create a PUBLISH packet."""
     # pylint: disable=too-many-arguments,too-many-positional-arguments
+    # Justification: Helper function used internally for packet construction.
     if qos > 0 and packet_id is None:
         raise ValueError('QoS > 0 requires a packet_id')
 
@@ -168,11 +169,11 @@ def publish(  # TODO: Refactor to reduce arguments
 
     byte1 = (MQTT_PACKET_PUBLISH << 4) | (int(dup) << 3) | (qos << 1) | int(retain)
     return (
-        bytes([byte1]) +
-        _encode_remaining_length(remaining_len) +
-        encoded_topic +
-        encoded_packet_id +
-        payload
+        bytes([byte1])
+        + _encode_remaining_length(remaining_len)
+        + encoded_topic
+        + encoded_packet_id
+        + payload
     )
 
 
@@ -181,7 +182,7 @@ def publish(  # TODO: Refactor to reduce arguments
 _MULTIPLIERS = (1, 128, 128 * 128, 128 * 128 * 128, 0)
 
 
-def parse(data: bytearray, output: list) -> int:
+def parse(data: bytearray, output: List[Any]) -> int:
     """Parse packets from data into output list. Returns bytes consumed."""
     if not isinstance(data, bytearray):
         raise TypeError("data must be a bytearray")
@@ -190,7 +191,8 @@ def parse(data: bytearray, output: list) -> int:
     offset = 0
 
     while offset < len(data):
-        pkt_type = data[offset] >> 4
+        first_byte = data[offset]
+        pkt_type = first_byte >> 4
         variable_begin = offset + 1
         remaining_length = 0
         nb = 0
@@ -210,7 +212,7 @@ def parse(data: bytearray, output: list) -> int:
         if (len(data) - offset) < (remaining_length + 1 + size_rem_len):
             return consumed
 
-        pkt = _parse_packet(pkt_type, data, remaining_length, variable_begin)
+        pkt = _parse_packet(pkt_type, first_byte, data, remaining_length, variable_begin)
         if pkt:
             output.append(pkt)
 
@@ -220,16 +222,31 @@ def parse(data: bytearray, output: list) -> int:
     return consumed
 
 
-def parse_one(data: Union[bytes, bytearray]):
+def parse_one(
+    data: Union[bytes, bytearray]
+) -> Optional[Union[ConnackPacket, SubackPacket, PublishPacket, PubackPacket, PingrespPacket]]:
     """Parse a single packet from data."""
     if not isinstance(data, bytearray):
         data = bytearray(data)
-    output: list = []
+    output: List[Any] = []
     parse(data, output)
     return output[0] if output else None
 
 
-def _parse_packet(pkt_type: int, data: bytearray, remaining_length: int, variable_begin: int):
+def parse_mqtt_packet(
+    data: Union[bytes, bytearray]
+) -> Optional[Union[ConnackPacket, SubackPacket, PublishPacket, PubackPacket, PingrespPacket]]:
+    """Parse a single packet from data (legacy alias)."""
+    return parse_one(data)
+
+
+def _parse_packet(
+    pkt_type: int,
+    first_byte: int,
+    data: bytearray,
+    remaining_length: int,
+    variable_begin: int
+) -> Optional[Union[ConnackPacket, SubackPacket, PublishPacket, PubackPacket, PingrespPacket]]:
     """Parse a single packet based on type."""
     if pkt_type == MQTT_PACKET_CONNACK:
         return ConnackPacket(data[variable_begin + 1], data[variable_begin])
@@ -240,7 +257,7 @@ def _parse_packet(pkt_type: int, data: bytearray, remaining_length: int, variabl
         return SubackPacket(packet_id, list(data[variable_begin + 2:end_payload]))
 
     if pkt_type == MQTT_PACKET_PUBLISH:
-        flags = data[0] & 0x0F
+        flags = first_byte & 0x0F
         qos = (flags & 0x06) >> 1
         end_packet = remaining_length + variable_begin
         topic_len = (data[variable_begin] << 8) | data[variable_begin + 1]

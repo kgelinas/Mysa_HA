@@ -10,31 +10,29 @@ import ssl
 import logging
 import asyncio
 from typing import TYPE_CHECKING, Any, Optional, List, Union
+from types import TracebackType
 from urllib.parse import urlparse
 from uuid import uuid1
 
 import websockets
 if TYPE_CHECKING:
-    try:
-        from websockets.client import WebSocketClientProtocol
-    except ImportError:
-        from websockets.legacy.client import WebSocketClientProtocol
+    # Use Any to avoid version mismatch issues with websockets library
+    WebSocketClientProtocol = Any
 
 # Support both package imports (for HA) and direct imports (for debug tool)
 try:
     from . import mqtt
     from .const import MQTT_KEEPALIVE, MQTT_USER_AGENT
 except ImportError:
+    # Support direct execution of this file (outside Home Assistant context)
     import mqtt  # type: ignore[no-redef]
     from const import MQTT_KEEPALIVE, MQTT_USER_AGENT  # type: ignore[no-redef]
 
 if TYPE_CHECKING:
-    import boto3
+    pass
+
 
 _LOGGER = logging.getLogger(__name__)
-
-
-
 
 
 def build_subscription_topics(device_ids: List[str]) -> List[mqtt.SubscriptionSpec]:
@@ -109,7 +107,7 @@ async def connect_websocket(signed_url: str) -> WebSocketClientProtocol:
     try:
         ws = await websockets.connect(
             ws_url,
-            subprotocols=[websockets.Subprotocol('mqtt')],  # type: ignore[list-item]
+            subprotocols=[websockets.Subprotocol('mqtt')],
             ssl=ssl_context,
             additional_headers=headers,
             ping_interval=None,
@@ -119,14 +117,14 @@ async def connect_websocket(signed_url: str) -> WebSocketClientProtocol:
         # Fallback for older websockets versions
         ws = await websockets.connect(
             ws_url,
-            subprotocols=[websockets.Subprotocol('mqtt')],  # type: ignore[list-item]
+            subprotocols=[websockets.Subprotocol('mqtt')],
             ssl=ssl_context,
             extra_headers=headers,
             ping_interval=None,
             ping_timeout=None
         )
 
-    return ws  # type: ignore[return-value]
+    return ws
 
 
 def create_connect_packet(keepalive: int = MQTT_KEEPALIVE) -> bytes:
@@ -203,7 +201,7 @@ class MqttConnection:
 
         # Wait for CONNACK
         resp = await self._ws.recv()
-        pkt = parse_mqtt_packet(resp)  # type: ignore[arg-type]
+        pkt = parse_mqtt_packet(resp)
         if not isinstance(pkt, mqtt.ConnackPacket):
             await self._ws.close()
             raise RuntimeError(f"Expected CONNACK, got {pkt}")
@@ -218,7 +216,7 @@ class MqttConnection:
 
             # Wait for SUBACK
             resp = await self._ws.recv()
-            pkt = parse_mqtt_packet(resp)  # type: ignore[arg-type]
+            pkt = parse_mqtt_packet(resp)
             if not isinstance(pkt, mqtt.SubackPacket):
                 await self._ws.close()
                 raise RuntimeError(f"Expected SUBACK, got {pkt}")
@@ -228,7 +226,12 @@ class MqttConnection:
         self._connected = True
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool:
+    async def __aexit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType]
+    ) -> bool:
         """Disconnect from MQTT broker."""
         self._connected = False
         if self._ws:
@@ -236,11 +239,16 @@ class MqttConnection:
                 # Send MQTT DISCONNECT
                 disconnect_pkt = mqtt.disconnect()
                 await self._ws.send(disconnect_pkt)
-                await self._ws.close()
-            except Exception:  # TODO: Catch specific exceptions instead of Exception
+            except Exception:  # pylint: disable=broad-except
+                # Justification: Ensure listener loop continues despite parsing errors.
+                # Swallow exceptions during disconnect (e.g. network down)
+                # to ensure finally block runs and socket is closed.
                 pass
+            finally:
+                await self._ws.close()
             self._ws = None
         return False  # Don't suppress exceptions
+
     @property
     def connected(self) -> bool:
         """Check if connection is active."""
@@ -269,7 +277,7 @@ class MqttConnection:
                 data = await asyncio.wait_for(self._ws.recv(), timeout=timeout)
             else:
                 data = await self._ws.recv()
-            return parse_mqtt_packet(data)  # type: ignore[arg-type]
+            return parse_mqtt_packet(data)
         except asyncio.TimeoutError:
             return None
 

@@ -3,6 +3,7 @@ Tests for Number entities.
 """
 
 import pytest
+from typing import Any
 from unittest.mock import MagicMock, AsyncMock
 
 
@@ -66,10 +67,11 @@ class TestBrightnessState:
         state = {"Brightness": {"v": 75, "t": 1704067200}}
 
         val = state.get("Brightness")
+        extracted = None
         if isinstance(val, dict):
-            val = val.get("v")
+            extracted = val.get("v")
 
-        assert val == 75
+        assert extracted == 75
 
     def test_brightness_short_key(self):
         """Test reading brightness from short MQTT key."""
@@ -101,7 +103,7 @@ class TestBrightnessCommands:
         device_id = "device1"
         brightness = 80
 
-        command = {
+        command: dict[str, Any] = {
             "did": device_id,
             "cmd": [{"br": brightness}],
         }
@@ -250,7 +252,7 @@ class TestNumberPendingState:
 
     def test_pending_value_cleared_on_confirm(self):
         """Test pending value is cleared when MQTT confirms."""
-        pending_value = 80
+        pending_value: int | None = 80
 
         # MQTT confirms with new value
         if True:  # Got confirmed value
@@ -295,3 +297,30 @@ class TestNumberEntitySetup:
         is_lite = device_type in lite_types
 
         assert is_lite is False
+
+# ===========================================================================
+# Merged Edge Case Tests
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_number_value_error(hass):
+    """Test number native_value handles invalid types."""
+    from custom_components.mysa.number import MysaMinBrightnessNumber
+
+    mock_coordinator = MagicMock()
+    # MinBrightness keys: ["MinBrightness", "mnbr"]
+    mock_coordinator.data = {"device1": {"MinBrightness": "invalid_float"}}
+
+    mock_api = MagicMock()
+    mock_entry = MagicMock()
+
+    # Initialize MysaMinBrightnessNumber
+    entity = MysaMinBrightnessNumber(
+        mock_coordinator,
+        "device1",
+        {"Name": "Test"},
+        mock_api,
+        mock_entry
+    )
+
+    assert entity.native_value is None

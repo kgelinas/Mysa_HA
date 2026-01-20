@@ -8,6 +8,7 @@ import asyncio
 import os
 import sys
 from datetime import timedelta
+from typing import Any
 from unittest.mock import MagicMock, AsyncMock, patch
 
 # Add project root to path for imports
@@ -578,14 +579,14 @@ class TestStateNormalization:
         assert state["Lock"] == 0
 
         # Test boolean True
-        state = {"lk": True}
-        api._normalize_state(state)
-        assert state["Lock"] == 1
+        state_bool: dict[str, Any] = {"lk": True}
+        api._normalize_state(state_bool)
+        assert state_bool["Lock"] == 1
 
         # Test integer 1
-        state = {"lc": 1}
-        api._normalize_state(state)
-        assert state["Lock"] == 1
+        state_int: dict[str, Any] = {"lc": 1}
+        api._normalize_state(state_int)
+        assert state_int["Lock"] == 1
 
     def test_normalize_preserves_original_keys(self):
         """Test that normalization preserves original keys."""
@@ -605,7 +606,7 @@ class TestStateNormalization:
     def test_normalize_empty_state(self):
         """Test normalization of empty state dict."""
         api = MockMysaApi()
-        state = {}
+        state: dict[str, Any] = {}
 
         api._normalize_state(state)
 
@@ -632,13 +633,13 @@ class TestCmdArrayExtraction:
     def test_extract_setpoint_from_cmd_array(self):
         """Test extracting setpoint from cmd array structure."""
         # This simulates the MQTT command echo format
-        body = {
+        body: dict[str, Any] = {
             "cmd": [{"sp": 22.0, "stpt": 22.0, "a_sp": 22.0, "tm": -1}],
             "type": 4,
             "ver": 1,
         }
 
-        state_update = body.get("state", {})
+        state_update: dict[str, Any] = body.get("state", {})
 
         # If state is empty but cmd exists, extract from cmd
         if not state_update and "cmd" in body:
@@ -709,7 +710,7 @@ class TestHomesApiParsing:
 
     def test_parse_homes_response(self):
         """Test parsing homes and zones from API response."""
-        api_response = {
+        api_response: dict[str, Any] = {
             "Homes": [
                 {
                     "Address": {"PostalCode": "G6W8M3"},
@@ -750,7 +751,7 @@ class TestHomesApiParsing:
 
     def test_parse_homes_empty_response(self):
         """Test parsing empty homes response."""
-        api_response = {"Homes": []}
+        api_response: dict[str, Any] = {"Homes": []}
 
         zones = {}
         homes = api_response.get("Homes", api_response.get("homes", []))
@@ -765,7 +766,7 @@ class TestHomesApiParsing:
 
     def test_parse_homes_no_zones(self):
         """Test parsing homes with no zones."""
-        api_response = {
+        api_response: dict[str, Any] = {
             "Homes": [
                 {
                     "Id": "f9bce0d1-3eb7-4300-8b7f-94df1c989079",
@@ -788,7 +789,7 @@ class TestHomesApiParsing:
 
     def test_parse_homes_alternative_key_names(self):
         """Test parsing with lowercase key names."""
-        api_response = {
+        api_response: dict[str, Any] = {
             "homes": [
                 {
                     "id": "f9bce0d1-3eb7-4300-8b7f-94df1c989079",
@@ -849,7 +850,7 @@ class TestHomesApiParsing:
 
     def test_thermostat_has_heating(self):
         """Test thermostats support heating mode."""
-        device = {"type": 4, "SupportedCaps": {"Heating": True}}
+        device: dict[str, Any] = {"type": 4, "SupportedCaps": {"Heating": True}}
 
         has_heating = device.get("SupportedCaps", {}).get("Heating", False)
 
@@ -884,7 +885,7 @@ class TestACCapabilities:
 
     def test_ac_has_cooling(self):
         """Test AC supports cooling mode."""
-        device = {"type": 9, "SupportedCaps": {"Cooling": True}}
+        device: dict[str, Any] = {"type": 9, "SupportedCaps": {"Cooling": True}}
 
         has_cooling = device.get("SupportedCaps", {}).get("Cooling", False)
 
@@ -948,7 +949,7 @@ class TestSupportedCapsLogic:
 
     def test_default_caps_when_missing(self):
         """Test default values when caps missing."""
-        caps = {}
+        caps: dict[str, Any] = {}
 
         heating = caps.get("Heating", True)  # Default True for thermostats
         cooling = caps.get("Cooling", False)
@@ -1205,6 +1206,7 @@ class TestMysaApiAsyncMocking:
         # Other necessary init
         api._last_command_time = {}
         api.states = {}
+        api.coordinator_callback = None
         api.upgraded_lite_devices = []
 
         await api.set_target_temperature("device1", 23.0)

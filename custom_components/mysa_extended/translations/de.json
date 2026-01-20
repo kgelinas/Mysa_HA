@@ -1,0 +1,88 @@
+{
+    "title": "Mysa Extended",
+    "config": {
+        "step": {
+            "user": {
+                "description": "Mysa Extended bietet erweiterte Funktionen. Keine Konfiguration erforderlich - es verwendet Ihre bestehende Mysa-Integration."
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Mysa Extended Optionen",
+                "description": "Konfigurieren Sie erweiterte Einstellungen. Lassen Sie Felder leer, um Standards zu verwenden.",
+                "data": {
+                    "custom_erate": "Benutzerdefinierter Stromtarif ($/kWh)"
+                }
+            }
+        }
+    },
+    "services": {
+        "upgrade_lite_device": {
+            "name": "Lite-Gerät upgraden (Magic Upgrade)",
+            "description": "Schaltet \"Voll\"-Funktionen auf einem Mysa Baseboard V2 Lite (BB-V2-0-L) frei, indem der Modelltyp auf Standard BB-V2-0 geändert wird.\n\n⚠️ WARNUNG: Dies ändert Firmware-Einstellungen und kann Ihre Garantie ungültig machen. Verwendung auf eigene Gefahr.\nErfordert anschließendes Aus- und Einschalten des Geräts.",
+            "fields": {
+                "device_id": {
+                    "name": "Gerät",
+                    "description": "Das Mysa Lite-Gerät zum Upgraden."
+                }
+            }
+        },
+        "downgrade_lite_device": {
+            "name": "Lite-Gerät zurücksetzen (Upgrade rückgängig machen)",
+            "description": "Setzt ein Mysa Baseboard V2 Lite-Gerät auf seine ursprüngliche Werksmodell-ID (BB-V2-0-L) zurück.\nVerwenden Sie dies, wenn Sie das \"Magic Upgrade\" rückgängig machen müssen.\n\n⚠️ WARNUNG: Dies ändert Firmware-Einstellungen. Verwendung auf eigene Gefahr.\nErfordert anschließendes Aus- und Einschalten des Geräts.",
+            "fields": {
+                "device_id": {
+                    "name": "Gerät",
+                    "description": "Das Mysa-Gerät zum Zurücksetzen."
+                }
+            }
+        },
+        "killer_ping": {
+            "name": "Killer Ping (Neustart in den Kopplungsmodus)",
+            "description": "Sendet einen speziellen Befehl, der das Gerät in den KOPPLUNGSMODUS NEUSTARTET.\nDas Gerät wird von Ihrem Netzwerk getrennt und muss über die Mysa-App neu gekoppelt werden.\n\n⚠️⚠️ GEFAHR: Dies ist eine DESTRUKTIVE Aktion! ⚠️⚠️\n- Das Gerät wird von Ihrem Netzwerk GETRENNT\n- Sie müssen das Gerät physisch NEU KOPPELN\n- Verwenden Sie dies nur, wenn Sie das Gerät in ein neues Netzwerk verschieben müssen",
+            "fields": {
+                "device_id": {
+                    "name": "Gerät",
+                    "description": "Das Mysa-Gerät, das in den Kopplungsmodus neu gestartet werden soll."
+                }
+            }
+        }
+    },
+    "exceptions": {
+        "device_not_found": {
+            "message": "Gerät {device_id} nicht gefunden."
+        },
+        "mysa_integration_not_loaded": {
+            "message": "Mysa-Integration nicht geladen."
+        },
+        "mysa_integration_not_found_for_device": {
+            "message": "Mysa-Integration für {device_id} nicht gefunden."
+        },
+        "mysa_data_invalid": {
+            "message": "Mysa-Daten nicht gefunden oder ungültig."
+        },
+        "mysa_api_not_initialized": {
+            "message": "Mysa-API nicht initialisiert."
+        },
+        "upgrade_failed": {
+            "message": "Hardware-Upgrade für Gerät {device_id} fehlgeschlagen."
+        },
+        "upgrade_error": {
+            "message": "Upgrade fehlgeschlagen: {error}"
+        },
+        "downgrade_failed": {
+            "message": "Hardware-Rücksetzung für Gerät {device_id} fehlgeschlagen."
+        },
+        "downgrade_error": {
+            "message": "Rücksetzung fehlgeschlagen: {error}"
+        },
+        "killer_ping_failed": {
+            "message": "Killer Ping für Gerät {device_id} fehlgeschlagen."
+        },
+        "killer_ping_error": {
+            "message": "Killer Ping fehlgeschlagen: {error}"
+        }
+    }
+}

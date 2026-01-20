@@ -1,0 +1,88 @@
+{
+    "title": "Mysa Estendido",
+    "config": {
+        "step": {
+            "user": {
+                "description": "O Mysa Estendido fornece recursos avançados. Nenhuma configuração necessária - ele usa sua integração Mysa existente."
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Opções do Mysa Estendido",
+                "description": "Configure configurações avançadas. Deixe os campos vazios para usar os padrões.",
+                "data": {
+                    "custom_erate": "Taxa de Eletricidade Personalizada ($/kWh)"
+                }
+            }
+        }
+    },
+    "services": {
+        "upgrade_lite_device": {
+            "name": "Atualizar Dispositivo Lite (Atualização Mágica)",
+            "description": "Desbloqueia recursos \"Completos\" em um Mysa Baseboard V2 Lite (BB-V2-0-L) alterando seu tipo de modelo para o BB-V2-0 padrão.\n\n⚠️ AVISO: Isso modifica as configurações de firmware e pode anular sua garantia. Use por sua conta e risco.\nRequer desligar e ligar o dispositivo posteriormente.",
+            "fields": {
+                "device_id": {
+                    "name": "Dispositivo",
+                    "description": "O dispositivo Mysa Lite para atualizar."
+                }
+            }
+        },
+        "downgrade_lite_device": {
+            "name": "Reverter Dispositivo Lite (Desfazer Atualização)",
+            "description": "Reverte um dispositivo Mysa Baseboard V2 Lite para seu ID de modelo de fábrica original (BB-V2-0-L).\nUse isso se precisar desfazer a \"Atualização Mágica\".\n\n⚠️ AVISO: Isso modifica as configurações de firmware. Use por sua conta e risco.\nRequer desligar e ligar o dispositivo posteriormente.",
+            "fields": {
+                "device_id": {
+                    "name": "Dispositivo",
+                    "description": "O dispositivo Mysa para reverter."
+                }
+            }
+        },
+        "killer_ping": {
+            "name": "Killer Ping (Reiniciar em Modo de Emparelhamento)",
+            "description": "Envia um comando especial que REINICIA o dispositivo em MODO DE EMPARELHAMENTO.\nO dispositivo será desconectado da sua rede e precisará ser reemparelhado usando o aplicativo Mysa.\n\n⚠️⚠️ PERIGO: Esta é uma ação DESTRUTIVA! ⚠️⚠️\n- O dispositivo será DESCONECTADO da sua rede\n- Você precisará REEMPARELHAR fisicamente o dispositivo\n- Use isso apenas se precisar mover o dispositivo para uma nova rede",
+            "fields": {
+                "device_id": {
+                    "name": "Dispositivo",
+                    "description": "O dispositivo Mysa para reiniciar em modo de emparelhamento."
+                }
+            }
+        }
+    },
+    "exceptions": {
+        "device_not_found": {
+            "message": "Dispositivo {device_id} não encontrado."
+        },
+        "mysa_integration_not_loaded": {
+            "message": "Integração Mysa não carregada."
+        },
+        "mysa_integration_not_found_for_device": {
+            "message": "Integração Mysa não encontrada para {device_id}."
+        },
+        "mysa_data_invalid": {
+            "message": "Dados do Mysa não encontrados ou inválidos."
+        },
+        "mysa_api_not_initialized": {
+            "message": "API Mysa não inicializada."
+        },
+        "upgrade_failed": {
+            "message": "Falha na atualização de hardware para o dispositivo {device_id}."
+        },
+        "upgrade_error": {
+            "message": "Falha na atualização: {error}"
+        },
+        "downgrade_failed": {
+            "message": "Falha na reversão de hardware para o dispositivo {device_id}."
+        },
+        "downgrade_error": {
+            "message": "Falha na reversão: {error}"
+        },
+        "killer_ping_failed": {
+            "message": "Falha no Killer Ping para o dispositivo {device_id}."
+        },
+        "killer_ping_error": {
+            "message": "Erro no Killer Ping: {error}"
+        }
+    }
+}

@@ -7,6 +7,10 @@
                 "data": {
                     "username": "Username (Email)",
                     "password": "Password"
+                },
+                "data_description": {
+                    "username": "The email address associated with your Mysa account.",
+                    "password": "Your Mysa account password."
                 }
             },
             "reauth_confirm": {
@@ -15,6 +19,10 @@
                 "data": {
                     "username": "Username (Email)",
                     "password": "Password"
+                },
+                "data_description": {
+                    "username": "The email address associated with your Mysa account.",
+                    "password": "Your new Mysa account password."
                 }
             }
         },
@@ -37,6 +45,11 @@
                     "upgraded_lite_devices": "Upgraded Lite Devices (Force Type 5)",
                     "estimated_max_current": "Estimated Max Current (Amps)",
                     "simulated_energy": "Force Simulated Energy"
+                },
+                "data_description": {
+                    "upgraded_lite_devices": "Select devices using the full feature set (upgraded from Lite).",
+                    "estimated_max_current": "Estimated current (Amps) for Lite devices for simulated energy calculation.",
+                    "simulated_energy": "Force all devices to use simulated power calculation."
                 }
             }
         }
@@ -49,6 +62,106 @@
         "downgrade_lite_device": {
             "name": "Revert Lite Device",
             "description": "Reverts a Mysa thermostat from Full features back to Lite (Downgrade)."
+        }
+    },
+    "issues": {
+        "auth_failed": {
+            "title": "Authentication Failed",
+            "fix_flow": {
+                "step": {
+                    "confirm": {
+                        "title": "Re-authenticate Mysa",
+                        "description": "Authentication with the Mysa API failed: {error}\n\nPlease reconfigure the integration with valid credentials."
+                    }
+                }
+            }
+        }
+    },
+    "entity": {
+        "switch": {
+            "lock": {
+                "name": "Lock"
+            },
+            "auto_brightness": {
+                "name": "Auto Brightness"
+            },
+            "proximity": {
+                "name": "Proximity Mode"
+            },
+            "climate_plus": {
+                "name": "Climate+"
+            }
+        },
+        "number": {
+            "min_brightness": {
+                "name": "Min Brightness"
+            },
+            "max_brightness": {
+                "name": "Max Brightness"
+            }
+        },
+        "select": {
+            "horizontal_swing": {
+                "name": "Horizontal Swing"
+            }
+        },
+        "sensor": {
+            "ip_address": {
+                "name": "IP Address"
+            },
+            "rssi": {
+                "name": "Signal Strength"
+            },
+            "temperature": {
+                "name": "Temperature"
+            },
+            "humidity": {
+                "name": "Humidity"
+            },
+            "cost": {
+                "name": "Electricity Rate"
+            },
+            "power": {
+                "name": "Active Power"
+            },
+            "energy": {
+                "name": "Energy"
+            },
+            "estimated_current": {
+                "name": "Estimated Current"
+            },
+            "current": {
+                "name": "Current"
+            },
+            "voltage": {
+                "name": "Voltage"
+            },
+            "duty_cycle": {
+                "name": "Duty Cycle"
+            },
+            "min_setpoint": {
+                "name": "Min Setpoint"
+            },
+            "max_setpoint": {
+                "name": "Max Setpoint"
+            },
+            "heatsink_temperature": {
+                "name": "Heatsink Temperature"
+            },
+            "infloor_temperature": {
+                "name": "Floor Temperature"
+            },
+            "brightness": {
+                "name": "Brightness"
+            },
+            "timezone": {
+                "name": "Time Zone"
+            }
+        },
+        "update": {
+            "firmware": {
+                "name": "Firmware"
+            }
         }
     }
 }

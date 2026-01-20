@@ -3,7 +3,7 @@ MQTT E2E tests for Mysa integration.
 
 Tests real-time updates using a mock MQTT broker.
 """
-# pylint: disable=redefined-outer-name
+
 import asyncio
 import json
 import pytest
@@ -61,7 +61,7 @@ async def mock_mqtt_broker():
 @pytest.fixture
 def mock_auth():
     """Mock authentication."""
-    async def side_effect(self):
+    async def side_effect(self, *args, **kwargs):
         self._user_obj = MagicMock()
         self._user_obj.id_claims = {"exp": 9999999999}
         self._user_obj.id_token = "mock_token"
@@ -84,6 +84,7 @@ def mock_realtime_with_broker(mock_mqtt_broker):
         mock_instance.start = AsyncMock()
         mock_instance.stop = AsyncMock()
         mock_instance.send_command = AsyncMock()
+        mock_instance.wait_until_connected = AsyncMock(return_value=True)
         mock_instance._broker = mock_mqtt_broker  # Attach broker for test access
         mock_cls.return_value = mock_instance
         yield mock_instance
@@ -175,6 +176,7 @@ async def test_mqtt_state_update_injection(
     await hass.async_block_till_done()
 
     # Verify initial state
+    print(f"All entities: {hass.states.async_entity_ids()}")
     state = hass.states.get("climate.test_thermostat")
     assert state is not None
     initial_temp = state.attributes.get("temperature")
@@ -190,8 +192,9 @@ async def test_mqtt_state_update_injection(
     )
 
     # Simulate the MQTT update through the API
-    api = hass.data[DOMAIN][entry.entry_id]["api"]
-    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    # Simulate the MQTT update through the API
+    api = entry.runtime_data.api
+    coordinator = entry.runtime_data.coordinator
 
     # Disable coordinator callback to prevent HTTP refresh from overwriting MQTT update
     # In production, coordinator_callback triggers async_request_refresh which fetches

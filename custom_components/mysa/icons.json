@@ -1,0 +1,53 @@
+{
+    "entity": {
+        "switch": {
+            "lock": {
+                "default": "mdi:lock"
+            },
+            "auto_brightness": {
+                "default": "mdi:brightness-auto"
+            },
+            "proximity": {
+                "default": "mdi:motion-sensor"
+            },
+            "climate_plus": {
+                "default": "mdi:thermostat-auto"
+            }
+        },
+        "number": {
+            "min_brightness": {
+                "default": "mdi:brightness-5"
+            },
+            "max_brightness": {
+                "default": "mdi:brightness-7"
+            }
+        },
+        "select": {
+            "horizontal_swing": {
+                "default": "mdi:arrow-left-right"
+            }
+        },
+        "sensor": {
+            "ip_address": {
+                "default": "mdi:ip-network"
+            },
+            "serial_number": {
+                "default": "mdi:barcode"
+            },
+            "temperature": {
+                "default": "mdi:thermometer"
+            },
+            "humidity": {
+                "default": "mdi:water-percent"
+            },
+            "cost": {
+                "default": "mdi:currency-usd"
+            }
+        },
+        "update": {
+            "firmware": {
+                "default": "mdi:update"
+            }
+        }
+    }
+}

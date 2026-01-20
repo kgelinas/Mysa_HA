@@ -1,37 +1,44 @@
 """Select platform for Mysa AC horizontal swing."""
 # pylint: disable=abstract-method
+# Justification: HA Entity properties implement the required abstracts.
 import logging
 import time
-
+from typing import Any, Dict, List, Optional
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
+from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
     DOMAIN,
     AC_HORIZONTAL_SWING_MODES,
     AC_HORIZONTAL_SWING_MODES_REVERSE,
 )
+from . import MysaData
+from .mysa_api import MysaApi
+from .device import MysaDeviceLogic
+
+PARALLEL_UPDATES = 0
 
 _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
+    _hass: HomeAssistant,
+    entry: ConfigEntry[MysaData],
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Mysa select entities."""
-    data = hass.data[DOMAIN][entry.entry_id]
-    coordinator = data["coordinator"]
-    api = data["api"]
+    coordinator = entry.runtime_data.coordinator
+    api = entry.runtime_data.api
     devices = await api.get_devices()
 
-    entities = []
+    entities: list[SelectEntity] = []
     for device_id, device_data in devices.items():
         # Add horizontal swing select only for AC devices
         if api.is_ac_device(device_id):
@@ -43,16 +50,25 @@ async def async_setup_entry(
         async_add_entities(entities)
 
 
-class MysaHorizontalSwingSelect(CoordinatorEntity, SelectEntity):
+class MysaHorizontalSwingSelect(
+    SelectEntity, CoordinatorEntity[DataUpdateCoordinator[Dict[str, Any]]]
+):
     """Select entity for AC horizontal swing position.
 
     TODO: Refactor MysaHorizontalSwingSelect to reduce instance attributes,
     duplicate code, and implement abstract methods.
     """
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
 
-    _attr_icon = "mdi:arrow-left-right"
-
-    def __init__(self, coordinator, device_id, device_data, api, entry):
+    def __init__(
+        self,
+        coordinator: DataUpdateCoordinator[Dict[str, Any]],
+        device_id: str,
+        device_data: Dict[str, Any],
+        api: MysaApi,
+        entry: ConfigEntry[MysaData]
+    ) -> None:
         # TODO: Refactor __init__ to reduce arguments
         """Initialize."""
         super().__init__(coordinator)
@@ -60,23 +76,23 @@ class MysaHorizontalSwingSelect(CoordinatorEntity, SelectEntity):
         self._device_data = device_data
         self._api = api
         self._entry = entry
-        self._attr_name = f"{device_data.get('Name', 'Mysa AC')} Horizontal Swing"
+        self._attr_translation_key = "horizontal_swing"
         self._attr_unique_id = f"{device_id}_horizontal_swing"
-        self._pending_option = None
-        self._pending_timestamp = None
+        self._pending_option: Optional[str] = None
+        self._pending_timestamp: Optional[float] = None
+        self._options: List[str] = []
 
         # Build options from SupportedCaps or defaults
         self._build_options(device_data)
 
-    def _build_options(self, device_data):
+    def _build_options(self, device_data: Dict[str, Any]) -> None:
         """Build list of available horizontal swing options."""
-        supported_caps = device_data.get("SupportedCaps", {})
         supported_caps = device_data.get("SupportedCaps", {})
         modes = supported_caps.get("modes", {})
 
         # Get horizontal swing positions from first available mode
         self._options = []
-        for _, mode_caps in modes.items():
+        for mode_caps in modes.values():
             horizontal_swings = mode_caps.get("horizontalSwing", [])
             if horizontal_swings:
                 for pos in horizontal_swings:
@@ -95,39 +111,35 @@ class MysaHorizontalSwingSelect(CoordinatorEntity, SelectEntity):
     @property
     def device_info(self) -> DeviceInfo:
         """Return device info."""
-        state = self.coordinator.data.get(self._device_id)
-        zone_id = state.get("Zone") if state else None
-        zone_name = self._entry.options.get(f"zone_name_{zone_id}") if zone_id else None
-
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._device_id)},
-            manufacturer="Mysa",
-            model=self._device_data.get("Model"),
-            suggested_area=zone_name,
-        )
+        state = self.coordinator.data.get(self._device_id) if self.coordinator.data else None
+        return MysaDeviceLogic.get_device_info(self._device_id, self._device_data, state)
 
     @property
-    def options(self) -> list[str]:
+    def options(self) -> List[str]:
         """Return list of available options."""
         return self._options
 
     @property
-    def current_option(self) -> str | None:
+    def current_option(self) -> Optional[str]:
         """Return current horizontal swing position using sticky optimistic logic."""
         # Calculate current cloud option
         state = None
         if self.coordinator.data:
             state = self.coordinator.data.get(self._device_id)
-        current_cloud_option = None
+        current_cloud_option: Optional[str] = None
         if state:
-            val = state.get("SwingStateHorizontal")
+            # Priority: MQTT (ssh), then HTTP (SwingStateHorizontal)
+            val = state.get("ssh")
+            if val is None:
+                val = state.get("SwingStateHorizontal")
+
             if isinstance(val, dict):
                 val = val.get('v')
             if val is not None:
-                current_cloud_option = AC_HORIZONTAL_SWING_MODES.get(int(val), "auto")
+                current_cloud_option = str(AC_HORIZONTAL_SWING_MODES.get(int(val), "auto"))
 
         if self._pending_option is not None:
-             # 1. Check expiration
+            # 1. Check expiration
             if self._pending_timestamp and (time.time() - self._pending_timestamp > 30):
                 self._pending_option = None
                 self._pending_timestamp = None
@@ -158,6 +170,11 @@ class MysaHorizontalSwingSelect(CoordinatorEntity, SelectEntity):
 
             await self._api.set_ac_horizontal_swing(self._device_id, position)
 
-        except Exception as e:  # TODO: Catch specific exceptions instead of Exception
+        except Exception as e:
             _LOGGER.error("Failed to set horizontal swing: %s", e)
             self._pending_option = None
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_horizontal_swing_failed",
+                translation_placeholders={"error": str(e)},
+            ) from e

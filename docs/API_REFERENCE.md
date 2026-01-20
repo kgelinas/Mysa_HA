@@ -219,8 +219,8 @@ All state values use a timestamp/value object:
 | Field | Type | Description |
 |:------|:-----|:------------|
 | `Connected` | bool | Device online status |
-| `CorrectedTemp` | number | Calibrated room temperature (°C) |
-| `SensorTemp` | number | Raw sensor temperature (°C) |
+| `CorrectedTemp` | number | Calibrated room temperature (°C) - **Priority for UI** |
+| `SensorTemp` | number | Raw sensor temperature (°C) - Elevated by device heat. **Warning logged if used as fallback.** |
 | `Humidity` | number | Relative humidity (0-100%) |
 | `SetPoint` | number | Target temperature (°C) |
 | `Mode` | number | HVAC mode ID |
@@ -248,7 +248,8 @@ All state values use a timestamp/value object:
 | `SwingStateHorizontal` | number | Horizontal swing position |
 | `IsThermostatic` | number | Climate+ mode (0/1) |
 | `Delta` | number | Temperature delta |
-| `ACState` | object | Raw AC unit state codes |
+| `ACState` | object | Raw codes: `1`:Power, `2`:Mode, `3`:Temp, `4`:Fan, `5`:Swing |
+| `FanSpeed` | number | Current fan speed setting (also in `fn`) |
 
 ---
 

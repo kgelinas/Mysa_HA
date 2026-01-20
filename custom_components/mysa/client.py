@@ -1,11 +1,18 @@
 """HTTP Client for Mysa."""
 import logging
+from typing import Any, Dict, List, Optional, cast
 from time import time
+from functools import partial
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from aiohttp import ClientSession, ClientResponse
+
+from pycognito import Cognito
 from .mysa_auth import (
     CognitoUser, login, refresh_and_sign_url,
     CLIENT_HEADERS, BASE_URL,
+    USER_POOL_ID, CLIENT_ID, REGION
 )
 from .device import MysaDeviceLogic
 
@@ -18,21 +25,26 @@ STORAGE_VERSION = 1
 class MysaClient:
     """Mysa HTTP API Client."""
 
-    def __init__(self, hass, username, password):
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        username: str,
+        password: str,
+        websession: Optional[ClientSession] = None
+    ) -> None:
         """Initialize the API."""
         self.hass = hass
         self.username = username
         self.password = password
-        self._user_obj = None
-        self._user_id = None  # Mysa User UUID
-        self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
-        self.devices = {}
-        self.homes = []
-        self.zones = {}
-        self.zone_to_home = {}
-        self.device_to_home = {}
-        self.home_rates = {}
-        self._last_command_time = {}
+        self.websession = websession
+        self._user_obj: Optional[CognitoUser] = None
+        self._user_id: Optional[str] = None  # Mysa User UUID
+        self._store: Store[Dict[str, Any]] = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+        self.devices: Dict[str, Any] = {}
+        self.homes: List[Any] = []
+        self.device_to_home: Dict[str, str] = {}
+        self.home_rates: Dict[str, float] = {}
+        self._last_command_time: Dict[str, float] = {}
 
     @property
     def is_connected(self) -> bool:
@@ -40,18 +52,18 @@ class MysaClient:
         return self._user_obj is not None
 
     @property
-    def user_id(self):
+    def user_id(self) -> Optional[str]:
         """Return the user ID."""
         return self._user_id
 
-    async def _get_auth_headers(self) -> dict:
+    async def _get_auth_headers(self) -> Dict[str, str]:
         """Get authorization headers, refreshing token if needed."""
         if not self._user_obj:
             return {}
 
         # Check if token needs refresh (within 5 seconds of expiry)
-        # pylint: disable=unsubscriptable-object
-        if self._user_obj.id_claims and time() > self._user_obj.id_claims['exp'] - 5:
+        # Check if token needs refresh (within 60 seconds of expiry)
+        if self._user_obj.id_claims and time() > self._user_obj.id_claims.get('exp', 0) - 60:
             # Renew token (now async, no executor needed)
             await self._user_obj.renew_access_token()
 
@@ -60,10 +72,13 @@ class MysaClient:
             headers['authorization'] = self._user_obj.id_token
         return headers
 
-    async def authenticate(self):
+    async def authenticate(self, use_cache: bool = True) -> bool:
         """Authenticate with Mysa (Async)."""
-        # 1. Load cached tokens
-        cached_data = await self._store.async_load()
+        # 1. Load cached tokens (if enabled)
+        if use_cache:
+            cached_data = await self._store.async_load()
+        else:
+            cached_data = None
 
         # Try to restore session from cached tokens
         if cached_data and isinstance(cached_data, dict):
@@ -72,16 +87,24 @@ class MysaClient:
             refresh_token = cached_data.get("refresh_token")
             if id_token and refresh_token and access_token:
                 try:
-                    # Create user object from cached tokens
-                    user = CognitoUser(
+                    # Create pycognito client from cached tokens in executor
+                    cognito_client = await self.hass.async_add_executor_job(partial(
+                        Cognito,
+                        USER_POOL_ID,
+                        CLIENT_ID,
+                        user_pool_region=REGION,
                         username=self.username,
                         id_token=id_token,
                         access_token=access_token,
                         refresh_token=refresh_token
-                    )
-                    # Verify token
+                    ))
+
+                    user = CognitoUser(cognito_client)
+
+                    # Verify token / Try refresh if needed
                     try:
-                        user.verify_token(user.id_token, "id")
+                        # Pyrefly note: verify_token is a method on CognitoUser
+                        await user.async_verify_token(id_token, "id")
                         _LOGGER.debug("Restored credentials from storage")
                         self._user_obj = user
                     except Exception:
@@ -104,7 +127,7 @@ class MysaClient:
                 raise
 
         # 2. Save tokens back to Store
-        if self._user_obj:
+        if self._user_obj and self._user_obj.id_token:
             await self._store.async_save({
                 "id_token": self._user_obj.id_token,
                 "access_token": self._user_obj.access_token,
@@ -113,7 +136,7 @@ class MysaClient:
 
         # 3. Fetch User ID (needed for MQTT commands)
         try:
-            session = async_get_clientsession(self.hass)
+            session = self.websession or async_get_clientsession(self.hass)
             async with session.get(
                 f"{BASE_URL}/users",
                 headers=await self._get_auth_headers()
@@ -124,15 +147,17 @@ class MysaClient:
                 _LOGGER.debug("Fetched User ID: %s", self._user_id)
         except Exception as e:
             _LOGGER.error("Failed to fetch User ID: %s", e)
+            # Don't strictly fail authentication if just USER ID fetch fails,
+            # though MQTT might fail later.
 
         return True
 
-    async def get_devices(self):
+    async def get_devices(self) -> Dict[str, Any]:
         """Get devices."""
         if not self._user_obj:
             raise RuntimeError("Session not initialized")
 
-        session = async_get_clientsession(self.hass)
+        session = self.websession or async_get_clientsession(self.hass)
         url = f"{BASE_URL}/devices"
 
         async with session.get(url, headers=await self._get_auth_headers()) as resp:
@@ -164,76 +189,74 @@ class MysaClient:
 
         return self.devices
 
-    async def fetch_homes(self):
+    def _map_devices_to_homes(self, zone_to_home: Dict[str, str]) -> None:
+        """Map devices to homes based on available metadata."""
+        for dev_id, dev in self.devices.items():
+            if dev_id in self.device_to_home:
+                continue
+
+            home_id = dev.get("Home")
+            if home_id in self.home_rates:
+                self.device_to_home[dev_id] = home_id
+                continue
+
+            dev_zone = dev.get('Zone')
+            z_id = dev_zone.get('Id') if isinstance(dev_zone, dict) else dev_zone
+            if z_id and str(z_id) in zone_to_home:
+                self.device_to_home[dev_id] = zone_to_home[str(z_id)]
+
+    async def fetch_homes(self) -> List[Any]:
         """Fetch homes and zones."""
         if not self._user_obj:
             raise RuntimeError("Session not initialized")
 
-        session = async_get_clientsession(self.hass)
-        url = f"{BASE_URL}/homes"
-
-        async with session.get(url, headers=await self._get_auth_headers()) as resp:
+        session = self.websession or async_get_clientsession(self.hass)
+        async with session.get(f"{BASE_URL}/homes", headers=await self._get_auth_headers()) as resp:
             resp.raise_for_status()
             data = await resp.json()
 
         self.homes = data.get('Homes', data.get('homes', []))
-
-        self.zones = {}
-        self.zone_to_home = {}
         self.device_to_home = {}
         self.home_rates = {}
+        zone_to_home = {}
 
         for home in self.homes:
             h_id = home.get('Id')
-            # Parse ERate
-            e_rate = home.get('ERate')
-            if h_id and e_rate is not None:
+            rate = home.get('ERate')
+            if h_id and rate is not None:
                 try:
-                    self.home_rates[h_id] = float(e_rate)
+                    val = float(rate.replace(',', '.') if isinstance(rate, str) else rate)
+                    self.home_rates[h_id] = val
                 except (ValueError, TypeError):
                     pass
 
             for zone in home.get('Zones', []):
                 z_id = zone.get('Id')
-                z_name = zone.get('Name')
-                if z_id:
-                    if z_name:
-                        self.zones[z_id] = z_name
-                    # Map zone to home for reverse lookup
-                    self.zone_to_home[z_id] = h_id
-                    # Map Devices in this zone to this home (if available)
-                    for d_id in zone.get('DeviceIds', []):
-                        self.device_to_home[d_id] = h_id
+                if z_id and h_id:
+                    zone_to_home[z_id] = h_id
+                for d_id in zone.get('DeviceIds', []):
+                    self.device_to_home[d_id] = h_id
+
+        # Fallback: Link devices via Zone ID or Home property
+        self._map_devices_to_homes(zone_to_home)
 
         return self.homes
 
-    def get_zone_name(self, zone_id):
-        """Get friendly name for a zone ID."""
-        return self.zones.get(zone_id)
-
-    def get_electricity_rate(self, device_id):
+    def get_electricity_rate(self, device_id: str) -> Optional[float]:
         """Get electricity rate for a device based on its home."""
-        # Check explicit device mapping first (from Zone->DeviceIds)
+        # Check explicit device mapping first
         home_id = self.device_to_home.get(device_id)
-
-        # Fallback: Find home via device's Zone setting
-        if not home_id and device_id in self.devices:
-            device = self.devices[device_id]
-            # Check device's Zone attribute
-            zone_id = device.get('Zone')
-            if zone_id:
-                home_id = self.zone_to_home.get(zone_id)
 
         if home_id:
             return self.home_rates.get(home_id)
         return None
 
-    async def fetch_firmware_info(self, device_id):
+    async def fetch_firmware_info(self, device_id: str) -> Optional[Dict[str, Any]]:
         """Fetch firmware update info."""
         if not self._user_obj:
             raise RuntimeError("Session not initialized")
 
-        session = async_get_clientsession(self.hass)
+        session = self.websession or async_get_clientsession(self.hass)
         url = f"{BASE_URL}/devices/update_available/{device_id}"
 
         try:
@@ -242,12 +265,12 @@ class MysaClient:
                 headers=await self._get_auth_headers()
             ) as resp:
                 resp.raise_for_status()
-                return await resp.json()
+                return cast(Optional[Dict[str, Any]], await resp.json())
         except Exception as e:
             _LOGGER.debug("Failed to fetch firmware info for %s: %s", device_id, e)
             return None
 
-    async def get_state(self, current_states=None):
+    async def get_state(self, current_states: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Get full state of all devices."""
         if current_states is None:
             current_states = {}
@@ -255,7 +278,7 @@ class MysaClient:
         if not self._user_obj:
             raise RuntimeError("Session not initialized")
 
-        session = async_get_clientsession(self.hass)
+        session = self.websession or async_get_clientsession(self.hass)
 
         # 1. Fetch live metrics
         async with session.get(
@@ -302,7 +325,7 @@ class MysaClient:
 
         return result_states
 
-    async def get_signed_mqtt_url(self):
+    async def get_signed_mqtt_url(self) -> str:
         """Get signed MQTT URL with fresh credentials."""
         if not self._user_obj:
             raise RuntimeError("Not authenticated")
@@ -315,12 +338,12 @@ class MysaClient:
 
         return signed_url
 
-    async def set_device_setting_http(self, device_id, settings: dict):
+    async def set_device_setting_http(self, device_id: str, settings: Dict[str, Any]) -> Any:
         """Set device settings via HTTP POST."""
         if not self._user_obj:
             raise RuntimeError("Session not initialized")
 
-        session = async_get_clientsession(self.hass)
+        session = self.websession or async_get_clientsession(self.hass)
         url = f"{BASE_URL}/devices/{device_id}"
 
         try:
@@ -337,12 +360,12 @@ class MysaClient:
             _LOGGER.error("Failed to set device %s settings: %s", device_id, e)
             raise
 
-    async def async_request(self, method, url, **kwargs):
+    async def async_request(self, method: str, url: str, **kwargs: Any) -> "ClientResponse":
         """Perform a request using the session."""
         if not self._user_obj:
             raise RuntimeError("Session not initialized")
 
-        session = async_get_clientsession(self.hass)
+        session = self.websession or async_get_clientsession(self.hass)
         headers = kwargs.pop('headers', {})
         headers.update(await self._get_auth_headers())
 
@@ -350,7 +373,7 @@ class MysaClient:
             resp.raise_for_status()
             return resp
 
-    async def set_device_setting_silent(self, device_id, settings: dict):
+    async def set_device_setting_silent(self, device_id: str, settings: Dict[str, Any]) -> None:
         """Set device settings via HTTP POST without raising on error (best effort)."""
         try:
             await self.set_device_setting_http(device_id, settings)

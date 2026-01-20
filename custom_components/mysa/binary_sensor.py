@@ -1,5 +1,7 @@
 """Binary sensor platform for Mysa."""
 import logging
+from typing import Any, Dict, Optional
+
 from homeassistant.components.binary_sensor import (
     BinarySensorEntity,
     BinarySensorDeviceClass,
@@ -7,25 +9,26 @@ from homeassistant.components.binary_sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
 
-from .const import DOMAIN
+from . import MysaData
+from .device import MysaDeviceLogic
+
+PARALLEL_UPDATES = 0
 
 _LOGGER = logging.getLogger(__name__)
 
+
 async def async_setup_entry(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
+    _hass: HomeAssistant,
+    entry: ConfigEntry[MysaData],
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Mysa binary sensors."""
-    data = hass.data[DOMAIN].get(entry.entry_id)
-    if not data:
-        return
-
-    coordinator = data["coordinator"]
-    api = data["api"]
+    coordinator = entry.runtime_data.coordinator
+    api = entry.runtime_data.api
     devices = await api.get_devices()
 
     entities = []
@@ -36,34 +39,41 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class MysaConnectionSensor(CoordinatorEntity, BinarySensorEntity):
+class MysaConnectionSensor(
+    BinarySensorEntity, CoordinatorEntity[DataUpdateCoordinator[Dict[str, Any]]]
+):
     """Representation of a Mysa Connection Status sensor."""
 
-    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_device_class: Any = BinarySensorDeviceClass.CONNECTIVITY
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_has_entity_name = True
 
-    def __init__(self, coordinator, device_id, device_data):
+    def __init__(
+        self,
+        coordinator: DataUpdateCoordinator[Dict[str, Any]],
+        device_id: str,
+        device_data: Dict[str, Any]
+    ) -> None:
         """Initialize."""
         super().__init__(coordinator)
         self._device_id = device_id
         self._device_data = device_data
-        self._attr_name = f"{device_data.get('Name', 'Mysa')} Connection"
+        self._attr_translation_key = "connection"
         self._attr_unique_id = f"{device_id}_connection"
 
     @property
-    def device_info(self):
+    def device_info(self) -> DeviceInfo:
         """Return device info."""
-        return {
-            "identifiers": {(DOMAIN, self._device_id)},
-            "manufacturer": "Mysa",
-            "model": self._device_data.get("Model"),
-            "name": self._device_data.get("Name"),
-        }
+        state = self.coordinator.data.get(self._device_id) if self.coordinator.data else None
+        return MysaDeviceLogic.get_device_info(self._device_id, self._device_data, state)
 
     @property
-    def is_on(self):
+    def is_on(self) -> Optional[bool]:
         """Return true if the device is connected."""
+        if not self.coordinator.data:
+            return False
+
         state = self.coordinator.data.get(self._device_id)
         if not state:
             return False
-        return state.get("Connected", False)
+        return bool(state.get("Connected", False))

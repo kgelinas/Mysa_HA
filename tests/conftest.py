@@ -12,13 +12,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 MYSA_RECORD = os.environ.get("MYSA_RECORD", "0") == "1"
 if not MYSA_RECORD:
     try:
-        import pycognito
+        import pycognito  # pylint: disable=unused-import
     except ImportError:
         sys.modules["pycognito"] = MagicMock()
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
-
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 
@@ -69,6 +68,7 @@ def mock_config_entry(hass):
         entry_id="test_entry_id",
         title="Mysa Integration",
     )
+    entry.runtime_data = None
     entry.add_to_hass(hass)
     return entry
 

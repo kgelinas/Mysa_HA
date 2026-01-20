@@ -1,6 +1,6 @@
 # Mysa for Home Assistant
 
-[![Version](https://img.shields.io/badge/version-0.8.10-blue.svg)](https://github.com/kgelinas/Mysa_HA)
+[![Version](https://img.shields.io/badge/version-0.9.0-blue.svg)](https://github.com/kgelinas/Mysa_HA)
 
 ...
 
@@ -38,25 +38,49 @@ A native cloud integration for Mysa devices in Home Assistant. Uses the official
 
 ### 🧪 Call for Testers
 
-We are looking for users with the **Mysa for Central AC/Heat (ST-V1)**. Support is currently **unverified**. If you have this device, please install the integration and report your findings (and debug logs) on GitHub to help us fully support it!
+- **Mysa for Baseboards V1** (BB-V1)
+- **Mysa for Baseboards V2** (BB-V2)
+- **Mysa for Baseboards V2 Lite** (BB-V2-L) - *With "Magic Upgrade" support*
+- **Mysa for AC/Mini-Split** (AC-V1)
+- **Mysa for In-Floor** (INF-V1)
+- **Mysa for Central AC/Heat** (ST-V1)
 
-## Installation
+## Known Limitations
+- **Cloud Dependent**: Requires an active internet connection to authenticate and connect to Mysa's backend. This is **not a local-only integration** (local API was removed by Mysa).
+- **Polling Fallback**: Uses a slower polling interval (120s) as a fail-safe, relying primarily on push updates.
 
-### HACS (Recommended)
+## Troubleshooting
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=kgelinas&repository=Mysa_HA&category=integration)
+### Authentication Failed
+- Double-check your email and password.
 
-Or manually:
-1. Open HACS → Integrations → ⋮ (menu) → Custom repositories
-2. Add `https://github.com/kgelinas/Mysa_HA` with category **Integration**
-3. Search for "Mysa" and install
-4. Restart Home Assistant
+### Delay in updates
+- This integrations uses a persistent MQTT connection. If updates are slow, check your internet connection or logs for "Reconnecting..." messages.
+
+---
+
+## Installation via HACS
+
+1. Go to HACS -> Integrations
+2. Click the 3 dots in the top right corner and select "Custom repositories"
+3. Add `kgelinas/Mysa_HA` as a custom repository
+4. Click "Install"
+5. Restart Home Assistant
+
 5. Go to **Settings → Devices & Services → Add Integration → Mysa**
 
 ### Manual
 1. Copy `custom_components/mysa` to your Home Assistant `config/custom_components/` folder
 2. Restart Home Assistant
 3. Add the integration via **Settings → Devices & Services**
+
+## Removal
+
+1. Go to **Settings → Devices & Services**.
+2. Select the **Mysa** integration.
+3. Click the three dots on the integration entry and select **Delete**.
+4. If you used HACS, go to HACS → Integrations → Mysa → three dots → Remove.
+5. Restart Home Assistant.
 
 ## Configuration
 
@@ -93,6 +117,8 @@ Or manually:
 ### Sensors
 | Sensor | Default | Category |
 |:-------|:--------|:---------|
+| Temperature | Enabled | Standard |
+| Humidity | Enabled | Standard |
 | Zone | Enabled | Standard |
 | Voltage | Hidden | Diagnostic |
 | Current | Hidden | Diagnostic |
@@ -217,6 +243,20 @@ For users who do not want to install Python, **standalone executables** are avai
 
 See [docs/MYSA_DEBUG.md](docs/MYSA_DEBUG.md) for usage details.
 
+## Troubleshooting
+
+### Authentication Failed
+If you see "Authentication failed" errors, ensure your email and password are correct. If you recently changed your password, re-configure the integration via **Settings → Devices & Services → Mysa → Configure** (or delete and re-add).
+
+### Devices Unavailable
+If devices show as "Unavailable":
+1. Check if the device is online in the official Mysa app.
+2. Verify your Home Assistant internet connection.
+3. Check the logs for specific error messages (Settings → System → Logs).
+
+### Ghost Devices
+Integration requires devices to be assigned to a specific "Home" within the Mysa app. Devices not assigned to a home (ghost devices) may be ignored or fail to update. ensuring all devices are assigned to a home in the Mysa app is recommended.
+
 ## Protocol Documentation
 
 For developers interested in the Mysa protocols:
@@ -235,6 +275,31 @@ A Dev Container configuration is included for VS Code. Open the project in VS Co
 
 - Mysa account (email/password)
 - Home Assistant 2024.1.0 or later
+
+## Advanced Configuration (Automation)
+
+Mysa entities can be automated using standard Home Assistant triggers and actions.
+
+### Example: Turn off AC when window opens
+
+```yaml
+alias: "Turn off AC if window open"
+description: "Turn off Mysa AC when living room window is opened"
+trigger:
+  - platform: state
+    entity_id: binary_sensor.living_room_window
+    to: "on"
+    for:
+      seconds: 30
+condition:
+  - condition: state
+    entity_id: climate.living_room_ac
+    state: "cool"
+action:
+  - service: climate.turn_off
+    target:
+      entity_id: climate.living_room_ac
+```
 
 ## Credits
 

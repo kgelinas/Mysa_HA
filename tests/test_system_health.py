@@ -1,7 +1,7 @@
 """Tests for System Health."""
 
 import pytest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock, AsyncMock, patch
 
 from custom_components.mysa.const import DOMAIN
 from custom_components.mysa.system_health import system_health_info, async_register
@@ -72,3 +72,40 @@ class TestSystemHealth:
         result = await system_health_info(hass)
 
         assert result["mqtt_listener"] == "Stopped"
+
+    @pytest.mark.asyncio
+    async def test_system_health_fallback_invalid_runtime_data(self, hass):
+        """Test fallback when runtime_data exists but lacks api attribute."""
+        hass.data[DOMAIN] = {}
+
+        mock_entry = MagicMock()
+        # runtime_data exists but is an empty object (no api attr)
+        mock_entry.runtime_data = object()
+
+        with patch("custom_components.mysa.system_health.MysaApi", side_effect=ImportError):
+            # We patch config_entries.async_entries via hass object
+            with patch.object(hass.config_entries, "async_entries", return_value=[mock_entry]):
+                 result = await system_health_info(hass)
+
+        assert result["api_connected"] is False
+
+    @pytest.mark.asyncio
+    async def test_system_health_fallback_success(self, hass):
+        """Test fallback when runtime_data works correctly."""
+        hass.data[DOMAIN] = {}
+
+        mock_api = MagicMock()
+        mock_api.is_connected = True
+        mock_api.devices = {"device1": {}}
+        mock_api.is_mqtt_running = True
+
+        mock_entry = MagicMock()
+        mock_entry.runtime_data.api = mock_api
+
+        with patch("custom_components.mysa.system_health.MysaApi", side_effect=ImportError):
+            # We patch config_entries.async_entries via hass object
+            with patch.object(hass.config_entries, "async_entries", return_value=[mock_entry]):
+                 result = await system_health_info(hass)
+
+        assert result["api_connected"] is True
+        assert result["devices"] == 1

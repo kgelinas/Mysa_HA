@@ -1,0 +1,88 @@
+{
+    "title": "Mysa Uitgebreid",
+    "config": {
+        "step": {
+            "user": {
+                "description": "Mysa Uitgebreid biedt geavanceerde functies. Geen configuratie nodig - het gebruikt uw bestaande Mysa-integratie."
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Mysa Uitgebreid Opties",
+                "description": "Configureer geavanceerde instellingen. Laat velden leeg om standaardwaarden te gebruiken.",
+                "data": {
+                    "custom_erate": "Aangepast Elektriciteitstarief ($/kWh)"
+                }
+            }
+        }
+    },
+    "services": {
+        "upgrade_lite_device": {
+            "name": "Upgrade Lite Apparaat (Magic Upgrade)",
+            "description": "Ontgrendelt \"Volledige\" functies op een Mysa Baseboard V2 Lite (BB-V2-0-L) door het modeltype te wijzigen naar standaard BB-V2-0.\n\n⚠️ WAARSCHUWING: Dit wijzigt firmware-instellingen en kan uw garantie ongeldig maken. Gebruik op eigen risico.\nVereist daarna het uit- en inschakelen van het apparaat.",
+            "fields": {
+                "device_id": {
+                    "name": "Apparaat",
+                    "description": "Het Mysa Lite apparaat om te upgraden."
+                }
+            }
+        },
+        "downgrade_lite_device": {
+            "name": "Herstel Lite Apparaat (Upgrade Ongedaan Maken)",
+            "description": "Herstelt een Mysa Baseboard V2 Lite apparaat naar zijn originele fabrieksmodel-ID (BB-V2-0-L).\nGebruik dit als u de \"Magic Upgrade\" ongedaan moet maken.\n\n⚠️ WAARSCHUWING: Dit wijzigt firmware-instellingen. Gebruik op eigen risico.\nVereist daarna het uit- en inschakelen van het apparaat.",
+            "fields": {
+                "device_id": {
+                    "name": "Apparaat",
+                    "description": "Het Mysa apparaat om te herstellen."
+                }
+            }
+        },
+        "killer_ping": {
+            "name": "Killer Ping (Herstart naar Koppelingsmodus)",
+            "description": "Stuurt een speciaal commando dat het apparaat HERSTART in KOPPELINGSMODUS.\nHet apparaat verbreekt de verbinding met uw netwerk en moet opnieuw worden gekoppeld via de Mysa-app.\n\n⚠️⚠️ GEVAAR: Dit is een DESTRUCTIEVE actie! ⚠️⚠️\n- Het apparaat wordt ONTKOPPELD van uw netwerk\n- U moet het apparaat fysiek OPNIEUW KOPPELEN\n- Gebruik dit alleen als u het apparaat naar een nieuw netwerk moet verplaatsen",
+            "fields": {
+                "device_id": {
+                    "name": "Apparaat",
+                    "description": "Het Mysa apparaat om te herstarten in koppelingsmodus."
+                }
+            }
+        }
+    },
+    "exceptions": {
+        "device_not_found": {
+            "message": "Apparaat {device_id} niet gevonden."
+        },
+        "mysa_integration_not_loaded": {
+            "message": "Mysa integratie niet geladen."
+        },
+        "mysa_integration_not_found_for_device": {
+            "message": "Mysa integratie niet gevonden voor {device_id}."
+        },
+        "mysa_data_invalid": {
+            "message": "Mysa-gegevens niet gevonden of ongeldig."
+        },
+        "mysa_api_not_initialized": {
+            "message": "Mysa API niet geïnitialiseerd."
+        },
+        "upgrade_failed": {
+            "message": "Hardware-upgrade mislukt voor apparaat {device_id}."
+        },
+        "upgrade_error": {
+            "message": "Upgrade mislukt: {error}"
+        },
+        "downgrade_failed": {
+            "message": "Hardware-herstel mislukt voor apparaat {device_id}."
+        },
+        "downgrade_error": {
+            "message": "Herstel mislukt: {error}"
+        },
+        "killer_ping_failed": {
+            "message": "Killer Ping mislukt voor apparaat {device_id}."
+        },
+        "killer_ping_error": {
+            "message": "Killer Ping fout: {error}"
+        }
+    }
+}

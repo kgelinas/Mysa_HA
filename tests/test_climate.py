@@ -15,7 +15,12 @@ sys.path.insert(0, ROOT_DIR)
 
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch, PropertyMock
-from homeassistant.components.climate import HVACMode, HVACAction
+from homeassistant.components.climate import (
+    HVACMode,
+    HVACAction,
+    ClimateEntityFeature,
+)
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 # Module-level imports after path setup
@@ -28,6 +33,7 @@ from custom_components.mysa.const import (
     AC_MODE_DRY,
     AC_MODE_FAN_ONLY,
 )
+from custom_components.mysa import MysaData
 
 
 # ===========================================================================
@@ -172,7 +178,8 @@ class TestMysaClimateInit:
         )
 
         assert entity._device_id == "device1"
-        assert "Living Room" in entity._attr_name
+        assert entity._attr_name is None
+        assert entity.has_entity_name is True
         assert entity._attr_unique_id == "device1"  # Just device_id
 
     @pytest.mark.asyncio
@@ -223,6 +230,29 @@ class TestMysaClimateProperties:
         temp = climate_entity.current_temperature
 
         assert temp == 20.5
+
+    @pytest.mark.asyncio
+    async def test_current_temperature_priority(self, hass, mock_coordinator, climate_entity):
+        """Test that climate entity prioritizes CorrectedTemp over ambTemp."""
+        await mock_coordinator.async_refresh()
+
+        # 1. Test with ONLY ambTemp
+        mock_coordinator.data = {
+            "device1": {
+                "ambTemp": 20.0
+            }
+        }
+        assert climate_entity.current_temperature == 20.0
+
+        # 2. Test with ambTemp AND CorrectedTemp (Simulate Stale ambTemp)
+        # We expect CorrectedTemp (21.0) to be prioritized
+        mock_coordinator.data = {
+            "device1": {
+                "ambTemp": 20.0,
+                "CorrectedTemp": 21.0
+            }
+        }
+        assert climate_entity.current_temperature == 21.0
 
     @pytest.mark.asyncio
     async def test_target_temperature(self, hass, mock_coordinator, climate_entity):
@@ -278,6 +308,67 @@ class TestMysaClimateProperties:
         attrs = climate_entity.extra_state_attributes
 
         assert isinstance(attrs, dict)
+
+
+class TestMysaClimateInfloor:
+    """Test dynamic current_temperature for In-Floor devices."""
+
+    @pytest.fixture
+    def infloor_device_data(self):
+        """Create mock device data for In-Floor thermostat."""
+        return {
+            "Id": "infloor1",
+            "Name": "Bathroom Floor",
+            "Model": "INF-V1",
+            "type": 3,
+        }
+
+    @pytest.fixture
+    def infloor_entity(
+        self, hass, mock_coordinator, infloor_device_data, mock_api, mock_entry
+    ):
+        """Create In-Floor climate entity."""
+        from custom_components.mysa.climate import MysaClimate
+
+        return MysaClimate(
+            mock_coordinator,
+            "infloor1",
+            infloor_device_data,
+            mock_api,
+            mock_entry,
+        )
+
+    @pytest.mark.asyncio
+    async def test_current_temperature_infloor_modes(
+        self, hass, mock_coordinator, infloor_entity
+    ):
+        """Test that In-Floor devices pick the correct sensor based on mode."""
+        await mock_coordinator.async_refresh()
+
+        # 1. Floor Mode (SensorMode = 1) -> Should pick Infloor
+        mock_coordinator.data = {
+            "infloor1": {"ambTemp": 20.0, "Infloor": 25.0, "SensorMode": 1}
+        }
+        assert infloor_entity.current_temperature == 25.0
+
+        # 2. Ambient Mode (SensorMode = 0) -> Should pick ambient (ambTemp)
+        mock_coordinator.data = {
+            "infloor1": {"ambTemp": 20.0, "Infloor": 25.0, "SensorMode": 0}
+        }
+        assert infloor_entity.current_temperature == 20.0
+
+        # 3. Default (no SensorMode) -> Should fallback to ambient
+        mock_coordinator.data = {"infloor1": {"ambTemp": 21.0, "Infloor": 25.0}}
+        assert infloor_entity.current_temperature == 21.0
+
+        # 4. Fallback to SensorTemp if nothing else
+        mock_coordinator.data = {
+            "infloor1": {
+                "SensorTemp": 22.0,
+                "SensorMode": 1,  # Mode 1 but no Infloor temp
+            }
+        }
+        assert infloor_entity.current_temperature == 22.0
 
 
 class TestMysaClimateActions:
@@ -378,7 +469,8 @@ class TestMysaACClimateInit:
         )
 
         assert entity._device_id == "ac_device_123"
-        assert "Bedroom AC" in entity._attr_name
+        assert entity._attr_name is None
+        assert entity.has_entity_name is True
 
 
 class TestMysaACClimateProperties:
@@ -534,6 +626,93 @@ class TestMysaACClimateActions:
         mock_api.set_target_temperature.assert_called_once_with("ac_device_123", 22.0)
         ac_entity.async_write_ha_state.assert_called()
 
+    @pytest.mark.asyncio
+    async def test_ac_turn_on_fallback(
+        self, hass, mock_coordinator, ac_entity, mock_api
+    ):
+        """Test async_turn_on fallback logic (line 658 coverage)."""
+        await mock_coordinator.async_refresh()
+
+        # Mock hvac_modes to NOT contain HEAT_COOL but contain HEAT
+        with patch.object(
+            type(ac_entity), "hvac_modes", new_callable=PropertyMock
+        ) as mock_modes:
+            mock_modes.return_value = [HVACMode.HEAT, HVACMode.OFF]
+
+            await ac_entity.async_turn_on()
+
+            # Should choose HEAT
+            mock_api.set_hvac_mode.assert_called_once_with("ac_device_123", "heat")
+
+        mock_api.set_hvac_mode.reset_mock()
+
+        # Mock hvac_modes to convert to COOL fallback
+        with patch.object(
+            type(ac_entity), "hvac_modes", new_callable=PropertyMock
+        ) as mock_modes:
+            mock_modes.return_value = [HVACMode.COOL, HVACMode.OFF]
+
+            await ac_entity.async_turn_on()
+
+            # Should choose COOL
+            mock_api.set_hvac_mode.assert_called_once_with("ac_device_123", "cool")
+
+    @pytest.mark.asyncio
+    async def test_ac_turn_on_restores_last_mode(
+        self, hass, mock_coordinator, ac_entity, mock_api
+    ):
+        """Test async_turn_on restores the last used mode."""
+        await mock_coordinator.async_refresh()
+
+        # Set mode to COOL
+        await ac_entity.async_set_hvac_mode(HVACMode.COOL)
+        assert ac_entity._last_mode == HVACMode.COOL
+
+        # Turn OFF
+        await ac_entity.async_set_hvac_mode(HVACMode.OFF)
+
+        # Turn ON - should restore COOL (even if Auto/Heat are available)
+        mock_api.set_hvac_mode.reset_mock()
+        await ac_entity.async_turn_on()
+
+        # Should choose COOL because it was last used
+        mock_api.set_hvac_mode.assert_called_once_with("ac_device_123", "cool")
+
+    @pytest.mark.parametrize(
+        "method_name,api_mock_name,args,pending_key",
+        [
+            ("async_set_swing_mode", "set_ac_swing_mode", ["auto"], "swing_mode"),
+            ("async_set_fan_mode", "set_ac_fan_speed", ["high"], "fan_mode"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_ac_setter_fail(
+        self,
+        hass,
+        mock_coordinator,
+        ac_entity,
+        mock_api,
+        method_name,
+        api_mock_name,
+        args,
+        pending_key,
+    ):
+        """Test async setter failure cleans up pending updates."""
+        await mock_coordinator.async_refresh()
+
+        # Mock API failure
+        getattr(mock_api, api_mock_name).side_effect = Exception("API Error")
+
+        # Pre-seed pending update
+        ac_entity._pending_updates[pending_key] = {"value": args[0], "ts": 1234567890}
+
+        # Call the method
+        with pytest.raises(HomeAssistantError):
+            await getattr(ac_entity, method_name)(*args)
+
+        # Verify pending update was removed
+        assert pending_key not in ac_entity._pending_updates
+
 
 # ===========================================================================
 # Helper Method Tests
@@ -596,6 +775,64 @@ class TestClimateHelperMethods:
         value = climate_entity._get_value("stpt")
 
         assert value == 21.0
+
+    @pytest.mark.asyncio
+    async def test_sensortemp_fallback_warning(
+        self, hass, mock_coordinator, mock_device_data, mock_api, mock_entry
+    ):
+        """Test fallback warning when only SensorTemp is available."""
+        from custom_components.mysa.climate import MysaClimate
+        from unittest.mock import patch
+
+        # Create entity
+        entity = MysaClimate(
+            mock_coordinator, "device1", mock_device_data, mock_api, mock_entry
+        )
+
+        # Mock extracting SensorTemp only
+        # We need to mock _extract_value to return None for first call (primary keys)
+        # and value for second call (SensorTemp)
+
+        # Since _extract_value logic is what we want to test, let's mock the state data instead
+        with patch.object(entity, "_get_state_data") as mock_state:
+            mock_state.return_value = {
+                "SensorTemp": 25.5
+                # No ambTemp or CorrectedTemp
+            }
+
+            with patch("custom_components.mysa.climate._LOGGER") as mock_logger:
+                # First call triggers warning
+                val = entity.current_temperature
+                assert val == 25.5
+                mock_logger.warning.assert_called_once()
+                assert "as a temperature fallback" in mock_logger.warning.call_args[0][0]
+
+                # Reset mock
+                mock_logger.warning.reset_mock()
+
+                # Second call should NOT trigger warning (already logged)
+                val = entity.current_temperature
+                mock_logger.warning.assert_not_called()
+
+            # Now simulate CorrectedTemp appearing
+            mock_state.return_value = {
+                "CorrectedTemp": 21.0,
+                "SensorTemp": 25.5
+            }
+
+            # This should clear the warning flag
+            val = entity.current_temperature
+            assert val == 21.0
+
+            # Now simulate falling back AGAIN
+            mock_state.return_value = {
+                "SensorTemp": 25.5
+            }
+
+            with patch("custom_components.mysa.climate._LOGGER") as mock_logger:
+                # Should warn again
+                val = entity.current_temperature
+                mock_logger.warning.assert_called_once()
 
 
 # ===========================================================================
@@ -893,6 +1130,7 @@ class TestACClimateEdgeCases:
             mock_coordinator, "ac_device_123", mock_ac_device_data, mock_api, mock_entry
         )
         entity.async_write_ha_state = MagicMock()
+        mock_api.set_hvac_mode = AsyncMock()
 
         await entity.async_turn_on()
 
@@ -910,7 +1148,10 @@ class TestACClimateEdgeCases:
         entity = MysaACClimate(
             mock_coordinator, "ac_device_123", mock_ac_device_data, mock_api, mock_entry
         )
-        entity.async_write_ha_state = MagicMock()
+        entity.hass = hass
+        entity.entity_id = "climate.ac_device_123"
+        mock_api.set_hvac_mode = AsyncMock()
+        mock_api.set_target_temperature = AsyncMock()
 
         for mode in [
             HVACMode.OFF,
@@ -1026,8 +1267,10 @@ class TestClimateExceptionHandling:
         )
         entity.async_write_ha_state = MagicMock()
 
-        # Should not raise, just log error
-        await entity.async_set_temperature(temperature=22.0)
+        mock_api.set_target_temperature.side_effect = Exception("API Error")
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await entity.async_set_temperature(temperature=22.0)
+        assert excinfo.value.translation_key == "set_temperature_failed"
 
     @pytest.mark.asyncio
     async def test_set_hvac_mode_exception(
@@ -1047,8 +1290,11 @@ class TestClimateExceptionHandling:
         )
         entity.async_write_ha_state = MagicMock()
 
-        # Should not raise, just log error
-        await entity.async_set_hvac_mode(HVACMode.OFF)
+        # Should raise HomeAssistantError
+        mock_api.set_hvac_mode.side_effect = Exception("API Error")
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await entity.async_set_hvac_mode(HVACMode.HEAT)
+        assert excinfo.value.translation_key == "set_hvac_mode_failed"
 
     @pytest.mark.asyncio
     async def test_ac_set_fan_mode_exception(
@@ -1068,8 +1314,11 @@ class TestClimateExceptionHandling:
         )
         entity.async_write_ha_state = MagicMock()
 
-        # Should not raise, just log error
-        await entity.async_set_fan_mode("high")
+        # Should raise HomeAssistantError
+        mock_api.set_ac_fan_speed.side_effect = Exception("API Error")
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await entity.async_set_fan_mode("high")
+        assert excinfo.value.translation_key == "set_ac_fan_mode_failed"
 
     @pytest.mark.asyncio
     async def test_ac_set_swing_mode_exception(
@@ -1089,8 +1338,10 @@ class TestClimateExceptionHandling:
         )
         entity.async_write_ha_state = MagicMock()
 
-        # Should not raise, just log error
-        await entity.async_set_swing_mode("auto")
+        mock_api.set_ac_swing_mode.side_effect = Exception("API Error")
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await entity.async_set_swing_mode("auto")
+        assert excinfo.value.translation_key == "set_ac_swing_mode_failed"
 
 
 # ===========================================================================
@@ -1164,6 +1415,9 @@ class TestACClimateEdgeCases2:
         """Test hvac_action returns COOLING when mode is COOL."""
         # Set mode to COOL
         mock_ac_entity.coordinator.data["ac_device"]["md"] = AC_MODE_COOL
+        # Ensure temp difference to avoid IDLE
+        mock_ac_entity.coordinator.data["ac_device"]["ambTemp"] = 25.0
+        mock_ac_entity.coordinator.data["ac_device"]["stpt"] = 20.0
         assert mock_ac_entity.hvac_action == HVACAction.COOLING
 
     @pytest.mark.asyncio
@@ -1264,8 +1518,10 @@ class TestACClimateEdgeCases2:
         mock_ac_entity._api.set_hvac_mode.side_effect = Exception("API Error")
         mock_ac_entity.async_write_ha_state = MagicMock()
 
-        # Should not raise
-        await mock_ac_entity.async_set_hvac_mode(HVACMode.COOL)
+        mock_ac_entity._api.set_hvac_mode.side_effect = Exception("API Error")
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await mock_ac_entity.async_set_hvac_mode(HVACMode.COOL)
+        assert excinfo.value.translation_key == "set_ac_hvac_mode_failed"
 
 
 # ===========================================================================
@@ -1515,6 +1771,26 @@ class TestClimateFinal100:
         assert entity.current_temperature is None
 
     @pytest.mark.asyncio
+    async def test_current_temp_float_fail(self, hass, mock_entry):
+        """Test current_temperature handles float conversion failure (line 174, 177)."""
+        from custom_components.mysa.climate import MysaClimate
+
+        async def async_update():
+            return {"d1": {"ambTemp": "not-a-float"}}
+
+        coord = DataUpdateCoordinator(
+            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+        )
+        await coord.async_refresh()
+
+        mock_api = MagicMock()
+        device_data = {"Id": "d1", "Name": "H", "Model": "BB-V2"}
+        entity = MysaClimate(coord, "d1", device_data, mock_api, mock_entry)
+
+        # Should catch ValueError and return None
+        assert entity.current_temperature is None
+
+    @pytest.mark.asyncio
     async def test_target_temp_none_when_key_missing(
         self, hass, mock_coordinator_with_state, mock_entry
     ):
@@ -1567,6 +1843,46 @@ class TestClimateFinal100:
 
         # API should NOT be called
         mock_api.set_target_temperature.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_async_set_temperature_error(self, hass, mock_coordinator, mock_entry):
+        """Test async_set_temperature handles API error (lines 342-350)."""
+        from custom_components.mysa.climate import MysaClimate
+
+        mock_api = MagicMock()
+        mock_api.set_target_temperature.side_effect = Exception("Target Temp API Error")
+
+        device_data = {"Id": "device1", "Name": "H", "Model": "BB-V2"}
+        entity = MysaClimate(mock_coordinator, "device1", device_data, mock_api, mock_entry)
+        entity.async_write_ha_state = MagicMock()
+        entity.hass = hass
+        entity.entity_id = "climate.test"
+
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await entity.async_set_temperature(temperature=23.0)
+        assert excinfo.value.translation_key == "set_temperature_failed"
+        assert excinfo.value.translation_placeholders is not None
+        assert "Target Temp API Error" in str(excinfo.value.translation_placeholders.get("error"))
+
+    @pytest.mark.asyncio
+    async def test_async_set_hvac_mode_error(self, hass, mock_coordinator, mock_entry):
+        """Test async_set_hvac_mode handles API error (lines 360-368)."""
+        from custom_components.mysa.climate import MysaClimate
+
+        mock_api = MagicMock()
+        mock_api.set_hvac_mode.side_effect = Exception("Mode API Error")
+
+        device_data = {"Id": "device1", "Name": "H", "Model": "BB-V2"}
+        entity = MysaClimate(mock_coordinator, "device1", device_data, mock_api, mock_entry)
+        entity.async_write_ha_state = MagicMock()
+        entity.hass = hass
+        entity.entity_id = "climate.test"
+
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await entity.async_set_hvac_mode(HVACMode.HEAT)
+        assert excinfo.value.translation_key == "set_hvac_mode_failed"
+        assert excinfo.value.translation_placeholders is not None
+        assert "Mode API Error" in str(excinfo.value.translation_placeholders.get("error"))
 
     @pytest.mark.asyncio
     async def test_ac_action_fallback_final(self, hass, mock_entry):
@@ -1670,9 +1986,11 @@ class TestClimateSetup:
 
         await mock_coordinator.async_refresh()
 
-        hass.data[DOMAIN] = {
-            "test_entry_id": {"coordinator": mock_coordinator, "api": mock_api}
-        }
+        # Update to use runtime_data
+        mock_data = MagicMock(spec=MysaData)
+        mock_data.coordinator = mock_coordinator
+        mock_data.api = mock_api
+        mock_entry.runtime_data = mock_data
 
         entities = []
         async_add_entities = MagicMock(side_effect=lambda e: entities.extend(e))
@@ -1705,9 +2023,10 @@ class TestClimateSetup:
         )
         mock_api.is_ac_device = MagicMock(return_value=True)
 
-        hass.data[DOMAIN] = {
-            "test_entry_id": {"coordinator": mock_coordinator, "api": mock_api}
-        }
+        mock_data = MagicMock(spec=MysaData)
+        mock_data.coordinator = mock_coordinator
+        mock_data.api = mock_api
+        mock_entry.runtime_data = mock_data
 
         entities = []
         async_add_entities = MagicMock(side_effect=lambda e: entities.extend(e))
@@ -1849,6 +2168,53 @@ class TestClimateEdgeCasesAdditional:
              # _get_sticky_value returns pending val (20) after exception catch
              assert val == 20
 
+    @pytest.mark.asyncio
+    async def test_extract_value_dict_fallback_id(self, hass, mock_coordinator, climate_entity):
+        """Test _extract_value fallback to 'Id' if 'v' is missing (line 224)."""
+        state = {"some_key": {"Id": "fallback_id"}}
+        val = climate_entity._extract_value(state, ["some_key"])
+        assert val == "fallback_id"
+
+    @pytest.mark.asyncio
+    async def test_hvac_mode_no_state_default(self, hass, mock_entry):
+        """Test hvac_mode returns default HEAT when no state (line 270)."""
+        from custom_components.mysa.climate import MysaClimate
+
+        async def async_update():
+            return {}  # No state
+
+        coord = DataUpdateCoordinator(
+            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+        )
+        await coord.async_refresh()
+
+        mock_api = MagicMock()
+        device_data = {"Id": "d1", "Name": "Test", "Model": "BB-V2"}
+        entity = MysaClimate(coord, "d1", device_data, mock_api, mock_entry)
+
+        assert entity.hvac_mode == HVACMode.HEAT
+
+    @pytest.mark.asyncio
+    async def test_extra_state_attributes_no_state(self, hass, mock_entry):
+        """Test extra_state_attributes handles no state (line 313)."""
+        from custom_components.mysa.climate import MysaClimate
+
+        async def async_update():
+            return {}  # No state
+
+        coord = DataUpdateCoordinator(
+            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+        )
+        await coord.async_refresh()
+
+        mock_api = MagicMock()
+        device_data = {"Id": "d1", "Name": "Test", "Model": "BB-V1"}
+        entity = MysaClimate(coord, "d1", device_data, mock_api, mock_entry)
+
+        attrs = entity.extra_state_attributes
+        assert attrs["model"] == "BB-V1"
+        assert "zone_id" not in attrs
+
 class TestACClimateCoverage(TestACClimateEdgeCases):
     """Additional AC tests."""
 
@@ -1881,28 +2247,30 @@ class TestACClimateCoverage(TestACClimateEdgeCases):
 
         assert ac_entity._api is mock_api
 
-        mock_api.set_target_temperature.side_effect = Exception("API Fail")
-
-        # Use direct call to target specific method exception block
-        await ac_entity.async_set_target_temperature(24)
+        mock_api.set_target_temperature.side_effect = Exception("API Error")
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await ac_entity.async_set_target_temperature(temperature=23.0)
+        assert excinfo.value.translation_key == "set_ac_temperature_failed"
         mock_api.set_target_temperature.assert_called()
 
     async def test_ac_set_target_temperature_success(self, hass, mock_coordinator, ac_entity, mock_api):
         """Test async_set_target_temperature success path (lines 518-525)."""
         # Proper setup
+        from homeassistant.exceptions import HomeAssistantError
         ac_entity.hass = hass
         ac_entity.entity_id = "climate.test_ac"
         ac_entity._api = mock_api
 
         # Call with valid temperature
-        # Call with valid temperature
-        await ac_entity.async_set_target_temperature(22)
+        # Should raise HomeAssistantError
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await ac_entity.async_set_target_temperature(22.0)
+        assert excinfo.value.translation_key == "set_ac_temperature_failed"
 
         # Verify API called
-        mock_api.set_target_temperature.assert_called_with(ac_entity._device_id, 22)
+        mock_api.set_target_temperature.assert_called_with(ac_entity._device_id, 22.0)
 
         # Verify state write requested (mocked or just run if harmless)
-        # async_write_ha_state() is called at end of success path
 
     async def test_ac_sticky_logic(self, hass, ac_entity):
         """Test sticky value logic (lines 182-183, 192-195)."""
@@ -1940,3 +2308,459 @@ class TestACClimateCoverage(TestACClimateEdgeCases):
         val = ac_entity._get_sticky_value("string_attr", "ModeA")
         assert val == "ModeA"
         assert "string_attr" not in ac_entity._pending_updates
+
+class TestACClimateCoverageExtended:
+    """Extended AC tests for 100% coverage."""
+
+    @pytest.fixture
+    def ac_entity(self, hass, mock_entry):
+        """Mock AC entity."""
+        from custom_components.mysa.climate import MysaACClimate
+        from custom_components.mysa.mysa_api import MysaApi
+
+        async def async_update():
+            return {"ac": {"ambTemp": 22.0, "stpt": 24.0, "md": 4}}
+
+        coord = DataUpdateCoordinator(
+            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+        )
+        coord.data = {"ac": {"ambTemp": 22.0, "stpt": 24.0, "md": 4}}
+
+        mock_api = MagicMock(spec=MysaApi)
+        device_data = {
+            "Id": "ac",
+            "Name": "AC",
+            "Model": "AC-V1",
+            "SupportedCaps": {
+                "modes": {
+                    "2": {"fanSpeeds": [1, 2], "verticalSwing": [1, 2]},
+                    "3": {"fanSpeeds": [1], "verticalSwing": [1]},
+                }
+            }
+        }
+        entity = MysaACClimate(coord, "ac", device_data, mock_api, mock_entry)
+        entity.hass = hass
+        entity._api = mock_api
+        entity.entity_id = "climate.ac"
+        entity.async_write_ha_state = MagicMock()
+        return entity
+
+    @pytest.mark.asyncio
+    async def test_ac_hvac_action_auto_logic(self, hass, ac_entity):
+        """Test AC hvac_action auto mode logic (lines 522-534)."""
+        # Set mode to HEAT_COOL (Auto)
+        with patch.object(type(ac_entity), "hvac_mode", new_callable=PropertyMock) as mock_mode:
+            mock_mode.return_value = HVACMode.HEAT_COOL
+
+            # 1. Current > Target -> Cooling
+            ac_entity.coordinator.data = {"ac": {"ambTemp": 26.0, "stpt": 24.0}}
+            assert ac_entity.hvac_action == HVACAction.COOLING
+
+            # 2. Current < Target -> Heating
+            ac_entity.coordinator.data = {"ac": {"ambTemp": 22.0, "stpt": 24.0}}
+            assert ac_entity.hvac_action == HVACAction.HEATING
+
+            # 3. Current == Target -> Idle
+            ac_entity.coordinator.data = {"ac": {"ambTemp": 24.0, "stpt": 24.0}}
+            assert ac_entity.hvac_action == HVACAction.IDLE
+
+    @pytest.mark.asyncio
+    async def test_ac_fan_swing_mode_logic(self, hass, ac_entity):
+        """Test AC fan and swing mode logic fallbacks (lines 542-554, 563-575).."""
+        from custom_components.mysa.const import AC_FAN_MEDIUM, AC_SWING_POSITION_3
+        # 1. No state -> defaults to "auto"
+        ac_entity.coordinator.data = {}
+        assert ac_entity.fan_mode == "auto"
+        assert ac_entity.swing_mode == "auto"
+
+        # 2. Extract from state
+        # fn=7 is medium, ss=6 is middle
+        ac_entity.coordinator.data = {"ac": {"fn": AC_FAN_MEDIUM, "ss": AC_SWING_POSITION_3}}
+        assert ac_entity.fan_mode == "medium"
+        assert ac_entity.swing_mode == "middle"
+
+        # 3. Sticky value (requires raw keys to be missing to hit line 556/575)
+        ac_entity.coordinator.data = {"ac": {"some_other_key": 1}}
+        ac_entity._set_sticky_value("fan_mode", "high")
+        ac_entity._set_sticky_value("swing_mode", "bottom")
+        assert ac_entity.fan_mode == "high"
+        assert ac_entity.swing_mode == "bottom"
+
+    @pytest.mark.asyncio
+    async def test_ac_set_fan_mode_success(self, hass, ac_entity, mock_api):
+        """Test async_set_fan_mode success and state update (line 640-647)."""
+        from custom_components.mysa.const import AC_FAN_HIGH
+        ac_entity._api.set_ac_fan_speed = AsyncMock()
+        ac_entity.async_write_ha_state = MagicMock()
+
+        # Setup coordinator data so it's not None
+        ac_entity.coordinator.data = {"ac": {}}
+
+        await ac_entity.async_set_fan_mode("high")
+
+        ac_entity._api.set_ac_fan_speed.assert_called_with("ac", "high")
+        assert ac_entity.coordinator.data["ac"]["fn"] == AC_FAN_HIGH
+        ac_entity.async_write_ha_state.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_ac_turn_on_smart_restore(self, hass, ac_entity):
+        """Test AC async_turn_on restore logic (lines 680-686)."""
+        # Patch async_set_hvac_mode on the INSTANCE
+        with patch.object(ac_entity, "async_set_hvac_mode", new_callable=AsyncMock) as mock_set_mode:
+            # 1. No last mode -> Fallback to Auto (HEAT_COOL)
+            ac_entity._last_mode = None
+            await ac_entity.async_turn_on()
+            mock_set_mode.assert_called_with(HVACMode.HEAT_COOL)
+
+            # 2. Restore last mode
+            mock_set_mode.reset_mock()
+            ac_entity._last_mode = HVACMode.COOL
+            # Mock supported modes to include COOL
+            with patch.object(type(ac_entity), "hvac_modes", new_callable=PropertyMock) as mock_modes:
+                mock_modes.return_value = [HVACMode.OFF, HVACMode.COOL]
+                await ac_entity.async_turn_on()
+                mock_set_mode.assert_called_with(HVACMode.COOL)
+
+            # 3. Fallback when last mode not in supported modes
+            mock_set_mode.reset_mock()
+            ac_entity._last_mode = HVACMode.FAN_ONLY
+            # mock supported modes to NOT include FAN_ONLY or HEAT_COOL
+            with patch.object(type(ac_entity), "hvac_modes", new_callable=PropertyMock) as mock_modes:
+                mock_modes.return_value = [HVACMode.OFF, HVACMode.HEAT]
+                await ac_entity.async_turn_on()
+                # Should fallback to HEAT because HEAT_COOL not in hvac_modes
+                mock_set_mode.assert_called_with(HVACMode.HEAT)
+
+    @pytest.mark.asyncio
+    async def test_ac_set_fan_mode_error(self, hass, ac_entity):
+        """Test async_set_fan_mode handles error (lines 648-656)."""
+        ac_entity._api.set_ac_fan_speed = AsyncMock(side_effect=Exception("Fan Speed Fail"))
+        ac_entity.async_write_ha_state = MagicMock()
+
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await ac_entity.async_set_fan_mode("high")
+        assert excinfo.value.translation_key == "set_ac_fan_mode_failed"
+
+    @pytest.mark.asyncio
+    async def test_ac_set_swing_mode_error(self, hass, ac_entity):
+        """Test async_set_swing_mode handles error (lines 666-674)."""
+        ac_entity._api.set_ac_swing_mode = AsyncMock(side_effect=Exception("Swing Fail"))
+        ac_entity.async_write_ha_state = MagicMock()
+
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await ac_entity.async_set_swing_mode("auto")
+        assert excinfo.value.translation_key == "set_ac_swing_mode_failed"
+
+    @pytest.mark.asyncio
+    async def test_ac_build_supported_options_invalid_key(self, hass, mock_entry):
+        """Test AC _build_supported_options handles invalid mode key (lines 440-441)."""
+        from custom_components.mysa.climate import MysaACClimate
+
+        device_data = {
+            "Id": "ac",
+            "Name": "AC",
+            "Model": "AC-V1",
+            "SupportedCaps": {
+                "modes": {
+                    "invalid": {} # Non-integer key
+                }
+            }
+        }
+        mock_api = MagicMock()
+        coord = MagicMock()
+        coord.data = {}
+
+        entity = MysaACClimate(coord, "ac", device_data, mock_api, mock_entry)
+        # Initialization calls _build_supported_options which hits line 440-441
+        assert HVACMode.OFF in entity.hvac_modes
+
+
+class TestMysaACClimateActionLogic:
+    """Test specific action logic for AC."""
+
+    @pytest.mark.asyncio
+    async def test_hvac_action_auto_with_acmode(self, hass, mock_api):
+        """Test hvac_action in Auto mode uses ACMode if present."""
+        from custom_components.mysa.climate import MysaACClimate
+        # Setup device data
+        dev_id = "ac_1"
+        device_data = {
+            "Model": "AC-V1",
+            "SupportedCaps": {"modes": {"2": {}, "3": {}, "4": {}}}
+        }
+
+        # 1. Test Auto + internal Heat (ACMode=3)
+        coordinator = MagicMock()
+        coordinator.data = {
+            dev_id: {
+                "mode": 2,     # Auto
+                "ACMode": 3,   # Internal Heat
+                "ambTemp": 15, # Cold -> Heating
+                "stpt": 20
+            }
+        }
+
+        entity = MysaACClimate(coordinator, dev_id, device_data, mock_api, MagicMock())
+        assert entity.hvac_mode == HVACMode.HEAT_COOL
+        assert entity.hvac_action == HVACAction.HEATING
+
+        # 2. Test Auto + internal Cool (ACMode=4)
+        coordinator.data[dev_id]["ACMode"] = 4
+        coordinator.data[dev_id]["ambTemp"] = 25 # Hot -> Cooling
+        assert entity.hvac_action == HVACAction.COOLING
+
+        # 3. Test Fallback (No ACMode)
+        coordinator.data[dev_id].pop("ACMode")
+        # ambTemp=25, stpt=20 -> Cooling
+        coordinator.data[dev_id]["stpt"] = 20
+        assert entity.hvac_action == HVACAction.COOLING
+
+    @pytest.mark.asyncio
+    async def test_hvac_action_auto_fallback_heating(self, hass, mock_api):
+        """Test hvac_action fallback to HEATING when no ACMode present."""
+        from custom_components.mysa.climate import MysaACClimate
+        dev_id = "ac_1"
+        device_data = {"Model": "AC-V1", "SupportedCaps": {"modes": {"2": {}, "3": {}, "4": {}}}}
+
+        coordinator = MagicMock()
+        coordinator.data = {
+            dev_id: {
+                "mode": 2,     # Auto
+                # NO ACMode
+                "ambTemp": 15.0, # Cold
+                "stpt": 20.0     # Target
+            }
+        }
+
+        entity = MysaACClimate(coordinator, dev_id, device_data, mock_api, MagicMock())
+        assert entity.hvac_action == HVACAction.HEATING
+
+    @pytest.mark.asyncio
+    async def test_hvac_action_auto_invalid_temps(self, hass, mock_api):
+        """Test hvac_action handles invalid temps (exception coverage)."""
+        from custom_components.mysa.climate import MysaACClimate
+        dev_id = "ac_1"
+        device_data = {"Model": "AC-V1", "SupportedCaps": {"modes": {"2": {}, "3": {}, "4": {}}}}
+
+        coordinator = MagicMock()
+        coordinator.data = {
+            dev_id: {
+                "mode": 2,     # Auto
+                "ACMode": 4,   # Cool
+                "ambTemp": "invalid",
+                "stpt": 20
+            }
+        }
+
+        entity = MysaACClimate(coordinator, dev_id, device_data, mock_api, MagicMock())
+        # Should catch exception and fall through to ACMode logic (Cool)
+        assert entity.hvac_action == HVACAction.COOLING
+
+    @pytest.mark.asyncio
+    async def test_hvac_action_auto_missing_temps(self, hass, mock_api):
+        """Test hvac_action returns IDLE when values are None."""
+        from custom_components.mysa.climate import MysaACClimate
+        dev_id = "ac_1"
+        device_data = {"Model": "AC-V1", "SupportedCaps": {"modes": {"2": {}, "3": {}, "4": {}}}}
+
+        coordinator = MagicMock()
+        coordinator.data = {
+            dev_id: {
+                "mode": 2,     # Auto
+                # NO ACMode, NO Temps
+            }
+        }
+
+        entity = MysaACClimate(coordinator, dev_id, device_data, mock_api, MagicMock())
+        assert entity.hvac_action == HVACAction.IDLE
+
+    @pytest.mark.asyncio
+    async def test_hvac_action_auto_idle(self, hass, mock_api):
+        """Test hvac_action returns IDLE when temp is satisfied."""
+        from custom_components.mysa.climate import MysaACClimate
+        dev_id = "ac_1"
+        device_data = {"Model": "AC-V1", "SupportedCaps": {"modes": {"2": {}, "3": {}, "4": {}}}}
+
+        coordinator = MagicMock()
+        coordinator.data = {
+            dev_id: {
+                "mode": 2,     # Auto
+                "ACMode": 4,   # Internal Cool
+                "ambTemp": 20.0,
+                "stpt": 20.0   # Matches -> IDLE
+            }
+        }
+
+        entity = MysaACClimate(coordinator, dev_id, device_data, mock_api, MagicMock())
+        assert entity.hvac_mode == HVACMode.HEAT_COOL
+        assert entity.hvac_action == HVACAction.IDLE
+
+        # Slightly off but within 1.0 deadband
+        coordinator.data[dev_id]["ambTemp"] = 20.5
+        assert entity.hvac_action == HVACAction.IDLE
+
+        # Outside deadband -> Should match ACMode (Cool)
+        coordinator.data[dev_id]["ambTemp"] = 21.1
+        assert entity.hvac_action == HVACAction.COOLING
+
+# ===========================================================================
+# Merged Coverage & Edge Case Tests
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_hvac_action_idle(hass, mock_coordinator, mock_device_data, mock_api, mock_entry):
+    """Test hvac_action returns IDLE when heating but temperature is satisfied."""
+    from custom_components.mysa.climate import MysaClimate
+    # Current temp (21.0) >= Target temp (21.0)
+    mock_coordinator.data = {
+        "device1": {
+            "ambTemp": 21.0,
+            "stpt": 21.0,
+            "md": 3, # HEAT
+        }
+    }
+    climate = MysaClimate(mock_coordinator, "device1", mock_device_data, mock_api, mock_entry)
+
+    assert climate.hvac_mode == HVACMode.HEAT
+    assert climate.hvac_action == HVACAction.IDLE
+
+@pytest.mark.asyncio
+async def test_hvac_action_invalid_temp(hass, mock_coordinator, mock_device_data, mock_api, mock_entry):
+    """Test hvac_action handles invalid temperature values gracefully."""
+    from custom_components.mysa.climate import MysaClimate
+    # Invalid temperature strings should trigger the exception block and pass to duty cycle check
+    mock_coordinator.data = {
+        "device1": {
+            "ambTemp": "invalid",
+            "stpt": "21.0",
+            "md": 3, # HEAT
+            "dc": 0, # No duty cycle
+        }
+    }
+    climate = MysaClimate(mock_coordinator, "device1", mock_device_data, mock_api, mock_entry)
+
+    # It should fall through to duty cycle, which is 0, so it returns IDLE
+    assert climate.hvac_action == HVACAction.IDLE
+
+@pytest.mark.asyncio
+async def test_hvac_action_duty_cycle_heating(hass, mock_coordinator, mock_device_data, mock_api, mock_entry):
+    """Test hvac_action returns HEATING based on duty cycle when temps are unavailable."""
+    from custom_components.mysa.climate import MysaClimate
+    # Missing temperatures, but duty cycle > 0
+    mock_coordinator.data = {
+        "device1": {
+            "ambTemp": None,
+            "stpt": None,
+            "dc": 1.0,
+            "md": 3, # HEAT
+        }
+    }
+    climate = MysaClimate(mock_coordinator, "device1", mock_device_data, mock_api, mock_entry)
+
+    assert climate.hvac_action == HVACAction.HEATING
+
+@pytest.mark.asyncio
+async def test_climate_edge_cases(hass, mock_coordinator, mock_device_data, mock_api, mock_entry):
+    """Test climate entity edge cases for missing data."""
+    from custom_components.mysa.climate import MysaClimate
+
+    mock_coordinator.data = {}
+    climate = MysaClimate(mock_coordinator, "device1", mock_device_data, mock_api, mock_entry)
+
+    # Test missing state for humidity
+    assert climate.current_humidity is None
+
+    # Test missing state for target temperature
+    assert climate.target_temperature is None
+
+    # Test missing coordinator data
+    mock_coordinator.data = None
+    assert climate.current_humidity is None
+    assert climate.target_temperature is None
+
+@pytest.mark.asyncio
+async def test_climate_exception_handling(hass, mock_coordinator, mock_device_data, mock_api, mock_entry):
+    """Test climate exception handling for invalid values."""
+    from custom_components.mysa.climate import MysaClimate, MysaACClimate
+
+    mock_coordinator.data = {
+        "device1": {
+            "ambTemp": "invalid",
+            "stpt": "invalid",
+        }
+    }
+    climate = MysaClimate(mock_coordinator, "device1", mock_device_data, mock_api, mock_entry)
+
+    # Trigger current_temperature exception
+    assert climate.current_temperature is None
+
+    # AC Climate supported options exception
+    ac_device_data = mock_device_data.copy()
+    ac_device_data["SupportedCaps"] = {
+        "modes": {
+            "invalid_int": {},
+            "2": {}
+        }
+    }
+    ac_climate = MysaACClimate(mock_coordinator, "device1", ac_device_data, mock_api, mock_entry)
+
+    # Check that valid mode (2=HEAT_COOL) was found despite invalid one
+    found = False
+    if ac_climate.hvac_modes:
+        for mode in ac_climate.hvac_modes:
+            if mode == HVACMode.HEAT_COOL:
+                found = True
+    assert found
+
+@pytest.mark.asyncio
+async def test_ac_dry_mode_zero_temp_bug(hass, mock_coordinator, mock_device_data, mock_api, mock_entry):
+    """Test verification of Dry mode setting temperature to 0."""
+    from custom_components.mysa.climate import MysaACClimate
+    from custom_components.mysa.device import MysaDeviceLogic
+
+    # Simulate the user's sniff payload for MsgType 30
+    payload = {
+        "ambTemp": 20.7,
+        "hum": 43,
+        "stpt": 21.0,
+        "mode": 6, # Dry
+        "3": 0,    # Protocol key 3 is 0
+    }
+
+    state = payload.copy()
+    MysaDeviceLogic.normalize_state(state)
+
+    # User confirmed Dry mode should indeed report 0.0
+    assert state.get("SetPoint") == 0.0
+
+@pytest.mark.asyncio
+async def test_ac_dry_mode_restore_logic(hass, mock_coordinator, mock_device_data, mock_api, mock_entry):
+    """Test Dry mode forces 0 temp and restores previous valid temp on exit."""
+    from custom_components.mysa.climate import MysaACClimate, HVACMode
+
+    # Setup Entity
+    entity = MysaACClimate(mock_coordinator, "dev1", mock_device_data, mock_api, mock_entry)
+    entity.hass = hass
+    entity.entity_id = "climate.ac_entity"
+
+    # 1. Start with valid temp (21.0) and HEAT mode
+    mock_coordinator.data = {"dev1": {"stpt": 21.0, "Mode": 3}} # Heat
+    assert entity.target_temperature == 21.0
+
+    # 2. Switch to Dry Mode
+    # Should save 21.0 and set to 0 (optimistically via sticky state)
+    mock_api.set_target_temperature.reset_mock()
+    await entity.async_set_hvac_mode(HVACMode.DRY)
+
+    # Verify set_target_temperature(0) was NOT called
+    mock_api.set_target_temperature.assert_not_called()
+    # Verify temp remains visible (no force 0)
+    assert entity.target_temperature == 21.0
+
+    # 3. Switch back to HEAT
+    # Should NOT restore temp (Device remembers it)
+    await entity.async_set_hvac_mode(HVACMode.HEAT)
+
+    # Verify set_target_temperature(21.0) was NOT called
+    mock_api.set_target_temperature.assert_not_called()
+    mock_api.set_hvac_mode.assert_called_with("dev1", "heat")

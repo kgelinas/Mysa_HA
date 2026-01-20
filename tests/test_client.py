@@ -27,7 +27,7 @@ def create_mock_response(json_data=None, status=200):
     """Create a mock aiohttp response."""
     response = MagicMock()
     response.status = status
-    response.raise_for_status = MagicMock()
+    response.raise_for_status = MagicMock(return_value=None)
     response.json = AsyncMock(return_value=json_data or {})
     return response
 
@@ -60,11 +60,10 @@ def mock_jwt():
 
 
 @pytest.fixture(autouse=True)
-def mock_jwks():
-    """Mock JWKS with matching key for all client tests."""
-    jwks = {"keys": [{"kid": "test_kid", "kty": "RSA", "alg": "RS256"}]}
-    with patch("custom_components.mysa.mysa_auth.JWKS", jwks):
-        yield jwks
+def mock_cognito():
+    """Mock Cognito class for all client tests."""
+    with patch("custom_components.mysa.mysa_auth.Cognito") as mock:
+        yield mock
 
 
 @pytest.mark.asyncio
@@ -77,6 +76,38 @@ class TestMysaClient:
         assert client.is_connected is False
         assert client.user_id is None
         assert client.username == "u"
+        assert client.websession is None
+
+    async def test_init_with_websession(self, mock_hass, mock_store):
+        """Test initialization with websession."""
+        mock_session = MagicMock()
+        client = MysaClient(mock_hass, "u", "p", websession=mock_session)
+        assert client.websession == mock_session
+
+        # Verify it uses the session
+        mock_response = create_mock_response({"User": {"Id": "uid"}})
+        mock_session.get = MagicMock(return_value=create_async_context_manager(mock_response))
+
+        # We also need to mock _store.async_load to avoid auth
+        mock_store.async_load.return_value = {
+             "id_token": "token",
+             "access_token": "access",
+             "refresh_token": "ref"
+        }
+
+        # We need to mock _user_obj or the auth flow will try to get it
+        # Let's just test get_request directly or something simple that uses session
+        # But we need to be authenticated for most things
+
+        # Let's perform authenticate()
+        with patch("custom_components.mysa.client.async_get_clientsession") as mock_get_session:
+             await client.authenticate()
+
+             # Should NOT call async_get_clientsession because we provided one
+             mock_get_session.assert_not_called()
+
+             # Should call our mock_session.get
+             mock_session.get.assert_called()
 
     async def test_authenticate_cached_success(self, mock_hass, mock_store):
         """Test authentication with cached tokens."""
@@ -95,11 +126,56 @@ class TestMysaClient:
         mock_session = MagicMock()
         mock_session.get = MagicMock(return_value=create_async_context_manager(mock_response))
 
-        # Mock aioboto3 - token validation happens during CognitoUser creation
-        # We don't need to patch aioboto3 anymore as we removed it
-        with patch("custom_components.mysa.client.async_get_clientsession", return_value=mock_session):
+        # Mock Cognito.verify_token to succeed
+        with patch("custom_components.mysa.client.Cognito") as mock_cog_cls, \
+             patch("custom_components.mysa.client.async_get_clientsession", return_value=mock_session):
+
+            mock_cog_inst = mock_cog_cls.return_value
+            mock_cog_inst.id_token = mock_token
+            mock_cog_inst.access_token = "access"
+            mock_cog_inst.refresh_token = "ref"
+            mock_cog_inst.verify_token.return_value = None
+
             await client.authenticate()
             assert client.is_connected is True
+            assert client.user_id == "uid"
+            mock_cog_inst.verify_token.assert_called_once()
+
+    async def test_authenticate_no_cache(self, mock_hass, mock_store):
+        """Test authentication with cache disabled forces login."""
+        mock_token = "cached_token"
+        client = MysaClient(mock_hass, "u", "p")
+
+        # Store has data
+        mock_store.async_load.return_value = {
+            "id_token": mock_token,
+            "access_token": "access",
+            "refresh_token": "ref"
+        }
+
+        mock_response = create_mock_response({"User": {"Id": "uid"}})
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(return_value=create_async_context_manager(mock_response))
+
+        with patch("custom_components.mysa.client.login") as mock_login, \
+             patch("custom_components.mysa.client.async_get_clientsession", return_value=mock_session):
+
+            mock_user = MagicMock()
+            mock_user.id_token = "new_token"
+            mock_user.access_token = "new_access"
+            mock_user.refresh_token = "new_ref"
+            mock_user.id_claims = {"exp": 9999999999}
+            mock_login.return_value = mock_user
+
+            # Call with use_cache=False
+            await client.authenticate(use_cache=False)
+
+            # Verification:
+            # 1. Store.async_load should NOT be called (or if called, result ignored? code says if use_cache is False, cached_data=None)
+            # Actually code assumes if not use_cache, cached_data=None.
+            # But we can verify that login() IS called even though store has valid data (mocked above)
+
+            mock_login.assert_called()
             assert client.user_id == "uid"
 
     async def test_authenticate_cached_refresh(self, mock_hass, mock_store, mock_jwt):
@@ -109,7 +185,7 @@ class TestMysaClient:
         mock_token_new = "eyJhbGciOiJSUzI1NiIsImtpZCI6InRlc3QiLCJ0eXAiOiJKV1QifQ.eyJzdWIiOiIxMjM0NTY3ODkwIiwiaXNzIjoiaHR0cHM6Ly90ZXN0IiwiZXhwIjo5OTk5OTk5OTk5fQ.sig"
 
         # Force verification failure to trigger renewal
-        mock_jwt.get_unverified_header.side_effect = Exception("Expired")
+        mock_jwt.decode.side_effect = Exception("Expired")
 
         client = MysaClient(mock_hass, "u", "p")
         mock_store.async_load.return_value = {
@@ -143,19 +219,21 @@ class TestMysaClient:
         mock_session = MagicMock()
         mock_session.get = MagicMock(return_value=create_async_context_manager(mock_response))
 
-        mock_boto_client = MagicMock()
-        mock_boto_client.initiate_auth.return_value = {
-             'AuthenticationResult': {
-                 'IdToken': mock_token_new,
-                 'AccessToken': 'new_access'
-             }
-        }
+        mock_cognito_instance = MagicMock()
+        mock_cognito_instance.id_token = mock_token_new
+        mock_cognito_instance.access_token = "new_access"
+        mock_cognito_instance.refresh_token = "ref"
 
-        with patch("boto3.client", return_value=mock_boto_client), \
+        # Mock verify_token to raise error to trigger renewal
+        mock_cognito_instance.verify_token.side_effect = Exception("Expired")
+        # Mock authenticate to be a no-op (successful)
+        mock_cognito_instance.authenticate = MagicMock()
+
+        with patch("custom_components.mysa.client.Cognito", return_value=mock_cognito_instance), \
              patch("custom_components.mysa.client.async_get_clientsession", return_value=mock_session):
 
             await client.authenticate()
-            mock_boto_client.initiate_auth.assert_called()
+            mock_cognito_instance.renew_access_token.assert_called()
             # Check token was saved
             assert mock_store.async_save.called
 
@@ -304,9 +382,6 @@ class TestMysaClient:
         with patch("custom_components.mysa.client.async_get_clientsession", return_value=mock_session):
             homes = await client.fetch_homes()
             assert len(homes) == 1
-            assert client.get_zone_name("z1") == "Zone1"
-            assert client.get_zone_name("z1") == "Zone1"
-            assert client.get_zone_name("unknown") is None
 
     async def test_fetch_homes_erates(self, mock_hass):
         """Test fetch_homes parses ERates and maps devices."""
@@ -500,6 +575,14 @@ class TestMysaClient:
         with pytest.raises(RuntimeError):
             await client.set_device_setting_http("d1", {})
 
+
+
+    async def test_get_signed_mqtt_url_unauthenticated(self, mock_hass):
+        """Test getting signed URL when not authenticated."""
+        client = MysaClient(mock_hass, "u", "p")  # No auth call
+        with pytest.raises(RuntimeError, match="Not authenticated"):
+            await client.get_signed_mqtt_url()
+
     async def test_async_request(self, mock_hass):
         """Test generic request."""
         client = MysaClient(mock_hass, "u", "p")
@@ -519,11 +602,6 @@ class TestMysaClient:
         with pytest.raises(RuntimeError):
             await client.async_request("GET", "url")
 
-    async def test_get_signed_mqtt_url_unauthenticated(self, mock_hass):
-        """Test getting signed URL when not authenticated."""
-        client = MysaClient(mock_hass, "u", "p")  # No auth call
-        with pytest.raises(RuntimeError, match="Not authenticated"):
-            await client.get_signed_mqtt_url()
 
     async def test_authenticate_cached_renew_fail(self, mock_hass, mock_store, mock_jwt):
         """Test renew failure triggers fallback to password login."""
@@ -531,7 +609,7 @@ class TestMysaClient:
         mock_new_token = "eyJhbGciOiJSUzI1NiIsImtpZCI6InRlc3QiLCJ0eXAiOiJKV1QifQ.eyJzdWIiOiIxMjM0NTY3ODkwIiwiaXNzIjoiaHR0cHM6Ly90ZXN0IiwiZXhwIjo5OTk5OTk5OTk5fQ.sig"
 
         # Force verification failure to trigger renewal
-        mock_jwt.get_unverified_header.side_effect = Exception("Expired")
+        mock_jwt.decode.side_effect = Exception("Expired")
 
         client = MysaClient(mock_hass, "u", "p")
         mock_store.async_load.return_value = {
@@ -629,13 +707,194 @@ class TestMysaClient:
         client._user_obj.renew_access_token.assert_called_once()
         assert headers["authorization"] == mock_token_new
 
-    async def test_get_electricity_rate_zone_fallback(self, mock_hass):
-        """Test get_electricity_rate using zone-based fallback."""
-        client = MysaClient(mock_hass, "u", "p")
-        # Device has Zone attribute, zone is mapped to home with rate
-        client.devices = {"d_zone": {"Id": "d_zone", "Zone": "z1"}}
-        client.zone_to_home = {"z1": "h1"}
-        client.home_rates = {"h1": 0.12}
 
-        rate = client.get_electricity_rate("d_zone")
-        assert rate == 0.12
+    async def test_authenticate_restore_no_id_token(self, mock_hass, mock_store):
+        """Test restore when stored user has no ID token."""
+        client = MysaClient(mock_hass, "u", "p")
+
+        # Mock storage returning user dict but restore creates user with no ID token
+        mock_store.async_load.return_value = {
+            "id_token": None,
+            "access_token": "acc",
+            "refresh_token": "ref"
+        }
+
+        # We need to mock CognitoUser to have id_token=None after init
+        # or just rely on the fact that we pass None from storage load result
+
+        mock_session = MagicMock()
+        mock_response = create_mock_response({"User": {"Id": "uid"}})
+        mock_session.get.return_value = create_async_context_manager(mock_response)
+
+        with patch("custom_components.mysa.client.login") as mock_login, \
+             patch("custom_components.mysa.client.async_get_clientsession", return_value=mock_session), \
+             patch("custom_components.mysa.client.Cognito"):
+
+            # Authenticate call will try to restore
+            # It will create CognitoUser(..., id_token=None)
+            # Then check if user.id_token: -> False
+            # Then raise ValueError("No ID token") inside the try block
+            # Then catch block handles it -> renew_access_token()
+
+            # We need to mock renew_access_token on the *instance* that is created inside authenticate
+            # Since we can't easily grab that instance before it's used, we can verify the behavior via side effects
+            # OR we can mock CognitoUser class
+
+            with patch("custom_components.mysa.client.CognitoUser") as MockUserClass:
+                mock_user_instance = MockUserClass.return_value
+                mock_user_instance.id_token = None
+                mock_user_instance.id_claims = {}
+                mock_user_instance.renew_access_token = AsyncMock()
+
+                # mock_login returns another user instance
+                mock_fallback_user = mock_login.return_value
+                mock_fallback_user.id_claims = {}
+                mock_fallback_user.renew_access_token = AsyncMock()
+                mock_fallback_user.get_aws_credentials = AsyncMock(return_value={})
+
+                await client.authenticate()
+
+                # Renew should NOT be called because check failed before try/except for verify
+                mock_user_instance.renew_access_token.assert_not_called()
+                # But login should be called as fallback
+                mock_login.assert_called()
+
+# ===========================================================================
+# ERate and Mapping Coverage Tests
+# ===========================================================================
+
+@pytest.mark.asyncio
+class TestClientCoverage:
+    """Test new coverage areas in client.py."""
+
+    async def test_fetch_homes_erate_parsing(self, mock_hass):
+        """Test parsing of different ERate formats (comma, string, float)."""
+        client = MysaClient(mock_hass, "u", "p")
+        client._user_obj = MagicMock()
+        client._user_obj.id_claims = {"exp": 9999999999}
+        client._user_obj.id_token = "token"
+
+        # Case 1: Comma decimal string "0,15"
+        # Case 2: Dot decimal string "0.12"
+        # Case 3: Invalid string "abc" (exception coverage)
+        mock_response = create_mock_response({
+            "Homes": [
+                {"Id": "h1", "ERate": "0,15", "Zones": []},
+                {"Id": "h2", "ERate": "0.12", "Zones": []},
+                {"Id": "h3", "ERate": "abc", "Zones": []},
+                {"Id": "h4", "ERate": None, "Zones": []}
+            ]
+        })
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(return_value=create_async_context_manager(mock_response))
+
+        with patch("custom_components.mysa.client.async_get_clientsession", return_value=mock_session):
+            await client.fetch_homes()
+
+            assert client.home_rates.get("h1") == 0.15
+            assert client.home_rates.get("h2") == 0.12
+            assert "h3" not in client.home_rates
+            assert "h4" not in client.home_rates
+
+    async def test_fetch_homes_device_mapping_fallback(self, mock_hass):
+        """Test device mapping fallback via Zone ID."""
+        client = MysaClient(mock_hass, "u", "p")
+        client._user_obj = MagicMock()
+        client._user_obj.id_claims = {"exp": 9999999999}
+        client._user_obj.id_token = "token"
+
+        # Pre-populate devices
+        client.devices = {
+            "d1": {"Id": "d1", "Zone": {"Id": "z1"}}, # Has valid Zone ID
+            "d2": {"Id": "d2", "Zone": {"Id": "z_unknown"}}, # Unknown Zone ID
+            "d3": {"Id": "d3"}, # No Zone info
+            "d4": {"Id": "d4"}  # Already mapped normally
+        }
+
+        # Response:
+        # h1 has z1 (but missing d1 in DeviceIds)
+        # h2 has z2 with d4
+        mock_response = create_mock_response({
+            "Homes": [
+                {
+                    "Id": "h1",
+                    "ERate": 0.1,
+                    "Zones": [{"Id": "z1", "DeviceIds": []}] # Empty DeviceIds!
+                },
+                {
+                    "Id": "h2",
+                    "ERate": 0.2,
+                    "Zones": [{"Id": "z2", "DeviceIds": ["d4"]}] # Normal mapping
+                }
+            ]
+        })
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(return_value=create_async_context_manager(mock_response))
+
+        with patch("custom_components.mysa.client.async_get_clientsession", return_value=mock_session):
+            await client.fetch_homes()
+
+            # d1 should be mapped to h1 via z1 fallback
+            assert client.device_to_home.get("d1") == "h1"
+
+            # d4 should be mapped to h2 via normal list
+            assert client.device_to_home.get("d4") == "h2"
+
+            # d2, d3 should not be mapped
+            assert "d2" not in client.device_to_home
+            assert "d3" not in client.device_to_home
+
+    async def test_fetch_homes_direct_home_id_mapping(self, mock_hass):
+        """Test device mapping via direct 'Home' property and string Zone ID."""
+        client = MysaClient(mock_hass, "u", "p")
+        client._user_obj = MagicMock()
+        client._user_obj.id_claims = {"exp": 9999999999}
+        client._user_obj.id_token = "token"
+
+        # Pre-populate devices
+        client.devices = {
+            "d1": {"Id": "d1", "Home": "h1"}, # Direct Home link
+            "d2": {"Id": "d2", "Zone": "z2"}, # String Zone ID link
+            "d3": {"Id": "d3", "Zone": {"Id": "z3"}}, # Object Zone ID link (existing logic)
+            "d4": {"Id": "d4"} # No links
+        }
+
+        mock_response = create_mock_response({
+            "Homes": [
+                {
+                    "Id": "h1",
+                    "ERate": 0.1,
+                    "Zones": []
+                },
+                {
+                    "Id": "h2",
+                    "ERate": 0.2,
+                    "Zones": [{"Id": "z2"}]
+                },
+                {
+                    "Id": "h3",
+                    "ERate": 0.3,
+                    "Zones": [{"Id": "z3"}]
+                }
+            ]
+        })
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(return_value=create_async_context_manager(mock_response))
+
+        with patch("custom_components.mysa.client.async_get_clientsession", return_value=mock_session):
+            await client.fetch_homes()
+
+            # d1 mapped via "Home" property
+            assert client.device_to_home.get("d1") == "h1"
+            assert client.get_electricity_rate("d1") == 0.1
+
+            # d2 mapped via string Zone ID
+            assert client.device_to_home.get("d2") == "h2"
+            assert client.get_electricity_rate("d2") == 0.2
+
+            # d3 mapped via object Zone ID
+            assert client.device_to_home.get("d3") == "h3"
+            assert client.get_electricity_rate("d3") == 0.3
+
+            # d4 not mapped
+            assert "d4" not in client.device_to_home

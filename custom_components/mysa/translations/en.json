@@ -39,5 +39,162 @@
                 }
             }
         }
+    },
+    "entity": {
+        "binary_sensor": {
+            "connection": {
+                "name": "Connection"
+            }
+        },
+        "climate": {
+            "thermostat": {
+                "name": "Thermostat"
+            }
+        },
+        "number": {
+            "min_brightness": {
+                "name": "Minimum Brightness"
+            },
+            "max_brightness": {
+                "name": "Maximum Brightness"
+            }
+        },
+        "select": {
+            "horizontal_swing": {
+                "name": "Horizontal Swing"
+            }
+        },
+        "sensor": {
+            "ip_address": {
+                "name": "IP Address"
+            },
+            "serial_number": {
+                "name": "Serial Number"
+            },
+            "power": {
+                "name": "Power"
+            },
+            "voltage": {
+                "name": "Voltage"
+            },
+            "energy": {
+                "name": "Energy"
+            },
+            "cost": {
+                "name": "Electricity Rate"
+            },
+            "estimated_current": {
+                "name": "Estimated Current"
+            },
+            "rssi": {
+                "name": "RSSI"
+            },
+            "brightness": {
+                "name": "Brightness"
+            },
+            "timezone": {
+                "name": "Time Zone"
+            },
+            "min_setpoint": {
+                "name": "Minimum Setpoint"
+            },
+            "max_setpoint": {
+                "name": "Maximum Setpoint"
+            },
+            "duty_cycle": {
+                "name": "Duty Cycle"
+            },
+            "max_current": {
+                "name": "Maximum Current"
+            },
+            "heatsink_temperature": {
+                "name": "HeatSink Temperature"
+            },
+            "infloor_temperature": {
+                "name": "Infloor Temperature"
+            },
+            "current": {
+                "name": "Current"
+            },
+            "temperature": {
+                "name": "Temperature"
+            },
+            "humidity": {
+                "name": "Humidity"
+            }
+        },
+        "switch": {
+            "lock": {
+                "name": "Lock"
+            },
+            "proximity": {
+                "name": "Proximity Mode"
+            },
+            "auto_brightness": {
+                "name": "Auto Brightness"
+            },
+            "climate_plus": {
+                "name": "Climate+"
+            }
+        },
+        "update": {
+            "firmware": {
+                "name": "Firmware"
+            }
+        }
+    },
+    "exceptions": {
+        "set_temperature_failed": {
+            "message": "Failed to set temperature: {error}"
+        },
+        "set_hvac_mode_failed": {
+            "message": "Failed to set HVAC mode: {error}"
+        },
+        "set_ac_hvac_mode_failed": {
+            "message": "Failed to set AC HVAC mode: {error}"
+        },
+        "set_ac_temperature_failed": {
+            "message": "Failed to set AC target temperature: {error}"
+        },
+        "set_ac_fan_mode_failed": {
+            "message": "Failed to set AC fan mode: {error}"
+        },
+        "set_ac_swing_mode_failed": {
+            "message": "Failed to set AC swing mode: {error}"
+        },
+        "set_min_brightness_failed": {
+            "message": "Failed to set min brightness: {error}"
+        },
+        "set_max_brightness_failed": {
+            "message": "Failed to set max brightness: {error}"
+        },
+        "set_lock_failed": {
+            "message": "Failed to set lock state: {error}"
+        },
+        "set_auto_brightness_failed": {
+            "message": "Failed to set auto brightness: {error}"
+        },
+        "set_proximity_failed": {
+            "message": "Failed to set proximity mode: {error}"
+        },
+        "set_climate_plus_failed": {
+            "message": "Failed to set Climate+: {error}"
+        },
+        "set_horizontal_swing_failed": {
+            "message": "Failed to set horizontal swing: {error}"
+        }
+    },
+    "issues": {
+        "auth_failed": {
+            "title": "Authentication Failed",
+            "fix_flow": {
+                "step": {
+                    "confirm": {
+                        "title": "Re-authenticate Mysa",
+                        "description": "Authentication with the Mysa API failed: {error}\n\nPlease reconfigure the integration with valid credentials."
+                    }
+                }
+            }
+        }
     }
 }

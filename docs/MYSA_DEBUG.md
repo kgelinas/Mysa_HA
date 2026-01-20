@@ -45,6 +45,8 @@ On first run, you'll be prompted for your Mysa account credentials. These are sa
 | `sniff`                  | Toggle MQTT sniffer mode                 |
 | `examples`               | Show example commands                    |
 | `advanced`               | Advanced/dangerous operations            |
+| `refresh <DID>`          | Force device to check cloud (MsgType 6)  |
+| `dump <DID>`             | Force metadata dump (MsgType 7)          |
 | `help` or `?`            | Show command help                        |
 | `q` or `quit`            | Exit                                     |
 

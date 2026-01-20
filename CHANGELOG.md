@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 
 
+## [0.9.0] - 2026-01-25
+### Added
+- **Documentation**: Added comprehensive explanations for API and Protocol documentation to improve maintainability.
+
+### Changed
+- **Major Refactor**: Major refactoring of the integration to align with Home Assistant best practices and a lot of change to the codebase. Some breaking change may occur.
+
 ## [0.8.10] - 2026-01-19
 ### Fixed
 - **Energy Calculation (Critical)**: Resolved 10x overestimation bug in power and energy sensors. The `Current` sensor reports the last-measured value when the heater was ON, not instantaneous current. Power is now correctly calculated as `Voltage × Current × DutyCycle%`.

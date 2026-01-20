@@ -5,6 +5,11 @@ Tests for Switch entities.
 
 
 
+import pytest
+from typing import Any
+from unittest.mock import MagicMock, AsyncMock
+from custom_components.mysa.switch import MysaClimatePlusSwitch
+
 class TestMysaLockSwitch:
     """Test thermostat lock switch entity."""
 
@@ -156,6 +161,25 @@ class TestMysaClimatePlusSwitch:
         assert ac_device_type in ac_types
         assert heater_device_type not in ac_types
 
+    @pytest.mark.asyncio
+    async def test_climate_plus_prioritizes_ecomode(self):
+        """Test that Climate+ switch prioritizes EcoMode key."""
+        mock_coordinator = MagicMock()
+        mock_api = MagicMock()
+
+        # Data is in EcoMode key
+        mock_coordinator.data = {"DID": {"EcoMode": True}}
+
+        switch = MysaClimatePlusSwitch(
+            mock_coordinator, "DID", {"Id": "DID"}, mock_api, MagicMock()
+        )
+
+        assert switch.is_on == True
+
+        # Data is in legacy it key
+        mock_coordinator.data = {"DID": {"it": 1}}
+        assert switch.is_on == True
+
 
 class TestSwitchPendingState:
     """Test pending state mechanism for switches."""
@@ -177,7 +201,7 @@ class TestSwitchPendingState:
 
     def test_pending_state_cleared_on_update(self):
         """Test pending state is cleared when MQTT update confirms."""
-        pending_state = True
+        pending_state: bool | None = True
 
         # Simulate MQTT confirmation
         # if True:  # Got confirmed state from MQTT
@@ -214,7 +238,7 @@ class TestSwitchValueExtraction:
 
     def test_extract_nested_value(self):
         """Test extracting a nested value with 'v' key."""
-        state = {"Lock": {"v": 1, "t": 1704067200}}
+        state: dict[str, Any] = {"Lock": {"v": 1, "t": 1704067200}}
 
         val = state.get("Lock")
         if isinstance(val, dict):
@@ -224,7 +248,7 @@ class TestSwitchValueExtraction:
 
     def test_extract_nested_with_id(self):
         """Test extracting a nested value with 'Id' key."""
-        state = {"Zone": {"Id": "zone-123"}}
+        state: dict[str, Any] = {"Zone": {"Id": "zone-123"}}
 
         val = state.get("Zone")
         if isinstance(val, dict):
@@ -237,7 +261,7 @@ class TestSwitchValueExtraction:
 
     def test_extract_missing_key(self):
         """Test extracting a missing key returns None."""
-        state = {}
+        state: dict[str, Any] = {}
 
         val = state.get("Lock")
 

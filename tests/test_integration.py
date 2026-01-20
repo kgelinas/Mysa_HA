@@ -17,6 +17,7 @@ ROOT_DIR = os.path.dirname(TEST_DIR)
 sys.path.insert(0, ROOT_DIR)
 
 import pytest
+from typing import Any
 from unittest.mock import MagicMock, AsyncMock, patch
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.helpers import entity_registry as er
@@ -216,7 +217,7 @@ class TestAsyncBlockTillDone:
         hass.async_create_task(background_task())
         await hass.async_block_till_done()
 
-        assert task_completed is True
+        assert task_completed
 
 
 class TestConfigFlow:
@@ -646,7 +647,7 @@ class TestOptionsFlow:
 
     def test_options_defaults(self):
         """Test options with defaults."""
-        options = {}
+        options: dict[str, Any] = {}
 
         polling_interval = options.get("polling_interval", 120)
 
@@ -692,7 +693,7 @@ class TestSetupFlowAsync:
             api = MysaApi("test@example.com", "password123", hass)
             result = await api.authenticate()
 
-            assert result is True
+            assert result
 
 
 class TestCommandFlowAsync:
@@ -713,6 +714,8 @@ class TestCommandFlowAsync:
         api.realtime.send_command = AsyncMock()
 
         api._last_command_time = {}
+        api.states = {}
+        api.coordinator_callback = None
         api.upgraded_lite_devices = []
 
         await api.set_target_temperature("device1", 23.0)
@@ -723,3 +726,28 @@ class TestCommandFlowAsync:
         call_args_list = api.realtime.send_command.call_args_list
         device_ids = [call[0][0] for call in call_args_list]
         assert "device1" in device_ids
+
+    @pytest.mark.asyncio
+    async def test_set_temperature_with_coordinator_callback(self, hass):
+        """Test coordinator_callback is called during optimistic update."""
+        from custom_components.mysa.mysa_api import MysaApi
+
+        api = MysaApi.__new__(MysaApi)
+        api.hass = hass
+        api.client = MagicMock()
+        api.client.devices = {"device1": {"type": 4}}
+        api.client.user_id = "test-user-id"
+        api.realtime = MagicMock()
+        api.realtime.send_command = AsyncMock()
+        api._last_command_time = {}
+        api.states = {}
+        api.upgraded_lite_devices = []
+
+        # Set up a mock callback
+        mock_callback = AsyncMock()
+        api.coordinator_callback = mock_callback
+
+        await api.set_target_temperature("device1", 23.0)
+
+        # Verify callback was called
+        mock_callback.assert_called_once()

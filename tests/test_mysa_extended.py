@@ -150,8 +150,9 @@ async def test_upgrade_lite_device_no_device(hass: HomeAssistant):
         call = MagicMock()
         call.data = {"device_id": "invalid_device"}
 
-        with pytest.raises(HomeAssistantError, match="Device invalid_device not found"):
+        with pytest.raises(HomeAssistantError) as excinfo:
             await async_service_upgrade_lite(call, hass)
+        assert excinfo.value.translation_key == "device_not_found"
 
 
 @pytest.mark.asyncio
@@ -171,8 +172,9 @@ async def test_upgrade_lite_device_no_mysa_integration(hass: HomeAssistant):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
-        with pytest.raises(HomeAssistantError, match="Mysa integration not found"):
+        with pytest.raises(HomeAssistantError) as excinfo:
             await async_service_upgrade_lite(call, hass)
+        assert excinfo.value.translation_key == "mysa_integration_not_found_for_device"
 
 
 @pytest.mark.asyncio
@@ -201,8 +203,9 @@ async def test_upgrade_lite_device_api_failure(hass: HomeAssistant):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
-        with pytest.raises(HomeAssistantError, match="Hardware upgrade failed"):
+        with pytest.raises(HomeAssistantError) as excinfo:
             await async_service_upgrade_lite(call, hass)
+        assert excinfo.value.translation_key == "upgrade_failed"
 
 
 @pytest.mark.asyncio
@@ -215,8 +218,9 @@ async def test_service_downgrade_no_device(hass: HomeAssistant):
         call = MagicMock()
         call.data = {"device_id": "invalid_device"}
 
-        with pytest.raises(HomeAssistantError, match="Device invalid_device not found"):
+        with pytest.raises(HomeAssistantError) as excinfo:
             await async_service_downgrade_lite(call, hass)
+        assert excinfo.value.translation_key == "device_not_found"
 
 
 @pytest.mark.asyncio
@@ -234,8 +238,9 @@ async def test_service_downgrade_no_mysa_integration(hass: HomeAssistant):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
-        with pytest.raises(HomeAssistantError, match="Mysa integration not found"):
+        with pytest.raises(HomeAssistantError) as excinfo:
             await async_service_downgrade_lite(call, hass)
+        assert excinfo.value.translation_key == "mysa_integration_not_found_for_device"
 
 
 @pytest.mark.asyncio
@@ -256,8 +261,9 @@ async def test_service_upgrade_integration_not_loaded(hass: HomeAssistant):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
-        with pytest.raises(HomeAssistantError, match="Mysa integration not loaded"):
+        with pytest.raises(HomeAssistantError) as excinfo:
             await async_service_upgrade_lite(call, hass)
+        assert excinfo.value.translation_key == "mysa_integration_not_loaded"
 
 
 @pytest.mark.asyncio
@@ -270,7 +276,7 @@ async def test_service_upgrade_api_not_initialized(hass: HomeAssistant):
     mock_device_registry.async_get.return_value = mock_device_entry
 
     # Entry exists but API is missing
-    hass.data[MYSA_DOMAIN] = {"test_entry": {}}
+    hass.data[MYSA_DOMAIN] = {"test_entry": {"loaded": True}}
     mock_entry = MagicMock(entry_id="test_entry")
 
     with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_device_registry), \
@@ -278,8 +284,9 @@ async def test_service_upgrade_api_not_initialized(hass: HomeAssistant):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
-        with pytest.raises(HomeAssistantError, match="Mysa API not initialized"):
+        with pytest.raises(HomeAssistantError) as excinfo:
             await async_service_upgrade_lite(call, hass)
+        assert excinfo.value.translation_key == "mysa_api_not_initialized"
 
 
 @pytest.mark.asyncio
@@ -291,7 +298,7 @@ async def test_service_downgrade_api_not_initialized(hass: HomeAssistant):
     mock_device_entry.config_entries = {"test_entry"}
     mock_device_registry.async_get.return_value = mock_device_entry
 
-    hass.data[MYSA_DOMAIN] = {"test_entry": {}}
+    hass.data[MYSA_DOMAIN] = {"test_entry": {"loaded": True}}
     mock_entry = MagicMock(entry_id="test_entry")
 
     with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_device_registry), \
@@ -299,8 +306,9 @@ async def test_service_downgrade_api_not_initialized(hass: HomeAssistant):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
-        with pytest.raises(HomeAssistantError, match="Mysa API not initialized"):
+        with pytest.raises(HomeAssistantError) as excinfo:
             await async_service_downgrade_lite(call, hass)
+        assert excinfo.value.translation_key == "mysa_api_not_initialized"
 
 
 @pytest.mark.asyncio
@@ -323,8 +331,9 @@ async def test_downgrade_api_failure(hass: HomeAssistant):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
-        with pytest.raises(HomeAssistantError, match="Hardware revert failed"):
+        with pytest.raises(HomeAssistantError) as excinfo:
             await async_service_downgrade_lite(call, hass)
+        assert excinfo.value.translation_key == "downgrade_failed"
 
 
 @pytest.mark.asyncio
@@ -334,8 +343,9 @@ async def test_upgrade_generic_exception(hass: HomeAssistant):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
-        with pytest.raises(HomeAssistantError, match="Upgrade failed: Boom"):
+        with pytest.raises(HomeAssistantError) as excinfo:
             await async_service_upgrade_lite(call, hass)
+        assert excinfo.value.translation_key == "upgrade_error"
 
 
 @pytest.mark.asyncio
@@ -345,8 +355,9 @@ async def test_downgrade_generic_exception(hass: HomeAssistant):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
-        with pytest.raises(HomeAssistantError, match="Revert failed: Boom"):
+        with pytest.raises(HomeAssistantError) as excinfo:
             await async_service_downgrade_lite(call, hass)
+        assert excinfo.value.translation_key == "downgrade_error"
 
 
 @pytest.mark.asyncio
@@ -385,8 +396,9 @@ async def test_killer_ping_device_not_found(hass: HomeAssistant):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
-        with pytest.raises(HomeAssistantError, match="Device ha_device_id not found"):
+        with pytest.raises(HomeAssistantError) as excinfo:
             await async_service_killer_ping(call, hass)
+        assert excinfo.value.translation_key == "device_not_found"
 
 
 @pytest.mark.asyncio
@@ -404,14 +416,15 @@ async def test_killer_ping_mysa_not_found(hass: HomeAssistant):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
-        with pytest.raises(HomeAssistantError, match="Mysa integration not found"):
+        with pytest.raises(HomeAssistantError) as excinfo:
             await async_service_killer_ping(call, hass)
+        assert excinfo.value.translation_key == "mysa_integration_not_found_for_device"
 
 
 @pytest.mark.asyncio
 async def test_killer_ping_api_not_initialized(hass: HomeAssistant):
     """Test killer ping when API not initialized."""
-    hass.data[MYSA_DOMAIN] = {"test_entry": {"api": None}}
+    hass.data[MYSA_DOMAIN] = {"test_entry": {"loaded": True}}
     mock_entry = MagicMock(entry_id="test_entry")
 
     mock_device_registry = MagicMock()
@@ -425,8 +438,9 @@ async def test_killer_ping_api_not_initialized(hass: HomeAssistant):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
-        with pytest.raises(HomeAssistantError, match="Mysa API not initialized"):
+        with pytest.raises(HomeAssistantError) as excinfo:
             await async_service_killer_ping(call, hass)
+        assert excinfo.value.translation_key == "mysa_api_not_initialized"
 
 
 @pytest.mark.asyncio
@@ -449,8 +463,9 @@ async def test_killer_ping_api_failure(hass: HomeAssistant):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
-        with pytest.raises(HomeAssistantError, match="Killer Ping failed"):
+        with pytest.raises(HomeAssistantError) as excinfo:
             await async_service_killer_ping(call, hass)
+        assert excinfo.value.translation_key == "killer_ping_failed"
 
 
 @pytest.mark.asyncio
@@ -460,5 +475,29 @@ async def test_killer_ping_generic_exception(hass: HomeAssistant):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
-        with pytest.raises(HomeAssistantError, match="Killer Ping failed: Boom"):
+        with pytest.raises(HomeAssistantError) as excinfo:
             await async_service_killer_ping(call, hass)
+        assert excinfo.value.translation_key == "killer_ping_error"
+
+@pytest.mark.asyncio
+async def test_upgrade_lite_device_invalid_data(hass: HomeAssistant):
+    """Test upgrade when Mysa data is invalid (not a dict)."""
+    mock_device_registry = MagicMock()
+    mock_device_entry = MagicMock()
+    mock_device_entry.identifiers = {(MYSA_DOMAIN, "device_123")}
+    mock_device_entry.config_entries = {"test_entry"}
+    mock_device_registry.async_get.return_value = mock_device_entry
+
+    # Invalid data (not a dict)
+    hass.data[MYSA_DOMAIN] = {"test_entry": "invalid_string"}
+    mock_entry = MagicMock(entry_id="test_entry")
+
+    with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_device_registry), \
+         patch.object(hass.config_entries, "async_get_entry", return_value=mock_entry):
+
+        call = MagicMock()
+        call.data = {"device_id": "ha_device_id"}
+
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await async_service_upgrade_lite(call, hass)
+        assert excinfo.value.translation_key == "mysa_data_invalid"

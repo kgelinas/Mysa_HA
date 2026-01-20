@@ -19,6 +19,7 @@ Each Mysa device model uses a specific payload type for MQTT commands:
 | INF-V1      | `3`          | In-Floor Heating         |
 | BB-V2       | `4`          | Baseboard V2             |
 | BB-V2-L     | `5`          | Baseboard V2 Lite        |
+| ST-V1       | `?`          | Central AC/Heat (Unknown)|
 
 ---
 
@@ -37,9 +38,8 @@ Mysa uses a non-standard AWS SigV4 signing implementation. The `X-Amz-Security-T
 ### Topics
 
 Each device has three topics:
-- `/v1/dev/{device_id}/in` - Commands TO device
 - `/v1/dev/{device_id}/out` - State FROM device
-- `/v1/dev/{device_id}/batch` - Batch updates
+- `/v1/dev/{device_id}/in` - Commands TO device
 
 The `{device_id}` is the MAC address without colons, lowercase.
 
@@ -61,15 +61,25 @@ Commands are wrapped in an envelope structure:
 }
 ```
 
-### Message Types
+### Message Types (MsgType)
+
+Messages are JSON objects containing a `MsgType` (or `msg` in some responses) field.
 
 | MsgType | Direction | Description                                |
 |:--------|:----------|:-------------------------------------------|
+| 4       | ← Device  | Device Log (Info/Error/Debug JSON)         |
 | 5       | → Device  | Killer Ping (Reset to pairing mode)        |
-| 6       | → Device  | Settings Nudge (Trigger cloud sync)        |
-| 40      | ← Device  | State update                               |
-| 44      | → Device  | Command (wrapped)                          |
+| 6       | → Device  | Settings Nudge (Force cloud-to-device sync)|
+| 7       | → Device  | Metadata Dump (Request Info/FW/IP/Serial)   |
+| 10      | ← Device  | Boot Status (IP, Firmware, Serial)         |
+| 20      | ← Device  | Heartbeat / Status Request Response        |
+| 30      | ← Device  | Telemetry (AC Only: 1s updates)            |
+| 31      | ← Device  | ACState Object Dump (AC Only)              |
+| 34      | → Device  | Event Hash / Sync (ver 3.0.0)              |
+| 40      | ← Device  | State update (Automatic Broadcast)         |
 | 44      | ← Device  | Command response                           |
+| 61      | ← Device  | Firmware Report (Response to MsgType 20)   |
+
 
 ---
 
@@ -81,7 +91,9 @@ Commands are wrapped in an envelope structure:
 ```json
 {"cmd": [{"sp": 21.0, "stpt": 21.0, "a_sp": 21.0, "tm": -1}], "type": TYPE, "ver": 1}
 ```
-- `sp` / `stpt` / `a_sp`: Target temperature in Celsius (supports 0.5° increments)
+- `sp` / `stpt` / `a_sp`: Target temperature in Celsius.
+  - Heating (BB/INF): Supports `0.5°` increments.
+  - Cooling (AC-V1): Supports `1.0°` increments only.
 - `tm`: Timer (-1 = permanent)
 
 #### Set HVAC Mode
@@ -128,6 +140,57 @@ Commands are wrapped in an envelope structure:
 }
 ```
 *Note: This message is sent WITHOUT the standard MsgType 44 envelope. It is used to notify the cloud that settings were changed via HTTP, triggering a state push to the device.*
+
+#### Metadata Dump (MsgType 7)
+```json
+{
+  "Device": "DEVICE_ID",
+  "Timestamp": 1704825600,
+  "MsgType": 7
+}
+```
+*Note: Request the device at its local IP to publish device-specific information including Firmware version, Local IP, Serial Number, and MAC address.*
+
+---
+
+### Diagnostic Messages (From Device)
+
+#### Device Logs (MsgType 4)
+Contains internal device logs, including local IP and serial number upon boot.
+```json
+{
+  "Device": "DEVICE_ID",
+  "Timestamp": 1704825600,
+  "MsgType": 4,
+  "Level": "INFO",
+  "Message": "Local IP: 192.168.1.100"
+}
+```
+
+#### Boot Status (MsgType 10)
+Sent when the device reboots. Contains firmware version, boot count, and reason.
+```json
+{
+  "device": "DEVICE_ID",
+  "timestamp": 1704825600,
+  "MsgType": 10,
+  "bootTime": 1704825000,
+  "bootCount": 1024,
+  "version": "3.17.4.1",
+  "ip": "192.168.1.100"
+}
+```
+
+#### Heartbeat / State (MsgType 20)
+Periodic status update from the device.
+```json
+{
+  "Device": "DEVICE_ID",
+  "Timestamp": 25,
+  "MsgType": 20
+}
+```
+
 
 ---
 
@@ -215,6 +278,12 @@ Commands are wrapped in an envelope structure:
 
 Base URL: `https://app.mysa.cloud/api/v2`
 
+### Polling & Synchronization
+- **Poll Interval**: The integration polls `/devices` and `/devices/state` every **120 seconds** (2 minutes).
+- **Staleness Logic**:
+  1. **Timestamp Check (Primary)**: If an update contains a timestamp older than the latest known timestamp for the device, it is ignored.
+  2. **90-Second Guard (Fallback)**: If no timestamp is present, HTTP updates are ignored if a command was sent to the device within the last **90 seconds**. This prevents "rubber-banding" from slow cloud APIs. Real-time MQTT updates are always accepted.
+
 ### Authentication
 
 Uses AWS Cognito with JWT tokens. Include auth header on all requests.
@@ -273,8 +342,8 @@ Returns firmware update information.
 |:------------|:----------------------|:--------------|
 | Temperature | Current temperature   | float         |
 | Humidity    | Current humidity      | int (0-100)   |
-| SetPoint/sp | Target temperature    | float         |
-| Mode/md     | HVAC mode             | int           |
+| SetPoint/sp/stpt | Target temperature | float         |
+| Mode/md/mode | HVAC mode             | int           |
 | Lock/lk     | Button lock state     | int (0/1)     |
 | Rssi        | WiFi signal strength  | int (dBm)     |
 
@@ -297,3 +366,5 @@ Returns firmware update information.
 | SwingStateHorizontal | Horizontal swing pos  | int  |
 | IsThermostatic/it    | Climate+ enabled      | int  |
 | TstatMode            | AC HVAC mode          | int  |
+| CorrectedTemp        | Adjusted Temp (Priority) | float |
+| SensorTemp           | Raw Sensor Temp (Elevated/Warning) | float |

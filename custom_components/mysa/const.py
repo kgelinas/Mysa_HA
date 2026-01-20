@@ -74,7 +74,7 @@ AC_SWING_MODES = {
 AC_SWING_MODES_REVERSE = {v: k for k, v in AC_SWING_MODES.items()}
 
 # Horizontal swing positions (for select entity if needed)
-AC_HORIZONTAL_SWING_MODES = {
+AC_HORIZONTAL_SWING_MODES: dict[int, str] = {
     AC_SWING_AUTO: "auto",
     AC_SWING_POSITION_1: "left",
     AC_SWING_POSITION_2: "left_center",

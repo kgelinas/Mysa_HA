@@ -1,30 +1,37 @@
 """Number platform for Mysa."""
 # pylint: disable=abstract-method
+# Justification: HA Entity properties implement the required abstracts.
 import time
 import logging
+from typing import Any, Dict, List, Optional
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE
+from homeassistant.const import PERCENTAGE, EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
+from homeassistant.exceptions import HomeAssistantError
 
 from .const import DOMAIN
+from . import MysaData
+from .mysa_api import MysaApi
+from .device import MysaDeviceLogic
+
+PARALLEL_UPDATES = 0
 
 _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
+    _hass: HomeAssistant,
+    entry: ConfigEntry[MysaData],
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Mysa number entities."""
-    data = hass.data[DOMAIN][entry.entry_id]
-    coordinator = data["coordinator"]
-    api = data["api"]
+    coordinator = entry.runtime_data.coordinator
+    api = entry.runtime_data.api
     devices = await api.get_devices()
 
     entities: list[NumberEntity] = []
@@ -36,7 +43,9 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class MysaNumber(CoordinatorEntity, NumberEntity):
+class MysaNumber(
+    NumberEntity, CoordinatorEntity[DataUpdateCoordinator[Dict[str, Any]]]
+):
     """Base class for Mysa number entities.
 
     TODO: Refactor MysaNumber to reduce instance attributes,
@@ -48,10 +57,19 @@ class MysaNumber(CoordinatorEntity, NumberEntity):
     _attr_native_step = 1
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_mode = NumberMode.SLIDER
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(
-        self, coordinator, device_id, device_data, api, entry, sensor_key, name_suffix
-    ):
+        self,
+        coordinator: DataUpdateCoordinator[Dict[str, Any]],
+        device_id: str,
+        device_data: Dict[str, Any],
+        api: MysaApi,
+        entry: ConfigEntry[MysaData],
+        sensor_key: str,
+        translation_key: str
+    ) -> None:
         # TODO: Refactor __init__ to reduce arguments
         """Initialize."""
         super().__init__(coordinator)
@@ -60,27 +78,21 @@ class MysaNumber(CoordinatorEntity, NumberEntity):
         self._api = api
         self._entry = entry
         self._device_data = device_data
-        self._attr_name = f"{device_data.get('Name', 'Mysa')} {name_suffix}"
+        self._attr_translation_key = translation_key
         self._attr_unique_id = f"{device_id}_{sensor_key.lower()}"
-        self._pending_value = None  # Track pending value to avoid 'unknown' state
-        self._pending_time = None   # Timestamp when pending was set
+        self._pending_value: Optional[float] = None  # Track pending value to avoid 'unknown' state
+        self._pending_time: Optional[float] = None   # Timestamp when pending was set
 
     @property
-    def device_info(self):
+    def device_info(self) -> DeviceInfo:
         """Return device info."""
-        state = self.coordinator.data.get(self._device_id)
-        zone_id = state.get("Zone") if state else None
-        zone_name = self._entry.options.get(f"zone_name_{zone_id}") if zone_id else None
+        state = self.coordinator.data.get(self._device_id) if self.coordinator.data else None
+        return MysaDeviceLogic.get_device_info(self._device_id, self._device_data, state)
 
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._device_id)},
-            manufacturer="Mysa",
-            model=self._device_data.get("Model"),
-            suggested_area=zone_name,
-        )
-
-    def _extract_value(self, state, keys):
+    def _extract_value(self, state: Optional[Dict[str, Any]], keys: List[str]) -> Any:
         """Helper to extract a value from state dictionary."""
+        if state is None:
+            return None
         for key in keys:
             val = state.get(key)
             if val is not None:
@@ -92,17 +104,23 @@ class MysaNumber(CoordinatorEntity, NumberEntity):
                 return val
         return None
 
-    def _get_value_with_pending(self, keys):
+    def _get_value_with_pending(self, keys: List[str]) -> Optional[float]:
         """Get value using sticky optimistic logic."""
         # Cloud value
         state = None
         if self.coordinator.data:
             state = self.coordinator.data.get(self._device_id)
         val = self._extract_value(state, keys) if state else None
-        current_val = float(val) if val is not None else None
+
+        current_val: Optional[float] = None
+        if val is not None:
+            try:
+                current_val = float(val)
+            except (ValueError, TypeError):
+                pass
 
         if self._pending_value is not None:
-             # 1. Check expiration (30s)
+            # 1. Check expiration (30s)
             if self._pending_time and (time.time() - self._pending_time > 30):
                 self._pending_value = None
                 self._pending_time = None
@@ -126,26 +144,40 @@ class MysaMinBrightnessNumber(MysaNumber):
     TODO: Implement abstract methods.
     """
 
-    _attr_icon = "mdi:brightness-5"
-
-    def __init__(self, coordinator, device_id, device_data, api, entry):
+    def __init__(
+        self,
+        coordinator: DataUpdateCoordinator[Dict[str, Any]],
+        device_id: str,
+        device_data: Dict[str, Any],
+        api: MysaApi,
+        entry: ConfigEntry[MysaData]
+    ) -> None:
         # TODO: Refactor __init__ to reduce arguments
         """Initialize."""
         super().__init__(
-            coordinator, device_id, device_data, api, entry, "MinBrightness", "Minimum Brightness"
+            coordinator, device_id, device_data, api, entry, "MinBrightness", "min_brightness"
         )
 
     @property
-    def native_value(self):
+    def native_value(self) -> Optional[float]:
         """Return current min brightness value."""
-        return self._get_value_with_pending(["MinBrightness", "mnbr"])
+        return self._get_value_with_pending(["mnbr", "MinBrightness"])
 
     async def async_set_native_value(self, value: float) -> None:
         """Set minimum brightness."""
         self._pending_value = float(value)
         self._pending_time = time.time()
         self.async_write_ha_state()  # Update UI immediately
-        await self._api.set_min_brightness(self._device_id, int(value))
+        try:
+            await self._api.set_min_brightness(self._device_id, int(value))
+        except Exception as e:
+            self._pending_value = None
+            self.async_write_ha_state()
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_min_brightness_failed",
+                translation_placeholders={"error": str(e)},
+            ) from e
         # Don't clear pending - let it expire or converge
 
 
@@ -155,24 +187,38 @@ class MysaMaxBrightnessNumber(MysaNumber):
     TODO: Implement abstract methods.
     """
 
-    _attr_icon = "mdi:brightness-7"
-
-    def __init__(self, coordinator, device_id, device_data, api, entry):
+    def __init__(
+        self,
+        coordinator: DataUpdateCoordinator[Dict[str, Any]],
+        device_id: str,
+        device_data: Dict[str, Any],
+        api: MysaApi,
+        entry: ConfigEntry[MysaData]
+    ) -> None:
         # TODO: Refactor __init__ to reduce arguments
         """Initialize."""
         super().__init__(
-            coordinator, device_id, device_data, api, entry, "MaxBrightness", "Maximum Brightness"
+            coordinator, device_id, device_data, api, entry, "MaxBrightness", "max_brightness"
         )
 
     @property
-    def native_value(self):
+    def native_value(self) -> Optional[float]:
         """Return current max brightness value."""
-        return self._get_value_with_pending(["MaxBrightness", "mxbr"])
+        return self._get_value_with_pending(["mxbr", "MaxBrightness"])
 
     async def async_set_native_value(self, value: float) -> None:
         """Set maximum brightness."""
         self._pending_value = float(value)
         self._pending_time = time.time()
         self.async_write_ha_state()  # Update UI immediately
-        await self._api.set_max_brightness(self._device_id, int(value))
+        try:
+            await self._api.set_max_brightness(self._device_id, int(value))
+        except Exception as e:
+            self._pending_value = None
+            self.async_write_ha_state()
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_max_brightness_failed",
+                translation_placeholders={"error": str(e)},
+            ) from e
         # Don't clear pending - let it expire or converge

@@ -30,7 +30,6 @@ async def test_diagnostics(hass: HomeAssistant):
     api.devices = {"device1": {"Name": "Test Device"}}
     api.states = {"device1": {"temp": 21}}
     api.homes = [{"Name": "Test Home"}]
-    api.zones = {"zone1": "Test Zone"}
     api.upgraded_lite_devices = ["device2"]
     api.estimated_max_current = 10
 
@@ -40,12 +39,16 @@ async def test_diagnostics(hass: HomeAssistant):
         }
     }
 
+    # Mock runtime_data
+    mock_data = MagicMock()
+    mock_data.api = api
+    entry.runtime_data = mock_data
+
     result = await async_get_config_entry_diagnostics(hass, entry)
 
     assert result["devices"] == {"device1": {"Name": "Test Device"}}
     assert result["states"] == {"device1": {"temp": 21}}
     assert result["homes"] == [{"Name": "Test Home"}]
-    assert result["zones"] == {"zone1": "Test Zone"}
     assert result["upgraded_lite_devices"] == ["device2"]
     assert result["estimated_max_current"] == 10
 

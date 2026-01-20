@@ -14,9 +14,6 @@
                 "description": "Configure advanced settings. Leave fields empty to use defaults.",
                 "data": {
                     "custom_erate": "Custom Electricity Rate ($/kWh)"
-                },
-                "data_description": {
-                    "custom_erate": "Override the electricity rate from your Mysa cloud account. Leave empty to use the cloud value."
                 }
             }
         }

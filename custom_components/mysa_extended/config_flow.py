@@ -6,7 +6,7 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.core import callback
 
 from .const import DOMAIN
@@ -31,7 +31,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle the initial step."""
         if self._async_current_entries():
             return self.async_abort(reason="already_configured")
@@ -51,7 +51,7 @@ class MysaExtendedOptionsFlowHandler(config_entries.OptionsFlow):
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Manage the options."""
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
@@ -63,7 +63,7 @@ class MysaExtendedOptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Optional(
                     "custom_erate",
                     description={"suggested_value": current_rate},
-                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=1)),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=100.0)),
             }
         )
 

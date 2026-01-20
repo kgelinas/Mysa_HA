@@ -2,41 +2,75 @@
     "config": {
         "step": {
             "user": {
-                "title": "Autenticação Mysa",
+                "title": "Autentica\u00e7\u00e3o Mysa",
                 "description": "Insira as credenciais da sua conta Mysa.",
                 "data": {
-                    "username": "Nome de usuário (E-mail)",
+                    "username": "Nome de usu\u00e1rio (E-mail)",
                     "password": "Senha"
+                },
+                "data_description": {
+                    "username": "O endere\u00e7o de e-mail associado \u00e0 sua conta Mysa.",
+                    "password": "A senha da sua conta Mysa."
                 }
             },
             "reauth_confirm": {
                 "title": "Reautenticar Mysa",
-                "description": "A palavra-passe para {username} é inválida. Por favor, introduza a nova palavra-passe.",
+                "description": "A palavra-passe para {username} \u00e9 inv\u00e1lida. Por favor, introduza a nova palavra-passe.",
                 "data": {
-                    "username": "Nome de usuário (E-mail)",
+                    "username": "Nome de usu\u00e1rio (E-mail)",
                     "password": "Senha"
+                },
+                "data_description": {
+                    "username": "O endere\u00e7o de e-mail associado \u00e0 sua conta Mysa.",
+                    "password": "A sua nova senha da conta Mysa."
                 }
             }
         },
         "error": {
-            "invalid_auth": "Autenticação inválida",
+            "invalid_auth": "Autentica\u00e7\u00e3o inv\u00e1lida",
             "unknown": "Erro inesperado",
-            "reauth_account_mismatch": "O e-mail fornecido não corresponde à configuração existente."
+            "reauth_account_mismatch": "O e-mail fornecido n\u00e3o corresponde \u00e0 configura\u00e7\u00e3o existente."
         },
         "abort": {
-            "single_instance_allowed": "Apenas uma configuração Mysa é permitida.",
-            "reauth_successful": "A reautenticação foi bem-sucedida."
+            "single_instance_allowed": "Apenas uma configura\u00e7\u00e3o Mysa \u00e9 permitida.",
+            "reauth_successful": "A reautentica\u00e7\u00e3o foi bem-sucedida."
         }
     },
     "options": {
         "step": {
             "init": {
-                "title": "Opções Mysa",
-                "description": "Configurar definições avançadas do dispositivo.",
+                "title": "Op\u00e7\u00f5es Mysa",
+                "description": "Configurar defini\u00e7\u00f5es avan\u00e7adas do dispositivo.",
                 "data": {
-                    "upgraded_lite_devices": "Dispositivos Lite atualizados (Forçar Tipo 5)",
-                    "estimated_max_current": "Corrente máxima estimada (Amperes)"
+                    "upgraded_lite_devices": "Dispositivos Lite atualizados (For\u00e7ar Tipo 5)",
+                    "estimated_max_current": "Corrente m\u00e1xima estimada (Amperes)",
+                    "simulated_energy": "For\u00e7ar Energia Simulada"
+                },
+                "data_description": {
+                    "upgraded_lite_devices": "Selecione os dispositivos que voc\u00ea atualizou de Lite para Full usando o recurso 'Magic Upgrade'.",
+                    "estimated_max_current": "Corrente estimada (Amperes) para dispositivos Lite para c\u00e1lculo de energia simulada.",
+                    "simulated_energy": "For\u00e7ar todos os dispositivos a usar o c\u00e1lculo de pot\u00eancia simulada com base no ciclo de trabalho."
                 }
+            }
+        }
+    },
+    "services": {
+        "upgrade_lite_device": {
+            "name": "Atualizar Dispositivo Lite",
+            "description": "Atualiza um termostato Mysa Lite para recursos completos (Magic Upgrade)."
+        },
+        "downgrade_lite_device": {
+            "name": "Reverter Dispositivo Lite",
+            "description": "Reverte um termostato Mysa de recursos completos para Lite."
+        }
+    },
+    "entity": {
+        "sensor": {
+            "ip_address": {
+                "name": "Endere\u00e7o IP"
+            },
+            "serial_number": {
+                "name": "N\u00famero de s\u00e9rie"
             }
         }
     }

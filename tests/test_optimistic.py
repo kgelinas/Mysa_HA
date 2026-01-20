@@ -3,6 +3,7 @@ import time
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 from homeassistant.components.climate import HVACMode, HVACAction
+from homeassistant.exceptions import HomeAssistantError
 from custom_components.mysa.const import DOMAIN
 from custom_components.mysa.switch import MysaLockSwitch
 from custom_components.mysa.climate import MysaClimate
@@ -213,12 +214,16 @@ class TestCoverageEdgeCases:
 
         # 3. Exception Handling
         mock_api.set_target_temperature.side_effect = Exception("API Error")
-        await entity.async_set_temperature(temperature=20.0)
-        # Should not raise, just log error
+        # Should raise HomeAssistantError
+        with pytest.raises(HomeAssistantError) as exc:
+            await entity.async_set_temperature(temperature=20.0)
+        assert exc.value.translation_key == "set_temperature_failed"
 
         mock_api.set_hvac_mode.side_effect = Exception("API Error")
-        await entity.async_set_hvac_mode(HVACMode.OFF)
-        # Should not raise
+        # Should raise HomeAssistantError
+        with pytest.raises(HomeAssistantError) as exc:
+                await entity.async_set_hvac_mode(HVACMode.OFF)
+        assert exc.value.translation_key == "set_hvac_mode_failed"
 
     @pytest.mark.asyncio
     async def test_climate_convergence_exact(self, mock_coordinator, mock_api, mock_entry):

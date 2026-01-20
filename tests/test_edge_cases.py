@@ -3,6 +3,7 @@ Tests for error handling and edge cases.
 """
 
 import pytest
+from typing import Any
 from unittest.mock import MagicMock, AsyncMock, patch
 
 
@@ -11,7 +12,7 @@ class TestStateNormalizationEdgeCases:
 
     def test_empty_dict(self):
         """Test normalizing empty dictionary."""
-        state = {}
+        state: dict[str, Any] = {}
         result = state.copy()
 
         assert result == {}
@@ -58,7 +59,7 @@ class TestStateNormalizationEdgeCases:
 
     def test_missing_required_keys(self):
         """Test handling missing required keys with defaults."""
-        state = {}
+        state: dict[str, Any] = {}
 
         temp = state.get("temperature", 0.0)
         setpoint = state.get("setpoint", 20.0)

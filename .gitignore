@@ -42,6 +42,3 @@ mysa_auth.json
 htmlcov/
 coverage.xml
 .pytest_cache/
-
-# VCR cassettes are now safe to commit (anonymized)
-# See docs/VCR_ANONYMIZATION.md for details

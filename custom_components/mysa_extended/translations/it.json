@@ -1,0 +1,88 @@
+{
+    "title": "Mysa Esteso",
+    "config": {
+        "step": {
+            "user": {
+                "description": "Mysa Esteso fornisce funzionalità avanzate. Nessuna configurazione necessaria - utilizza la tua integrazione Mysa esistente."
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Opzioni Mysa Esteso",
+                "description": "Configura impostazioni avanzate. Lascia i campi vuoti per utilizzare i valori predefiniti.",
+                "data": {
+                    "custom_erate": "Tariffa Elettrica Personalizzata ($/kWh)"
+                }
+            }
+        }
+    },
+    "services": {
+        "upgrade_lite_device": {
+            "name": "Aggiorna Dispositivo Lite (Aggiornamento Magico)",
+            "description": "Sblocca le funzionalità \"Complete\" su un Mysa Baseboard V2 Lite (BB-V2-0-L) cambiando il suo tipo di modello in BB-V2-0 standard.\n\n⚠️ ATTENZIONE: Questo modifica le impostazioni del firmware e potrebbe invalidare la garanzia. Usa a tuo rischio.\nRichiede lo spegnimento e la riaccensione del dispositivo in seguito.",
+            "fields": {
+                "device_id": {
+                    "name": "Dispositivo",
+                    "description": "Il dispositivo Mysa Lite da aggiornare."
+                }
+            }
+        },
+        "downgrade_lite_device": {
+            "name": "Ripristina Dispositivo Lite (Annulla Aggiornamento)",
+            "description": "Ripristina un dispositivo Mysa Baseboard V2 Lite al suo ID modello di fabbrica originale (BB-V2-0-L).\nUsa questo se devi annullare l'\"Aggiornamento Magico\".\n\n⚠️ ATTENZIONE: Questo modifica le impostazioni del firmware. Usa a tuo rischio.\nRichiede lo spegnimento e la riaccensione del dispositivo in seguito.",
+            "fields": {
+                "device_id": {
+                    "name": "Dispositivo",
+                    "description": "Il dispositivo Mysa da ripristinare."
+                }
+            }
+        },
+        "killer_ping": {
+            "name": "Killer Ping (Riavvia in Modalità Associazione)",
+            "description": "Invia un comando speciale che RIAVVIA il dispositivo in MODALITÀ ASSOCIAZIONE.\nIl dispositivo si disconnetterà dalla tua rete e dovrà essere riassociato utilizzando l'app Mysa.\n\n⚠️⚠️ PERICOLO: Questa è un'azione DISTRUTTIVA! ⚠️⚠️\n- Il dispositivo verrà DISCONNESSO dalla tua rete\n- Dovrai RIASSOCIARE fisicamente il dispositivo\n- Usa questo solo se devi spostare il dispositivo su una nuova rete",
+            "fields": {
+                "device_id": {
+                    "name": "Dispositivo",
+                    "description": "Il dispositivo Mysa da riavviare in modalità associazione."
+                }
+            }
+        }
+    },
+    "exceptions": {
+        "device_not_found": {
+            "message": "Dispositivo {device_id} non trovato."
+        },
+        "mysa_integration_not_loaded": {
+            "message": "Integrazione Mysa non caricata."
+        },
+        "mysa_integration_not_found_for_device": {
+            "message": "Integrazione Mysa non trovata per {device_id}."
+        },
+        "mysa_data_invalid": {
+            "message": "Dati Mysa non trovati o non validi."
+        },
+        "mysa_api_not_initialized": {
+            "message": "API Mysa non inizializzata."
+        },
+        "upgrade_failed": {
+            "message": "Aggiornamento hardware fallito per il dispositivo {device_id}."
+        },
+        "upgrade_error": {
+            "message": "Aggiornamento fallito: {error}"
+        },
+        "downgrade_failed": {
+            "message": "Ripristino hardware fallito per il dispositivo {device_id}."
+        },
+        "downgrade_error": {
+            "message": "Ripristino fallito: {error}"
+        },
+        "killer_ping_failed": {
+            "message": "Killer Ping fallito per il dispositivo {device_id}."
+        },
+        "killer_ping_error": {
+            "message": "Errore Killer Ping: {error}"
+        }
+    }
+}

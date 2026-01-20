@@ -2,30 +2,38 @@
     "config": {
         "step": {
             "user": {
-                "title": "Autenticación Mysa",
+                "title": "Autenticaci\u00f3n Mysa",
                 "description": "Ingrese las credenciales de su cuenta Mysa.",
                 "data": {
-                    "username": "Usuario (Correo electrónico)",
-                    "password": "Contraseña"
+                    "username": "Usuario (Correo electr\u00f3nico)",
+                    "password": "Contrase\u00f1a"
+                },
+                "data_description": {
+                    "username": "La direcci\u00f3n de correo electr\u00f3nico asociada a su cuenta Mysa.",
+                    "password": "La contrase\u00f1a de su cuenta Mysa."
                 }
             },
             "reauth_confirm": {
                 "title": "Reautenticar Mysa",
-                "description": "La contraseña para {username} no es válida. Por favor, introduza la nueva contraseña.",
+                "description": "La contrase\u00f1a para {username} no es v\u00e1lida. Por favor, introduza la nueva contrase\u00f1a.",
                 "data": {
-                    "username": "Usuario (Correo electrónico)",
-                    "password": "Contraseña"
+                    "username": "Usuario (Correo electr\u00f3nico)",
+                    "password": "Contrase\u00f1a"
+                },
+                "data_description": {
+                    "username": "La direcci\u00f3n de correo electr\u00f3nico asociada a su cuenta Mysa.",
+                    "password": "La nueva contrase\u00f1a de su cuenta Mysa."
                 }
             }
         },
         "error": {
-            "invalid_auth": "Autenticación inválida",
+            "invalid_auth": "Autenticaci\u00f3n inv\u00e1lida",
             "unknown": "Error inesperado",
-            "reauth_account_mismatch": "El correo electrónico proporcionado no coincide con la configuración existente."
+            "reauth_account_mismatch": "El correo electr\u00f3nico proporcionado no coincide con la configuraci\u00f3n existente."
         },
         "abort": {
-            "single_instance_allowed": "Solo se permite una configuración de Mysa.",
-            "reauth_successful": "La reautenticación se realizó correctamente."
+            "single_instance_allowed": "Solo se permite una configuraci\u00f3n de Mysa.",
+            "reauth_successful": "La reautenticaci\u00f3n se realiz\u00f3 correctamente."
         }
     },
     "options": {
@@ -35,8 +43,34 @@
                 "description": "Configurar ajustes avanzados del dispositivo.",
                 "data": {
                     "upgraded_lite_devices": "Dispositivos Lite actualizados (Forzar Tipo 5)",
-                    "estimated_max_current": "Corriente máxima estimada (Amperios)"
+                    "estimated_max_current": "Corriente m\u00e1xima estimada (Amperios)",
+                    "simulated_energy": "Forzar Energ\u00eda Simulada"
+                },
+                "data_description": {
+                    "upgraded_lite_devices": "Seleccione los dispositivos que ha actualizado de Lite a Full utilizando la funci\u00f3n 'Magic Upgrade'.",
+                    "estimated_max_current": "Corriente estimada (Amperios) para dispositivos Lite para el c\u00e1lculo de energ\u00eda simulada.",
+                    "simulated_energy": "Obligar a todos los dispositivos a usar el c\u00e1lculo de potencia simulada basado en el ciclo de trabajo."
                 }
+            }
+        }
+    },
+    "services": {
+        "upgrade_lite_device": {
+            "name": "Actualizar dispositivo Lite",
+            "description": "Actualiza un termostato Mysa Lite a funciones completas (Magic Upgrade)."
+        },
+        "downgrade_lite_device": {
+            "name": "Revertir dispositivo Lite",
+            "description": "Revierte un termostato Mysa de funciones completas a Lite."
+        }
+    },
+    "entity": {
+        "sensor": {
+            "ip_address": {
+                "name": "Direcci\u00f3n IP"
+            },
+            "serial_number": {
+                "name": "N\u00famero de serie"
             }
         }
     }

@@ -1,26 +1,37 @@
 """Switch platform for Mysa."""
 # pylint: disable=abstract-method
+# Justification: HA Entity properties implement the required abstracts.
 import logging
 import time
-from typing import Any
+from typing import Any, Dict, List, Optional
+
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.const import EntityCategory
 
 from .const import DOMAIN
+from . import MysaData
+from .mysa_api import MysaApi
+from .device import MysaDeviceLogic
+
+PARALLEL_UPDATES = 0
+
 _LOGGER = logging.getLogger(__name__)
+
+
 async def async_setup_entry(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
+    _hass: HomeAssistant,
+    entry: ConfigEntry[MysaData],
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Mysa switches."""
-    data = hass.data[DOMAIN][entry.entry_id]
-    coordinator = data["coordinator"]
-    api = data["api"]
+    coordinator = entry.runtime_data.coordinator
+    api = entry.runtime_data.api
     devices = await api.get_devices()
     entities: list[SwitchEntity] = []
     for device_id, device_data in devices.items():
@@ -43,15 +54,28 @@ async def async_setup_entry(
                 MysaClimatePlusSwitch(coordinator, device_id, device_data, api, entry)
             )
     async_add_entities(entities)
-class MysaSwitch(CoordinatorEntity, SwitchEntity):
+
+
+class MysaSwitch(
+    SwitchEntity, CoordinatorEntity[DataUpdateCoordinator[Dict[str, Any]]]
+):
     """Base class for Mysa switches.
 
     TODO: Refactor MysaSwitch to reduce instance attributes and duplicate code.
     """
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(
-        self, coordinator, device_id, device_data, api, entry, sensor_key, name_suffix
-    ):
+        self,
+        coordinator: DataUpdateCoordinator[Dict[str, Any]],
+        device_id: str,
+        device_data: Dict[str, Any],
+        api: MysaApi,
+        entry: ConfigEntry[MysaData],
+        sensor_key: str,
+        translation_key: str
+    ) -> None:
         # TODO: Refactor __init__ to reduce arguments
         """Initialize."""
         super().__init__(coordinator)
@@ -60,24 +84,21 @@ class MysaSwitch(CoordinatorEntity, SwitchEntity):
         self._api = api
         self._entry = entry
         self._device_data = device_data
-        self._attr_name = f"{device_data.get('Name', 'Mysa')} {name_suffix}"
+        self._attr_translation_key = translation_key
         self._attr_unique_id = f"{device_id}_{sensor_key.lower()}"
-        self._pending_state = None
-        self._pending_timestamp = None
+        self._pending_state: Optional[bool] = None
+        self._pending_timestamp: Optional[float] = None
+
     @property
     def device_info(self) -> DeviceInfo:
         """Return device info."""
-        state = self.coordinator.data.get(self._device_id)
-        zone_id = state.get("Zone") if state else None
-        zone_name = self._entry.options.get(f"zone_name_{zone_id}") if zone_id else None
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._device_id)},
-            manufacturer="Mysa",
-            model=self._device_data.get("Model"),
-            suggested_area=zone_name,
-        )
-    def _extract_value(self, state, keys):
+        state = self.coordinator.data.get(self._device_id) if self.coordinator.data else None
+        return MysaDeviceLogic.get_device_info(self._device_id, self._device_data, state)
+
+    def _extract_value(self, state: Optional[Dict[str, Any]], keys: List[str]) -> Any:
         """Helper to extract a value from state dictionary."""
+        if state is None:
+            return None
         for key in keys:
             val = state.get(key)
             if val is not None:
@@ -89,7 +110,7 @@ class MysaSwitch(CoordinatorEntity, SwitchEntity):
                 return val
         return None
 
-    def _get_state_with_pending(self, keys):
+    def _get_state_with_pending(self, keys: List[str]) -> bool:
         """Get boolean state using sticky optimistic logic."""
         if self.coordinator.data is None:
             return self._pending_state or False
@@ -116,111 +137,227 @@ class MysaSwitch(CoordinatorEntity, SwitchEntity):
             return self._pending_state
 
         return current_val if current_val is not None else False
+
+
 class MysaLockSwitch(MysaSwitch):  # TODO: Implement abstract methods
     """Switch for thermostat button lock."""
-    _attr_icon = "mdi:lock"
+
     def __init__(
-        self, coordinator, device_id, device_data, api, entry
-    ):  # TODO: Refactor __init__ to reduce arguments
+        self,
+        coordinator: DataUpdateCoordinator[Dict[str, Any]],
+        device_id: str,
+        device_data: Dict[str, Any],
+        api: MysaApi,
+        entry: ConfigEntry[MysaData]
+    ) -> None:
+        # TODO: Refactor __init__ to reduce arguments
         """Initialize."""
-        super().__init__(coordinator, device_id, device_data, api, entry, "Lock", "Lock")
+        super().__init__(coordinator, device_id, device_data, api, entry, "Lock", "lock")
+
     @property
-    def is_on(self):
+    def is_on(self) -> Optional[bool]:
         """Return true if locked."""
-        return self._get_state_with_pending(["Lock", "ButtonState", "alk", "lk", "lc"])
+        return self._get_state_with_pending(["lk", "alk", "lc", "Lock", "ButtonState"])
+
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Lock the thermostat."""
         self._pending_state = True
         self._pending_timestamp = time.time()
         self.async_write_ha_state()
-        await self._api.set_lock(self._device_id, True)
+        try:
+            await self._api.set_lock(self._device_id, True)
+        except Exception as e:
+            self._pending_state = None
+            self.async_write_ha_state()
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_lock_failed",
+                translation_placeholders={"error": str(e)},
+            ) from e
+
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Unlock the thermostat."""
         self._pending_state = False
         self._pending_timestamp = time.time()
         self.async_write_ha_state()
-        await self._api.set_lock(self._device_id, False)
+        try:
+            await self._api.set_lock(self._device_id, False)
+        except Exception as e:
+            self._pending_state = None
+            self.async_write_ha_state()
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_lock_failed",
+                translation_placeholders={"error": str(e)},
+            ) from e
+
+
 class MysaAutoBrightnessSwitch(MysaSwitch):  # TODO: Implement abstract methods
     """Switch for auto brightness."""
-    _attr_icon = "mdi:brightness-auto"
+
     def __init__(
-        self, coordinator, device_id, device_data, api, entry
-    ):  # TODO: Refactor __init__ to reduce arguments
+        self,
+        coordinator: DataUpdateCoordinator[Dict[str, Any]],
+        device_id: str,
+        device_data: Dict[str, Any],
+        api: MysaApi,
+        entry: ConfigEntry[MysaData]
+    ) -> None:
+        # TODO: Refactor __init__ to reduce arguments
         """Initialize."""
         super().__init__(
             coordinator, device_id, device_data, api, entry, "AutoBrightness",
-            "Auto Brightness"
+            "auto_brightness"
         )
+
     @property
-    def is_on(self):
+    def is_on(self) -> Optional[bool]:
         """Return true if auto brightness is enabled."""
-        return self._get_state_with_pending(["AutoBrightness", "ab"])
+        return self._get_state_with_pending(["ab", "AutoBrightness"])
+
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Enable auto brightness."""
         self._pending_state = True
         self._pending_timestamp = time.time()
         self.async_write_ha_state()
-        await self._api.set_auto_brightness(self._device_id, True)
+        try:
+            await self._api.set_auto_brightness(self._device_id, True)
+        except Exception as e:
+            self._pending_state = None
+            self.async_write_ha_state()
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_auto_brightness_failed",
+                translation_placeholders={"error": str(e)},
+            ) from e
+
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Disable auto brightness."""
         self._pending_state = False
         self._pending_timestamp = time.time()
         self.async_write_ha_state()
-        await self._api.set_auto_brightness(self._device_id, False)
+        try:
+            await self._api.set_auto_brightness(self._device_id, False)
+        except Exception as e:
+            self._pending_state = None
+            self.async_write_ha_state()
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_auto_brightness_failed",
+                translation_placeholders={"error": str(e)},
+            ) from e
+
+
 class MysaProximitySwitch(MysaSwitch):  # TODO: Implement abstract methods
     """Switch for proximity mode (wake on approach)."""
-    _attr_icon = "mdi:motion-sensor"
+
     def __init__(
-        self, coordinator, device_id, device_data, api, entry
-    ):  # TODO: Refactor __init__ to reduce arguments
+        self,
+        coordinator: DataUpdateCoordinator[Dict[str, Any]],
+        device_id: str,
+        device_data: Dict[str, Any],
+        api: MysaApi,
+        entry: ConfigEntry[MysaData]
+    ) -> None:
+        # TODO: Refactor __init__ to reduce arguments
         """Initialize."""
         super().__init__(
             coordinator, device_id, device_data, api, entry, "ProximityMode",
-            "Wake on Approach"
+            "proximity"
         )
+
     @property
-    def is_on(self):
+    def is_on(self) -> Optional[bool]:
         """Return true if proximity mode is enabled."""
-        return self._get_state_with_pending(["ProximityMode", "Proximity", "px", "pr"])
+        return self._get_state_with_pending(["px", "pr", "ProximityMode", "Proximity"])
+
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Enable proximity mode."""
         self._pending_state = True
         self._pending_timestamp = time.time()
         self.async_write_ha_state()
-        await self._api.set_proximity(self._device_id, True)
+        try:
+            await self._api.set_proximity(self._device_id, True)
+        except Exception as e:
+            self._pending_state = None
+            self.async_write_ha_state()
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_proximity_failed",
+                translation_placeholders={"error": str(e)},
+            ) from e
+
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Disable proximity mode."""
         self._pending_state = False
         self._pending_timestamp = time.time()
         self.async_write_ha_state()
-        await self._api.set_proximity(self._device_id, False)
+        try:
+            await self._api.set_proximity(self._device_id, False)
+        except Exception as e:
+            self._pending_state = None
+            self.async_write_ha_state()
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_proximity_failed",
+                translation_placeholders={"error": str(e)},
+            ) from e
+
+
 class MysaClimatePlusSwitch(MysaSwitch):  # TODO: Implement abstract methods
     """Switch for AC Climate+ mode (IsThermostatic).
     When enabled, the Mysa uses its temperature sensor to control the AC.
     When disabled, it acts as a simple IR remote.
     """
-    _attr_icon = "mdi:thermostat-auto"
+
     def __init__(
-        self, coordinator, device_id, device_data, api, entry
-    ):  # TODO: Refactor __init__ to reduce arguments
+        self,
+        coordinator: DataUpdateCoordinator[Dict[str, Any]],
+        device_id: str,
+        device_data: Dict[str, Any],
+        api: MysaApi,
+        entry: ConfigEntry[MysaData]
+    ) -> None:
+        # TODO: Refactor __init__ to reduce arguments
         """Initialize."""
         super().__init__(
             coordinator, device_id, device_data, api, entry, "IsThermostatic",
-            "Climate+"
+            "climate_plus"
         )
+
     @property
-    def is_on(self):
+    def is_on(self) -> Optional[bool]:
         """Return true if Climate+ is enabled."""
-        return self._get_state_with_pending(["IsThermostatic", "it"])
+        return self._get_state_with_pending(["EcoMode", "it", "IsThermostatic"])
+
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Enable Climate+ mode."""
         self._pending_state = True
         self._pending_timestamp = time.time()
         self.async_write_ha_state()
-        await self._api.set_ac_climate_plus(self._device_id, True)
+        try:
+            await self._api.set_ac_climate_plus(self._device_id, True)
+        except Exception as e:
+            self._pending_state = None
+            self.async_write_ha_state()
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_climate_plus_failed",
+                translation_placeholders={"error": str(e)},
+            ) from e
+
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Disable Climate+ mode."""
         self._pending_state = False
         self._pending_timestamp = time.time()
         self.async_write_ha_state()
-        await self._api.set_ac_climate_plus(self._device_id, False)
+        try:
+            await self._api.set_ac_climate_plus(self._device_id, False)
+        except Exception as e:
+            self._pending_state = None
+            self.async_write_ha_state()
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_climate_plus_failed",
+                translation_placeholders={"error": str(e)},
+            ) from e

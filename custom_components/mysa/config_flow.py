@@ -1,5 +1,8 @@
 """Config flow for Mysa integration."""
 # pylint: disable=abstract-method
+# Justification: ConfigFlow inherits abstract methods handled by base class meta-programming.
+# Suppress abstract-method check as we inherit from ConfigFlow but implement
+# only the methods required for this specific implementation.
 from __future__ import annotations
 
 import logging
@@ -11,6 +14,7 @@ from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.core import callback
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import homeassistant.helpers.config_validation as cv
 
 from .const import DOMAIN
@@ -26,7 +30,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 )
 
 
-class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # HA domain arg pattern
     """Handle a config flow for Mysa."""
 
     VERSION = 1
@@ -67,10 +71,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
         )
 
-    async def _validate_credentials(self, username, password):
+    async def _validate_credentials(self, username: str, password: str) -> MysaApi:
         """Validate credentials and return API instance."""
-        api = MysaApi(username, password, self.hass)
-        await api.authenticate()
+        session = async_get_clientsession(self.hass)
+        api = MysaApi(username, password, self.hass, websession=session)
+        # Force authentication against server, skipping cache
+        await api.authenticate(use_cache=False)
         return api
 
     async def async_step_reauth(
@@ -123,12 +129,58 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             ),
             errors=errors,
+            description_placeholders={"username": default_username},
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle reconfiguration."""
+        return await self.async_step_reconfigure_confirm(user_input)
+
+    async def async_step_reconfigure_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle reconfiguration confirmation."""
+        errors: dict[str, str] = {}
+        entry = self._get_reconfigure_entry()
+
+        if user_input is not None:
+            try:
+                # Validate credentials
+                await self._validate_credentials(
+                    user_input[CONF_USERNAME],
+                    user_input[CONF_PASSWORD]
+                )
+
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data={
+                        **entry.data,
+                        CONF_USERNAME: user_input[CONF_USERNAME],
+                        CONF_PASSWORD: user_input[CONF_PASSWORD],
+                    },
+                    reason="reconfigure_successful",
+                )
+            except Exception:
+                _LOGGER.exception("Unexpected exception during reconfigure")
+                errors["base"] = "invalid_auth"
+
+        return self.async_show_form(
+            step_id="reconfigure_confirm",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_USERNAME, default=entry.data[CONF_USERNAME]): str,
+                    vol.Required(CONF_PASSWORD): str,
+                }
+            ),
+            errors=errors,
         )
 
 
 class MysaOptionsFlowHandler(
     config_entries.OptionsFlow
-):  # TODO: Add more public methods or refactor
+):
     """Handle options flow for Mysa."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
@@ -144,12 +196,16 @@ class MysaOptionsFlowHandler(
 
         api = None
         try:
-            api = self.hass.data[DOMAIN][self._config_entry.entry_id]["api"]
+            # Use runtime_data as migrated in __init__.py
+            # Entry type is ConfigEntry[MysaData]
+            # Since ConfigEntry generic might be erased at runtime or mypy incomplete,
+            # we access assuming structure.
+            # However property access to runtime_data might fail
+            # type check if config_entry is generic Any.
+            api = self._config_entry.runtime_data.api
             devices = api.devices
-            zones = api.zones
-        except (KeyError, AttributeError):
+        except (AttributeError, KeyError):
             devices = {}
-            zones = {}
 
         device_options = {
             d_id: f"{d_data.get('Name', d_id)} ({d_id})"
@@ -157,7 +213,7 @@ class MysaOptionsFlowHandler(
         }
 
         # Build schema
-        schema_dict = {
+        schema_dict: dict[Any, Any] = {
             vol.Optional(
                 "simulated_energy",
                 default=self._config_entry.options.get("simulated_energy", False)
@@ -182,21 +238,6 @@ class MysaOptionsFlowHandler(
                             description=f"Wattage for {name}"
                         )
                     ] = vol.All(vol.Coerce(int), vol.Range(min=0, max=5000))
-
-        # Add zone renaming
-        # zones is a dict: {'123': 'Living Room'}
-        for z_id, z_name in zones.items():
-            if z_id:
-                key = f"zone_name_{z_id}"
-                current_val = self._config_entry.options.get(key, z_name)
-                # Use default instead of suggested_value to allow using description for label
-                schema_dict[
-                    vol.Optional(
-                        key,
-                        default=current_val,
-                        description=f"Rename Zone: {z_name}"
-                    )
-                ] = str
 
         return self.async_show_form(
             step_id="init",

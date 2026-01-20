@@ -13,12 +13,15 @@ TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(TEST_DIR)
 sys.path.insert(0, ROOT_DIR)
 
+from typing import Any
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 # Module-level imports after path setup
 from custom_components.mysa.const import DOMAIN
+from custom_components.mysa import MysaData
 
 
 # ===========================================================================
@@ -133,9 +136,10 @@ class TestNumberSetup:
         """Test number entities are created."""
         from custom_components.mysa.number import async_setup_entry
 
-        hass.data[DOMAIN] = {
-            "test_entry": {"coordinator": MagicMock(), "api": mock_api}
-        }
+        mock_data = MagicMock(spec=MysaData)
+        mock_data.coordinator = MagicMock()
+        mock_data.api = mock_api
+        mock_entry.runtime_data = mock_data
 
         entities = []
         async_add_entities = MagicMock(side_effect=lambda e: entities.extend(e))
@@ -243,9 +247,10 @@ class TestSwitchSetup:
         """Test switch entities are created."""
         from custom_components.mysa.switch import async_setup_entry
 
-        hass.data[DOMAIN] = {
-            "test_entry": {"coordinator": MagicMock(), "api": mock_api}
-        }
+        mock_data = MagicMock(spec=MysaData)
+        mock_data.coordinator = MagicMock()
+        mock_data.api = mock_api
+        mock_entry.runtime_data = mock_data
 
         entities = []
         async_add_entities = MagicMock(side_effect=lambda e: entities.extend(e))
@@ -462,9 +467,10 @@ class TestSelectSetup:
         )
         mock_api.is_ac_device = MagicMock(return_value=True)
 
-        hass.data[DOMAIN] = {
-            "test_entry": {"coordinator": MagicMock(), "api": mock_api}
-        }
+        mock_data = MagicMock(spec=MysaData)
+        mock_data.coordinator = MagicMock()
+        mock_data.api = mock_api
+        mock_entry.runtime_data = mock_data
 
         entities = []
         async_add_entities = MagicMock(side_effect=lambda e: entities.extend(e))
@@ -486,9 +492,10 @@ class TestSelectSetup:
         )
         mock_api.is_ac_device = MagicMock(return_value=False)
 
-        hass.data[DOMAIN] = {
-            "test_entry": {"coordinator": MagicMock(), "api": mock_api}
-        }
+        mock_data = MagicMock(spec=MysaData)
+        mock_data.coordinator = MagicMock()
+        mock_data.api = mock_api
+        mock_entry.runtime_data = mock_data
 
         async_add_entities = MagicMock()
 
@@ -595,7 +602,9 @@ class TestUpdateSetup:
         """Test update entities are created."""
         from custom_components.mysa.update import async_setup_entry
 
-        hass.data[DOMAIN] = {"test_entry": {"api": mock_api}}
+        mock_data = MagicMock(spec=MysaData)
+        mock_data.api = mock_api
+        mock_entry.runtime_data = mock_data
 
         async_add_entities = MagicMock()
 
@@ -622,7 +631,8 @@ class TestMysaUpdate:
         entity = MysaUpdate(mock_api, "device1", device_data)
 
         assert entity._attr_installed_version == "1.2.3"
-        assert entity._attr_name == "Living Room Firmware"
+        # Name should be just "Firmware" as has_entity_name=True
+        assert entity._attr_translation_key == "firmware"
 
     @pytest.mark.asyncio
     async def test_async_update_success(self, hass, mock_api):
@@ -708,7 +718,7 @@ class TestNumberEdgeCases:
         )
 
         info = entity.device_info
-        assert info.get("suggested_area") == "Living Room Zone"
+        assert "suggested_area" not in info
 
     @pytest.mark.asyncio
     async def test_extract_value_with_id_key(
@@ -795,7 +805,7 @@ class TestSwitchEdgeCases:
         )
 
         info = entity.device_info
-        assert info.get("suggested_area") == "Kitchen Zone"
+        assert "suggested_area" not in info
 
     @pytest.mark.asyncio
     async def test_extract_value_with_id_key(
@@ -874,7 +884,7 @@ class TestSelectEdgeCases:
         )
 
         info = entity.device_info
-        assert info.get("suggested_area") == "Bedroom Zone"
+        assert "suggested_area" not in info
 
     @pytest.mark.asyncio
     async def test_current_option_with_dict_value(
@@ -932,8 +942,10 @@ class TestSelectEdgeCases:
         )
         entity.async_write_ha_state = MagicMock()
 
-        # Should not raise, just log error
-        await entity.async_select_option("auto")
+        # Should raise HomeAssistantError
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await entity.async_select_option("auto")
+        assert excinfo.value.translation_key == "set_horizontal_swing_failed"
 
         # Pending should be cleared on error
         assert entity._pending_option is None
@@ -1141,7 +1153,7 @@ class TestFinalEdgeCases:
         device_id = "device1"
         locked = True
 
-        command = {
+        command: dict[str, Any] = {
             "did": device_id,
             "cmd": [{"lk": 1 if locked else 0}],
         }
@@ -1217,7 +1229,7 @@ class TestBrightnessNumber:
         device_id = "device1"
         brightness = 80
 
-        command = {
+        command: dict[str, Any] = {
             "did": device_id,
             "cmd": [{"br": brightness}],
         }
@@ -1295,7 +1307,7 @@ class TestMysaNumberEntities:
         )
 
         assert entity._device_id == "device1"
-        assert "Minimum Brightness" in entity._attr_name
+        assert entity._attr_translation_key == "min_brightness"
         assert entity._attr_unique_id == "device1_minbrightness"
 
     @pytest.mark.asyncio
@@ -1358,7 +1370,7 @@ class TestMysaNumberEntities:
         )
 
         assert entity._device_id == "device1"
-        assert "Maximum Brightness" in entity._attr_name
+        assert entity._attr_translation_key == "max_brightness"
 
     @pytest.mark.asyncio
     async def test_max_brightness_set_value(
@@ -1409,8 +1421,8 @@ class TestMysaSwitchEntities:
         )
 
         assert entity._device_id == "device1"
-        assert "Lock" in entity._attr_name
-        assert entity._attr_icon == "mdi:lock"
+        assert entity._attr_translation_key == "lock"
+        assert entity._attr_translation_key == "lock"
 
     @pytest.mark.asyncio
     async def test_lock_switch_is_on(
@@ -1492,8 +1504,8 @@ class TestMysaSwitchEntities:
             mock_entry,
         )
 
-        assert "Auto Brightness" in entity._attr_name
-        assert entity._attr_icon == "mdi:brightness-auto"
+        assert entity._attr_translation_key == "auto_brightness"
+        assert entity._attr_translation_key == "auto_brightness"
 
     @pytest.mark.asyncio
     async def test_proximity_switch_init(
@@ -1512,8 +1524,8 @@ class TestMysaSwitchEntities:
             mock_entry,
         )
 
-        assert "Wake on Approach" in entity._attr_name
-        assert entity._attr_icon == "mdi:motion-sensor"
+        assert entity._attr_translation_key == "proximity"
+        assert entity._attr_translation_key == "proximity"
 
     @pytest.mark.asyncio
     async def test_climate_plus_switch_init(
@@ -1532,7 +1544,7 @@ class TestMysaSwitchEntities:
             mock_entry,
         )
 
-        assert "Climate+" in entity._attr_name
+        assert entity._attr_translation_key == "climate_plus"
 
 
 # ===========================================================================
@@ -1561,7 +1573,7 @@ class TestMysaSelectEntities:
         )
 
         assert entity._device_id == "device1"
-        assert "Horizontal Swing" in entity._attr_name
+        assert entity._attr_translation_key == "horizontal_swing"
 
     @pytest.mark.asyncio
     async def test_horizontal_swing_options(
@@ -1649,7 +1661,7 @@ class TestMysaSensorEntities:
             "device1",
             mock_device_data,
             "DutyCycle",
-            "Duty Cycle",
+            "duty_cycle",
             "%",
             None,
             None,
@@ -1657,7 +1669,7 @@ class TestMysaSensorEntities:
         )
 
         assert entity._device_id == "device1"
-        assert "Duty Cycle" in entity._attr_name
+        assert entity._attr_translation_key == "duty_cycle"
 
     @pytest.mark.asyncio
     async def test_diagnostic_sensor_value(
@@ -1673,7 +1685,7 @@ class TestMysaSensorEntities:
             "device1",
             mock_device_data,
             "DutyCycle",
-            "Duty Cycle",
+            "duty_cycle",
             "%",
             None,
             None,
@@ -1683,23 +1695,7 @@ class TestMysaSensorEntities:
         value = entity.native_value
         assert value == 50
 
-    @pytest.mark.asyncio
-    async def test_zone_sensor_init(
-        self, hass, mock_coordinator, mock_device_data, mock_api
-    ):
-        """Test MysaZoneSensor instantiation."""
-        from custom_components.mysa.sensor import MysaZoneSensor
 
-        await mock_coordinator.async_refresh()
-
-        entity = MysaZoneSensor(
-            mock_coordinator,
-            "device1",
-            mock_device_data,
-            mock_api,
-        )
-
-        assert entity._device_id == "device1"
 
     @pytest.mark.asyncio
     async def test_simulated_current_sensor_init(
@@ -1721,7 +1717,7 @@ class TestMysaSensorEntities:
         )
 
         assert entity._device_id == "device1"
-        assert "Estimated Current" in entity._attr_name
+        assert entity._attr_translation_key == "estimated_current"
 
     @pytest.mark.asyncio
     async def test_simulated_power_sensor_init(
@@ -1743,7 +1739,7 @@ class TestMysaSensorEntities:
         )
 
         assert entity._device_id == "device1"
-        assert "Power" in entity._attr_name
+        assert entity._attr_translation_key == "power"
 
 
 # ===========================================================================
@@ -1766,7 +1762,7 @@ class TestMysaUpdateEntities:
         )
 
         assert entity._device_id == "device1"
-        assert "Firmware" in entity._attr_name
+        assert entity._attr_translation_key == "firmware"
         assert entity._attr_installed_version == "1.2.3"
 
     @pytest.mark.asyncio
@@ -1780,7 +1776,7 @@ class TestMysaUpdateEntities:
             mock_device_data,
         )
 
-        device_info = entity._attr_device_info
+        device_info = entity.device_info
         # DeviceInfo is a NamedTuple-like object
         assert (DOMAIN, "device1") in device_info["identifiers"]
 
@@ -2238,3 +2234,127 @@ class TestClimateEntityAsync:
             await entity.async_set_hvac_mode(HVACMode.HEAT)
 
             mock_api.set_hvac_mode.assert_called_once()
+
+class TestSwitchExceptions:
+    """Test exception handling for switches."""
+
+    @pytest.mark.asyncio
+    async def test_lock_switch_exception(self, hass, mock_coordinator, mock_device_data, mock_api, mock_entry):
+        """Test MysaLockSwitch exception handling."""
+        from custom_components.mysa.switch import MysaLockSwitch
+
+        entity = MysaLockSwitch(mock_coordinator, "device1", mock_device_data, mock_api, mock_entry)
+        entity.async_write_ha_state = MagicMock()
+
+        # Turn On Exception
+        mock_api.set_lock.side_effect = Exception("API Error")
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await entity.async_turn_on()
+        assert excinfo.value.translation_key == "set_lock_failed"
+        assert entity._pending_state is None
+
+        # Turn Off Exception
+        mock_api.set_lock.side_effect = Exception("API Error")
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await entity.async_turn_off()
+        assert excinfo.value.translation_key == "set_lock_failed"
+        assert entity._pending_state is None
+
+    @pytest.mark.asyncio
+    async def test_auto_brightness_switch_exception(self, hass, mock_coordinator, mock_device_data, mock_api, mock_entry):
+        """Test MysaAutoBrightnessSwitch exception handling."""
+        from custom_components.mysa.switch import MysaAutoBrightnessSwitch
+
+        entity = MysaAutoBrightnessSwitch(mock_coordinator, "device1", mock_device_data, mock_api, mock_entry)
+        entity.async_write_ha_state = MagicMock()
+
+        # Turn On Exception
+        mock_api.set_auto_brightness.side_effect = Exception("API Error")
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await entity.async_turn_on()
+        assert excinfo.value.translation_key == "set_auto_brightness_failed"
+        assert entity._pending_state is None
+
+        # Turn Off Exception
+        mock_api.set_auto_brightness.side_effect = Exception("API Error")
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await entity.async_turn_off()
+        assert excinfo.value.translation_key == "set_auto_brightness_failed"
+        assert entity._pending_state is None
+
+    @pytest.mark.asyncio
+    async def test_proximity_switch_exception(self, hass, mock_coordinator, mock_device_data, mock_api, mock_entry):
+        """Test MysaProximitySwitch exception handling."""
+        from custom_components.mysa.switch import MysaProximitySwitch
+
+        entity = MysaProximitySwitch(mock_coordinator, "device1", mock_device_data, mock_api, mock_entry)
+        entity.async_write_ha_state = MagicMock()
+
+        # Turn On Exception
+        mock_api.set_proximity.side_effect = Exception("API Error")
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await entity.async_turn_on()
+        assert excinfo.value.translation_key == "set_proximity_failed"
+        assert entity._pending_state is None
+
+        # Turn Off Exception
+        mock_api.set_proximity.side_effect = Exception("API Error")
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await entity.async_turn_off()
+        assert excinfo.value.translation_key == "set_proximity_failed"
+        assert entity._pending_state is None
+
+    @pytest.mark.asyncio
+    async def test_climate_plus_switch_exception(self, hass, mock_coordinator, mock_ac_device_data, mock_api, mock_entry):
+        """Test MysaClimatePlusSwitch exception handling."""
+        from custom_components.mysa.switch import MysaClimatePlusSwitch
+
+        entity = MysaClimatePlusSwitch(mock_coordinator, "ac_device", mock_ac_device_data, mock_api, mock_entry)
+        entity.async_write_ha_state = MagicMock()
+
+        # Turn On Exception
+        mock_api.set_ac_climate_plus.side_effect = Exception("API Error")
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await entity.async_turn_on()
+        assert excinfo.value.translation_key == "set_climate_plus_failed"
+        assert entity._pending_state is None
+
+        # Turn Off Exception
+        mock_api.set_ac_climate_plus.side_effect = Exception("API Error")
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await entity.async_turn_off()
+        assert excinfo.value.translation_key == "set_climate_plus_failed"
+        assert entity._pending_state is None
+
+class TestNumberExceptions:
+    """Test exception handling for number entities."""
+
+    @pytest.mark.asyncio
+    async def test_min_brightness_exception(self, hass, mock_coordinator, mock_device_data, mock_api, mock_entry):
+        """Test MysaMinBrightnessNumber exception handling."""
+        from custom_components.mysa.number import MysaMinBrightnessNumber
+
+        entity = MysaMinBrightnessNumber(mock_coordinator, "device1", mock_device_data, mock_api, mock_entry)
+        entity.async_write_ha_state = MagicMock()
+
+        # Set Value Exception
+        mock_api.set_min_brightness.side_effect = Exception("API Error")
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await entity.async_set_native_value(50.0)
+        assert excinfo.value.translation_key == "set_min_brightness_failed"
+        assert entity._pending_value is None
+
+    @pytest.mark.asyncio
+    async def test_max_brightness_exception(self, hass, mock_coordinator, mock_device_data, mock_api, mock_entry):
+        """Test MysaMaxBrightnessNumber exception handling."""
+        from custom_components.mysa.number import MysaMaxBrightnessNumber
+
+        entity = MysaMaxBrightnessNumber(mock_coordinator, "device1", mock_device_data, mock_api, mock_entry)
+        entity.async_write_ha_state = MagicMock()
+
+        # Set Value Exception
+        mock_api.set_max_brightness.side_effect = Exception("API Error")
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await entity.async_set_native_value(50.0)
+        assert excinfo.value.translation_key == "set_max_brightness_failed"
+        assert entity._pending_value is None

@@ -21,6 +21,7 @@ from homeassistant.const import EntityCategory
 
 # Module-level imports after path setup
 from custom_components.mysa.const import DOMAIN
+from custom_components.mysa import MysaData
 from custom_components.mysa.sensor import (
     MysaDiagnosticSensor,
     MysaPowerSensor,
@@ -163,7 +164,7 @@ class TestMysaDiagnosticSensorInit:
             "device1",
             mock_device_data,
             "Rssi",
-            "RSSI",
+            "rssi",
             SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
             SensorStateClass.MEASUREMENT,
             SensorDeviceClass.SIGNAL_STRENGTH,
@@ -171,7 +172,7 @@ class TestMysaDiagnosticSensorInit:
         )
 
         assert entity._device_id == "device1"
-        assert "RSSI" in entity._attr_name
+        assert entity._attr_translation_key == "rssi"
 
     @pytest.mark.asyncio
     async def test_duty_sensor_init(
@@ -188,14 +189,14 @@ class TestMysaDiagnosticSensorInit:
             "device1",
             mock_device_data,
             "Duty",
-            "Duty Cycle",
+            "duty_cycle",
             PERCENTAGE,
             SensorStateClass.MEASUREMENT,
             None,
             mock_entry,
         )
 
-        assert "Duty Cycle" in entity._attr_name
+        assert entity._attr_translation_key == "duty_cycle"
         assert entity._attr_entity_category == EntityCategory.DIAGNOSTIC
 
 
@@ -381,95 +382,12 @@ class TestMysaDiagnosticSensorProperties:
         attrs = sensor_entity.extra_state_attributes
 
         assert "device_id" in attrs
-        assert "zone_id" in attrs
 
 
-# ===========================================================================
-# MysaZoneSensor Tests
-# ===========================================================================
 
 
-class TestMysaZoneSensor:
-    """Test MysaZoneSensor."""
 
-    @pytest.mark.asyncio
-    async def test_zone_sensor_init(
-        self, hass, mock_coordinator, mock_device_data, mock_api
-    ):
-        """Test MysaZoneSensor initialization."""
-        from custom_components.mysa.sensor import MysaZoneSensor
 
-        await mock_coordinator.async_refresh()
-
-        entity = MysaZoneSensor(
-            mock_coordinator,
-            "device1",
-            mock_device_data,
-            mock_api,
-        )
-
-        assert entity._device_id == "device1"
-        assert "Zone" in entity._attr_name
-
-    @pytest.mark.asyncio
-    async def test_zone_sensor_value(
-        self, hass, mock_coordinator, mock_device_data, mock_api
-    ):
-        """Test MysaZoneSensor native_value."""
-        from custom_components.mysa.sensor import MysaZoneSensor
-
-        await mock_coordinator.async_refresh()
-
-        entity = MysaZoneSensor(
-            mock_coordinator,
-            "device1",
-            mock_device_data,
-            mock_api,
-        )
-
-        value = entity.native_value
-
-        assert value == "Living Room Zone"
-
-    @pytest.mark.asyncio
-    async def test_zone_sensor_device_info(
-        self, hass, mock_coordinator, mock_device_data, mock_api
-    ):
-        """Test MysaZoneSensor device_info."""
-        from custom_components.mysa.sensor import MysaZoneSensor
-
-        await mock_coordinator.async_refresh()
-
-        entity = MysaZoneSensor(
-            mock_coordinator,
-            "device1",
-            mock_device_data,
-            mock_api,
-        )
-
-        info = entity.device_info
-
-        assert "identifiers" in info
-
-    @pytest.mark.asyncio
-    async def test_zone_sensor_extra_attributes(
-        self, hass, mock_coordinator, mock_device_data, mock_api
-    ):
-        """Test MysaZoneSensor extra_state_attributes."""
-        from custom_components.mysa.sensor import MysaZoneSensor
-
-        await mock_coordinator.async_refresh()
-
-        entity = MysaZoneSensor(
-            mock_coordinator,
-            "device1",
-            mock_device_data,
-            mock_api,
-        )
-
-        attrs = entity.extra_state_attributes
-
-        assert "zone_id" in attrs
 
 
 # ===========================================================================
@@ -500,7 +418,8 @@ class TestMysaCurrentSensor:
         )
 
         assert entity._device_id == "lite_device"
-        assert "Estimated Current" in entity._attr_name
+        assert entity._attr_translation_key == "estimated_current"
+        assert entity._attr_state_class == SensorStateClass.MEASUREMENT
 
     @pytest.mark.asyncio
     async def test_simulated_current_value(
@@ -604,7 +523,8 @@ class TestMysaPowerSensor:
         )
 
         assert entity._device_id == "lite_device"
-        assert "Power" in entity._attr_name
+        assert entity._attr_translation_key == "power"
+        assert entity._attr_state_class == SensorStateClass.MEASUREMENT
 
     @pytest.mark.asyncio
     async def test_simulated_power_value(
@@ -706,7 +626,7 @@ class TestMysaElectricityRateSensor:
         )
 
         assert entity._device_id == "device1"
-        assert "Electricity Rate" in entity._attr_name
+        assert entity._attr_translation_key == "cost"
         assert entity._attr_entity_category == EntityCategory.DIAGNOSTIC
         assert entity.native_unit_of_measurement == "$/kWh"
 
@@ -840,9 +760,10 @@ class TestSensorSetup:
 
         await mock_coordinator.async_refresh()
 
-        hass.data[DOMAIN] = {
-            "test_entry_id": {"coordinator": mock_coordinator, "api": mock_api}
-        }
+        mock_data = MagicMock(spec=MysaData)
+        mock_data.coordinator = mock_coordinator
+        mock_data.api = mock_api
+        mock_entry.runtime_data = mock_data
 
         entities = []
         async_add_entities = MagicMock(side_effect=lambda e: entities.extend(e))
@@ -853,20 +774,7 @@ class TestSensorSetup:
         # Many sensors created for each device
         assert len(entities) > 10
 
-    @pytest.mark.asyncio
-    async def test_async_setup_entry_no_data(self, hass, mock_entry):
-        """Test setup handles missing data gracefully."""
-        from custom_components.mysa.sensor import async_setup_entry
 
-        hass.data[DOMAIN] = {}  # No entry data
-
-        async_add_entities = MagicMock()
-
-        # Should not raise, just log error and return
-        await async_setup_entry(hass, mock_entry, async_add_entities)
-
-        # async_add_entities should NOT be called
-        assert not async_add_entities.called
 
     @pytest.mark.asyncio
     async def test_async_setup_entry_heating_sensors(
@@ -888,9 +796,10 @@ class TestSensorSetup:
         )
         mock_api.is_ac_device = MagicMock(return_value=False)
 
-        hass.data[DOMAIN] = {
-            "test_entry_id": {"coordinator": mock_coordinator, "api": mock_api}
-        }
+        mock_data = MagicMock(spec=MysaData)
+        mock_data.coordinator = mock_coordinator
+        mock_data.api = mock_api
+        mock_entry.runtime_data = mock_data
 
         entities = []
         async_add_entities = MagicMock(side_effect=lambda e: entities.extend(e))
@@ -931,9 +840,10 @@ class TestSensorSetup:
         )
         mock_api.is_ac_device = MagicMock(return_value=False)
 
-        hass.data[DOMAIN] = {
-            "test_entry_id": {"coordinator": coordinator, "api": mock_api}
-        }
+        mock_data = MagicMock(spec=MysaData)
+        mock_data.coordinator = coordinator
+        mock_data.api = mock_api
+        mock_entry.runtime_data = mock_data
 
         entities = []
         async_add_entities = MagicMock(side_effect=lambda e: entities.extend(e))
@@ -976,9 +886,10 @@ class TestSensorSetup:
         )
         mock_api.is_ac_device = MagicMock(return_value=False)
 
-        hass.data[DOMAIN] = {
-            "test_entry_id": {"coordinator": mock_coordinator, "api": mock_api}
-        }
+        mock_data = MagicMock(spec=MysaData)
+        mock_data.coordinator = mock_coordinator
+        mock_data.api = mock_api
+        mock_entry.runtime_data = mock_data
 
         entities = []
         async_add_entities = MagicMock(side_effect=lambda e: entities.extend(e))
@@ -1007,9 +918,10 @@ class TestSensorSetup:
         )
         mock_api.is_ac_device = MagicMock(return_value=True)
 
-        hass.data[DOMAIN] = {
-            "test_entry_id": {"coordinator": mock_coordinator, "api": mock_api}
-        }
+        mock_data = MagicMock(spec=MysaData)
+        mock_data.coordinator = mock_coordinator
+        mock_data.api = mock_api
+        mock_entry.runtime_data = mock_data
 
         entities = []
         async_add_entities = MagicMock(side_effect=lambda e: entities.extend(e))
@@ -1026,28 +938,7 @@ class TestSensorSetup:
 class TestSensorEdgeCases:
     """Test sensor entity edge cases."""
 
-    @pytest.mark.asyncio
-    async def test_zone_sensor_no_zone(self, hass, mock_entry):
-        """Test zone sensor when zone is None."""
-        from custom_components.mysa.sensor import MysaZoneSensor
 
-        async def async_update():
-            return {"device1": {}}  # No Zone key
-
-        coordinator = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
-        )
-        await coordinator.async_refresh()
-
-        mock_api = MagicMock()
-        mock_api.get_zone_name = MagicMock(return_value=None)
-
-        device_data = {"Id": "device1", "Name": "Test", "Model": "BB-V2"}
-        entity = MysaZoneSensor(coordinator, "device1", device_data, mock_api)
-
-        # Should return None or "Unassigned"
-        value = entity.native_value
-        assert value is None or value == "Unassigned"
 
     @pytest.mark.asyncio
     async def test_diagnostic_sensor_duty_normalization(self, hass, mock_entry):
@@ -1130,16 +1021,16 @@ class TestSensorFinalEdgeCases:
     """Final edge cases for sensor.py."""
 
     @pytest.mark.asyncio
-    async def test_diagnostic_sensor_zone_name_present(self, hass, mock_entry):
-        """Test device_info includes zone_name when configured."""
+    async def test_diagnostic_sensor_no_zone_name(self, hass, mock_entry):
+        """Test device_info does NOT include zone_name."""
         from custom_components.mysa.sensor import MysaDiagnosticSensor
 
         async def async_update():
-            return {"device1": {"Zone": "zone123", "Rssi": -65}}
+            return {"device1": {"Rssi": -65}}
 
         entry = MagicMock()
         entry.entry_id = "test"
-        entry.options = {"zone_name_zone123": "Kitchen"}
+        entry.options = {}
 
         coordinator = DataUpdateCoordinator(
             hass, MagicMock(), name="test", update_method=async_update, config_entry=entry
@@ -1160,7 +1051,7 @@ class TestSensorFinalEdgeCases:
         )
 
         info = entity.device_info
-        assert info.get("suggested_area") == "Kitchen"
+        assert "suggested_area" not in info
 
     @pytest.mark.asyncio
     async def test_diagnostic_sensor_no_state(self, hass, mock_entry):
@@ -1280,24 +1171,7 @@ class TestSensorFinalEdgeCases:
         val = entity._extract_value(state, ["NonExistent"])
         assert val is None
 
-    @pytest.mark.asyncio
-    async def test_zone_sensor_no_zone_id(self, hass, mock_api):
-        """Test zone sensor returns Unassigned when no zone_id."""
-        from custom_components.mysa.sensor import MysaZoneSensor
 
-        async def async_update():
-            return {"device1": {"SomeOther": 123}}  # No Zone key
-
-        coordinator = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=MagicMock(entry_id="test")
-        )
-        await coordinator.async_refresh()
-
-        device_data = {"Id": "device1", "Name": "Test", "Model": "BB-V2"}
-        entity = MysaZoneSensor(coordinator, "device1", device_data, mock_api)
-
-        # Line 257
-        assert entity.native_value == "Unassigned"
 
     @pytest.mark.asyncio
     async def test_simulated_current_no_duty(self, hass, mock_entry, mock_api):
@@ -1704,6 +1578,8 @@ class TestSensorCoverage:
         sensor = MysaEnergySensor(
             mock_coordinator, "device1", device_data, MagicMock(), mock_config_entry, mock_power_sensor
         )
+        sensor.hass = hass
+        sensor.platform = MagicMock()
 
         # Allow setting private attributes for testing
         sensor.hass = hass
@@ -1835,3 +1711,373 @@ class TestSensorCoverage:
         sensor = MysaCurrentSensor(mock_coordinator, "device1", device_data, MagicMock(), mock_config_entry)
 
         assert sensor.native_value == 0.0
+
+# ===========================================================================
+# MysaTemperatureSensor Tests
+# ===========================================================================
+
+
+class TestMysaTemperatureSensor:
+    """Test MysaTemperatureSensor."""
+
+    @pytest.mark.asyncio
+    async def test_temperature_sensor_init(
+        self, hass, mock_coordinator, mock_device_data, mock_api, mock_entry
+    ):
+        """Test MysaTemperatureSensor initialization."""
+        from custom_components.mysa.sensor import MysaTemperatureSensor
+
+        await mock_coordinator.async_refresh()
+
+        entity = MysaTemperatureSensor(
+            mock_coordinator,
+            "device1",
+            mock_device_data,
+            mock_api,
+            mock_entry
+        )
+
+        assert entity._device_id == "device1"
+        assert entity._attr_translation_key == "temperature"
+        assert entity.native_unit_of_measurement == "°C"
+
+    @pytest.mark.asyncio
+    async def test_temperature_sensor_value(
+        self, hass, mock_coordinator, mock_device_data, mock_api, mock_entry
+    ):
+        """Test MysaTemperatureSensor native_value."""
+        from custom_components.mysa.sensor import MysaTemperatureSensor
+
+        # Helper to set data
+        async def async_update():
+            return mock_coordinator.data
+
+        # Case 1: ambTemp (direct float)
+        mock_coordinator.data = {"device1": {"ambTemp": 22.5}}
+        entity = MysaTemperatureSensor(mock_coordinator, "device1", mock_device_data, mock_api, mock_entry)
+        assert entity.native_value == 22.5
+
+        # Case 2: SensorTemp (dict with 'v')
+        mock_coordinator.data = {"device1": {"SensorTemp": {"v": "23.5", "t": 123}}}
+        assert entity.native_value == 23.5
+
+        # Case 3: CorrectedTemp (direct)
+        mock_coordinator.data = {"device1": {"CorrectedTemp": 24.0}}
+        assert entity.native_value == 24.0
+
+        # Case 4: None
+        mock_coordinator.data = {"device1": {}}
+        assert entity.native_value is None
+
+        # Case 5: Priority Check (CorrectedTemp vs ambTemp)
+        mock_coordinator.data = {"device1": {"ambTemp": 20.0, "CorrectedTemp": 21.0}}
+        assert entity.native_value == 21.0
+
+        # Case 6: Coordinator data None
+        mock_coordinator.data = None
+        assert entity.native_value is None
+
+
+        # Case 6: Invalid ambTemp
+        mock_coordinator.data = {"device1": {"ambTemp": "invalid"}}
+        assert entity.native_value is None
+
+        # Case 7: Invalid SensorTemp
+        mock_coordinator.data = {"device1": {"SensorTemp": {"v": "invalid", "t": 123}}}
+        assert entity.native_value is None
+
+
+# ===========================================================================
+# MysaHumiditySensor Tests
+# ===========================================================================
+
+
+class TestMysaHumiditySensor:
+    """Test MysaHumiditySensor."""
+
+    @pytest.mark.asyncio
+    async def test_humidity_sensor_init(
+        self, hass, mock_coordinator, mock_device_data, mock_api, mock_entry
+    ):
+        """Test MysaHumiditySensor initialization."""
+        from custom_components.mysa.sensor import MysaHumiditySensor
+
+        await mock_coordinator.async_refresh()
+
+        entity = MysaHumiditySensor(
+            mock_coordinator,
+            "device1",
+            mock_device_data,
+            mock_api,
+            mock_entry
+        )
+
+        assert entity._device_id == "device1"
+        assert entity._attr_translation_key == "humidity"
+        assert entity.native_unit_of_measurement == "%"
+
+    @pytest.mark.asyncio
+    async def test_humidity_sensor_value(
+        self, hass, mock_coordinator, mock_device_data, mock_api, mock_entry
+    ):
+        """Test MysaHumiditySensor native_value."""
+        from custom_components.mysa.sensor import MysaHumiditySensor
+
+        # Case 1: hum (direct)
+        mock_coordinator.data = {"device1": {"hum": 45.0}}
+        entity = MysaHumiditySensor(mock_coordinator, "device1", mock_device_data, mock_api, mock_entry)
+        assert entity.native_value == 45.0
+
+        # Case 2: Humidity (dict)
+        mock_coordinator.data = {"device1": {"Humidity": {"v": "50", "t": 123}}}
+        assert entity.native_value == 50.0
+
+        # Case 3: None
+        mock_coordinator.data = {"device1": {}}
+        assert entity.native_value is None
+
+        # Case 4: Coordinator data None
+        mock_coordinator.data = None
+        assert entity.native_value is None
+
+        # Case 5: Invalid hum
+        mock_coordinator.data = {"device1": {"hum": "invalid"}}
+        assert entity.native_value is None
+
+        # Case 6: Invalid Humidity
+        mock_coordinator.data = {"device1": {"Humidity": {"v": "invalid", "t": 123}}}
+        assert entity.native_value is None
+
+# ===========================================================================
+# State Class Tests
+# ===========================================================================
+
+
+class TestSensorStateClass:
+    """Test sensor state class."""
+
+    @pytest.mark.asyncio
+    async def test_temperature_sensor_state_class(
+        self, hass, mock_coordinator, mock_device_data, mock_api, mock_entry
+    ):
+        """Test that MysaTemperatureSensor has the correct state_class."""
+        from custom_components.mysa.sensor import MysaTemperatureSensor
+
+        await mock_coordinator.async_refresh()
+
+        entity = MysaTemperatureSensor(
+            mock_coordinator,
+            "device1",
+            mock_device_data,
+            mock_api,
+            mock_entry,
+        )
+
+        assert entity.state_class == SensorStateClass.MEASUREMENT
+
+    @pytest.mark.asyncio
+    async def test_humidity_sensor_state_class(
+        self, hass, mock_coordinator, mock_device_data, mock_api, mock_entry
+    ):
+        """Test that MysaHumiditySensor has the correct state_class."""
+        from custom_components.mysa.sensor import MysaHumiditySensor
+
+        await mock_coordinator.async_refresh()
+
+        entity = MysaHumiditySensor(
+            mock_coordinator,
+            "device1",
+            mock_device_data,
+            mock_api,
+            mock_entry,
+        )
+
+        assert entity.state_class == SensorStateClass.MEASUREMENT
+
+# ===========================================================================
+# Merged Device Info, Diagnostics, and Edge Case Tests
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_sensor_device_info_zone_name(hass, mock_coordinator, mock_api, mock_entry):
+    """Test device_info picks up zone name from options."""
+    from custom_components.mysa.sensor import (
+        MysaEnergySensor,
+        MysaElectricityRateSensor,
+        MysaIpSensor,
+        MysaTemperatureSensor,
+        MysaHumiditySensor
+    )
+
+    # Mock data with Zone ID
+    mock_coordinator.data = {"device1": {"Zone": "ZONE123"}}
+
+    device_id = "device1"
+    device_data = {"Name": "Test Device", "Model": "BB-V1"}
+
+    mock_entry.options = {"zone_name_ZONE123": "Living Room"}
+
+    # 1. MysaEnergySensor
+    power_sensor = MagicMock()
+    energy_sensor = MysaEnergySensor(mock_coordinator, device_id, device_data, mock_api, mock_entry, power_sensor)
+    info = energy_sensor.device_info
+    assert "suggested_area" not in info
+
+    # 2. MysaElectricityRateSensor
+    rate_sensor = MysaElectricityRateSensor(mock_coordinator, device_id, device_data, mock_api, mock_entry)
+    info = rate_sensor.device_info
+    assert "suggested_area" not in info
+
+    # 3. MysaIpSensor
+    ip_sensor = MysaIpSensor(mock_coordinator, device_id, device_data, mock_entry)
+    info = ip_sensor.device_info
+    assert "suggested_area" not in info
+
+    # 4. MysaTemperatureSensor
+    temp_sensor = MysaTemperatureSensor(mock_coordinator, device_id, device_data, mock_api, mock_entry)
+    info = temp_sensor.device_info
+    assert "suggested_area" not in info
+
+    # 5. MysaHumiditySensor
+    hum_sensor = MysaHumiditySensor(mock_coordinator, device_id, device_data, mock_api, mock_entry)
+    info = hum_sensor.device_info
+    assert "suggested_area" not in info
+
+@pytest.mark.asyncio
+async def test_ip_sensor(hass, mock_coordinator, mock_entry, mock_device_data):
+    """Test IP address sensor."""
+    from custom_components.mysa.sensor import MysaIpSensor
+    from homeassistant.const import EntityCategory
+
+    mock_coordinator.data = {"device1": {"ip": "10.0.0.1"}}
+
+    sensor = MysaIpSensor(mock_coordinator, "device1", mock_device_data, mock_entry)
+
+    # Check attributes
+    assert sensor.native_value == "10.0.0.1"
+    assert sensor.entity_category == EntityCategory.DIAGNOSTIC
+    assert sensor.translation_key == "ip_address"
+    assert sensor.unique_id == "device1_ip_address"
+
+    # Check update behavior
+    mock_coordinator.data = {"device1": {"ip": "192.168.1.100"}}
+    assert sensor.native_value == "192.168.1.100"
+
+    # Check missing data
+    mock_coordinator.data = {"device1": {}}
+    assert sensor.native_value is None
+
+    # Check coordinator data None
+    mock_coordinator.data = None
+    assert sensor.native_value is None
+
+    # Check state is None
+    mock_coordinator.data = {"other": {}}
+    assert sensor.native_value is None
+
+@pytest.mark.asyncio
+async def test_sensor_edge_cases(hass, mock_api, mock_entry, mock_device_data):
+    """Test sensor entity edge cases for missing data."""
+    mock_coordinator = MagicMock()
+    mock_coordinator.data = None
+
+    # Test MysaPowerSensor missing data
+    power_sensor = MysaPowerSensor(mock_coordinator, "device1", mock_device_data, mock_api, mock_entry)
+    assert power_sensor.native_value is None
+    assert power_sensor.extra_state_attributes == {}
+
+    # Test MysaDiagnosticSensor Duty exception
+    from custom_components.mysa.sensor import MysaDiagnosticSensor
+    diag_sensor = MysaDiagnosticSensor(
+        mock_coordinator,
+        "device1",
+        mock_device_data,
+        "Duty",
+        "duty",
+        None,
+        None,
+        None,
+        mock_entry
+    )
+    mock_coordinator.data = {"device1": {"Duty": "invalid"}}
+    assert diag_sensor.native_value == "invalid"
+
+    # Test MysaDiagnosticSensor extra_state_attributes missing data
+    mock_coordinator.data = None
+    diag_attr = diag_sensor.extra_state_attributes
+    assert "zone_name" not in diag_attr
+
+    # Test MysaCurrentSensor simulated exception
+    simple_entry = MagicMock()
+    simple_entry.options = {"estimated_max_current": 10.0}
+
+    from custom_components.mysa.sensor import MysaCurrentSensor
+    current_sensor = MysaCurrentSensor(mock_coordinator, "device1", mock_device_data, mock_api, simple_entry)
+
+    # 1. Force simulated
+    mock_api.simulated_energy = True
+
+    # 3. Duty is invalid
+    mock_coordinator.data = {"device1": {"Duty": "invalid"}}
+    assert current_sensor.native_value == 0.0
+
+    # Test MysaCurrentSensor extra_state_attributes with None data
+    mock_coordinator.data = None
+    assert current_sensor.extra_state_attributes == {}
+
+@pytest.mark.asyncio
+async def test_energy_sensor_accumulation_logic(hass, mock_api, mock_entry, mock_device_data):
+    """Test energy sensor accumulation logic including 0W handling."""
+    import time
+    from unittest.mock import patch
+
+    mock_coordinator = MagicMock()
+    mock_coordinator.data = {"device1": {}}
+
+    # Mock Power Sensor
+    power_sensor = MagicMock(spec=MysaPowerSensor)
+    power_sensor.native_value = 0.0
+
+    energy_sensor = MysaEnergySensor(
+        mock_coordinator,
+        "device1",
+        mock_device_data,
+        mock_api,
+        mock_entry,
+        power_sensor
+    )
+
+    # Initialize
+    await energy_sensor.async_added_to_hass()
+    energy_sensor.async_write_ha_state = MagicMock()
+
+    # Initial state should be 0.0
+    assert energy_sensor.native_value == 0.0
+
+    # Simulate time progression
+    start_time = 1000000.0
+
+    with patch("time.time", return_value=start_time):
+        energy_sensor._handle_coordinator_update()
+        assert energy_sensor.native_value == 0.0
+
+    # T1: 1 hour later, Power still 0W
+    t1 = start_time + 3600
+    with patch("time.time", return_value=t1):
+        energy_sensor._handle_coordinator_update()
+        assert energy_sensor.native_value == 0.0
+
+    # T2: 1 hour later, Power now 1000W
+    power_sensor.native_value = 1000.0
+    t2 = t1 + 3600
+    with patch("time.time", return_value=t2):
+        energy_sensor._handle_coordinator_update()
+        # 1000W * 1h = 1000 Wh = 1 kWh
+        assert energy_sensor.native_value == 1.0
+
+    # T3: 1 hour later, Power drops to 0W
+    power_sensor.native_value = 0.0
+    t3 = t2 + 3600
+    with patch("time.time", return_value=t3):
+        energy_sensor._handle_coordinator_update()
+        assert energy_sensor.native_value == 1.0

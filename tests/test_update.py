@@ -181,3 +181,38 @@ class TestFirmwareErrorHandling:
 
         assert installed_version == "2.0.0"
         assert latest_version == "2.0.0"
+
+# ===========================================================================
+# Merged Coverage Tests
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_update_installed_version_mismatch(hass):
+    """Test that device_data is updated when firmware version mismatch occurs."""
+    from custom_components.mysa.update import MysaUpdate
+
+    mock_api = MagicMock()
+    mock_api.fetch_firmware_info = AsyncMock()
+
+    device_id = "test_device_id"
+    device_data = {"FirmwareVersion": "1.0.0", "Name": "Test Device"}
+
+    entity = MysaUpdate(mock_api, device_id, device_data)
+
+    # Simulate API returning a newer installed version than what we have in device_data
+    mock_api.fetch_firmware_info.return_value = {
+        "installedVersion": "1.1.0",
+        "allowedVersion": "1.2.0",
+        "update": True
+    }
+
+    # Verify initial state
+    assert entity._device_data["FirmwareVersion"] == "1.0.0"
+
+    # Run update
+    await entity.async_update()
+
+    # Verify device_data was updated
+    assert entity._device_data["FirmwareVersion"] == "1.1.0"
+    assert entity._attr_installed_version == "1.1.0"
+    assert entity._attr_latest_version == "1.2.0"

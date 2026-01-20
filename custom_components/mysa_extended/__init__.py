@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import logging
 from functools import partial
+from typing import Any
 
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
@@ -25,48 +26,61 @@ from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup(hass: HomeAssistant, config: dict) -> bool:  # pylint: disable=unused-argument
+# pylint: disable=unused-argument
+# Justification: Required by Home Assistant callback signature.
+async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     """Set up the Mysa Extended integration."""
     # Services registered via async_setup_services, but only once
     if not hass.services.has_service(DOMAIN, "upgrade_lite_device"):
-        await async_setup_services(hass)
+        async_setup_services(hass)
     return True
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  # pylint: disable=unused-argument
+# pylint: disable=unused-argument
+# Justification: Required by Home Assistant callback signature.
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Mysa Extended from a config entry."""
     # Services registered via async_setup_services, but only once
     if not hass.services.has_service(DOMAIN, "upgrade_lite_device"):
-        await async_setup_services(hass)
+        async_setup_services(hass)
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  # pylint: disable=unused-argument
+# pylint: disable=unused-argument
+# Justification: Required by Home Assistant callback signature.
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     return True
 
 
-def _get_mysa_device_info(hass: HomeAssistant, device_id: str):
+def _get_mysa_device_info(hass: HomeAssistant, device_id: str) -> tuple[str, ConfigEntry, Any]:
     """Resolve HA device ID to Mysa device ID and API instance."""
     # Get actual device registry entry
     device_registry = dr.async_get(hass)
     device_entry = device_registry.async_get(device_id)
 
     if not device_entry:
-        raise HomeAssistantError(f"Device {device_id} not found")
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="device_not_found",
+            translation_placeholders={"device_id": device_id}
+        )
 
     # Find mysa device ID and config entry
-    mysa_device_id = None
-    mysa_entry = None
+    mysa_device_id: str | None = None
+    mysa_entry: ConfigEntry | None = None
 
     # Check mysa domain data exists
     if MYSA_DOMAIN not in hass.data:
-        raise HomeAssistantError("Mysa integration not loaded")
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="mysa_integration_not_loaded"
+        )
 
-    for entry_id in device_entry.config_entries:
+    for entry_id in device_entry.config_entries if device_entry else []:
         if entry_id in hass.data[MYSA_DOMAIN]:
             mysa_entry = hass.config_entries.async_get_entry(entry_id)
-            for identifier in device_entry.identifiers:
+            for identifier in device_entry.identifiers if device_entry else []:
                 if identifier[0] == MYSA_DOMAIN:
                     mysa_device_id = identifier[1]
                     break
@@ -74,18 +88,32 @@ def _get_mysa_device_info(hass: HomeAssistant, device_id: str):
                 break
 
     if not mysa_entry or not mysa_device_id:
-        raise HomeAssistantError(f"Mysa integration not found for {device_id}")
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="mysa_integration_not_found_for_device",
+            translation_placeholders={"device_id": device_id}
+        )
 
-    api = hass.data[MYSA_DOMAIN][mysa_entry.entry_id].get("api")
+    mysa_data = hass.data[MYSA_DOMAIN].get(mysa_entry.entry_id)
+    if not mysa_data or not isinstance(mysa_data, dict):
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="mysa_data_invalid"
+        )
+
+    api = mysa_data.get("api")
     if not api:
-        raise HomeAssistantError("Mysa API not initialized")
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="mysa_api_not_initialized"
+        )
 
     return mysa_device_id, mysa_entry, api
 
 
-async def async_service_upgrade_lite(call: ServiceCall, hass: HomeAssistant):
+async def async_service_upgrade_lite(call: ServiceCall, hass: HomeAssistant) -> None:
     """Service to upgrade a Lite device to Full."""
-    device_id = call.data["device_id"]
+    device_id = str(call.data["device_id"])
 
     try:
         mysa_device_id, mysa_entry, api = _get_mysa_device_info(hass, device_id)
@@ -93,9 +121,8 @@ async def async_service_upgrade_lite(call: ServiceCall, hass: HomeAssistant):
         # Call the upgrade method
         if await api.async_upgrade_lite_device(mysa_device_id):
             # Update cache to persist this change
-            current = mysa_entry.options.get("upgraded_lite_devices", [])
+            current = list(mysa_entry.options.get("upgraded_lite_devices", []))
             if mysa_device_id not in current:
-                current = list(current)  # copy
                 current.append(mysa_device_id)
                 new_options = dict(mysa_entry.options)
                 new_options["upgraded_lite_devices"] = current
@@ -103,18 +130,26 @@ async def async_service_upgrade_lite(call: ServiceCall, hass: HomeAssistant):
 
             _LOGGER.info("Successfully upgraded device %s and updated core options", mysa_device_id)
         else:
-            raise HomeAssistantError(f"Hardware upgrade failed for device {mysa_device_id}")
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="upgrade_failed",
+                translation_placeholders={"device_id": mysa_device_id}
+            )
 
     except Exception as err:
         _LOGGER.error("Error upgrading device: %s", err)
         if isinstance(err, HomeAssistantError):
             raise
-        raise HomeAssistantError(f"Upgrade failed: {err}") from err
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="upgrade_error",
+            translation_placeholders={"error": str(err)}
+        ) from err
 
 
-async def async_service_downgrade_lite(call: ServiceCall, hass: HomeAssistant):
+async def async_service_downgrade_lite(call: ServiceCall, hass: HomeAssistant) -> None:
     """Service to downgrade a device back to Lite."""
-    device_id = call.data["device_id"]
+    device_id = str(call.data["device_id"])
 
     try:
         mysa_device_id, mysa_entry, api = _get_mysa_device_info(hass, device_id)
@@ -131,18 +166,26 @@ async def async_service_downgrade_lite(call: ServiceCall, hass: HomeAssistant):
 
             _LOGGER.info("Successfully reverted device %s and updated core options", mysa_device_id)
         else:
-            raise HomeAssistantError(f"Hardware revert failed for device {mysa_device_id}")
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="downgrade_failed",
+                translation_placeholders={"device_id": mysa_device_id}
+            )
 
     except Exception as err:
         _LOGGER.error("Error reverting device: %s", err)
         if isinstance(err, HomeAssistantError):
             raise
-        raise HomeAssistantError(f"Revert failed: {err}") from err
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="downgrade_error",
+            translation_placeholders={"error": str(err)}
+        ) from err
 
 
-async def async_service_killer_ping(call: ServiceCall, hass: HomeAssistant):
+async def async_service_killer_ping(call: ServiceCall, hass: HomeAssistant) -> None:
     """Service to restart device into pairing mode."""
-    device_id = call.data["device_id"]
+    device_id = str(call.data["device_id"])
 
     try:
         mysa_device_id, _mysa_entry, api = _get_mysa_device_info(hass, device_id)
@@ -156,18 +199,27 @@ async def async_service_killer_ping(call: ServiceCall, hass: HomeAssistant):
                 mysa_device_id
             )
         else:
-            raise HomeAssistantError(f"Killer Ping failed for device {mysa_device_id}")
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="killer_ping_failed",
+                translation_placeholders={"device_id": mysa_device_id}
+            )
 
     except Exception as err:
         _LOGGER.error("Error sending killer ping: %s", err)
         if isinstance(err, HomeAssistantError):
             raise
-        raise HomeAssistantError(f"Killer Ping failed: {err}") from err
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="killer_ping_error",
+            translation_placeholders={"error": str(err)}
+        ) from err
 
 
 # Auto-register services when integration loads
 # This helper is called by both async_setup and async_setup_entry
-async def async_setup_services(hass: HomeAssistant):
+@callback
+def async_setup_services(hass: HomeAssistant) -> None:
     """Set up services for mysa_extended."""
 
     # Register upgrade service
@@ -188,4 +240,4 @@ async def async_setup_services(hass: HomeAssistant):
         partial(async_service_killer_ping, hass=hass)
     )
 
-    _LOGGER.info("Mysa Extended services registered")
+    _LOGGER.debug("Mysa Extended services registered")

@@ -114,6 +114,18 @@ If tests are failing due to authentication:
 2. Verify that `aioclient_mock` is mocking the correct endpoints
 3. Check the test's fixture dependencies
 
+### Authentication Issues
+If tests are failing due to authentication:
+1. Check that mock fixtures are being used correctly
+2. Verify that `aioclient_mock` is mocking the correct endpoints
+3. Check the test's fixture dependencies
+
+## Manual Testing
+
+For manual testing and debugging of devices (sending raw MQTT commands, inspecting state), use the **Mysa Debug Tool**.
+
+See [MYSA_DEBUG.md](MYSA_DEBUG.md) for full instructions.
+
 ## Test Categories
 
 Tests are organized by component and marked with pytest markers:

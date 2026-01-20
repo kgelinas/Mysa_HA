@@ -12,5 +12,6 @@
     "integration_type": "service",
     "iot_class": "cloud_push",
     "issue_tracker": "https://github.com/kgelinas/Mysa_HA/issues",
-    "version": "0.1.0"
+    "quality_scale": "silver",
+    "version": "0.9.0"
 }
