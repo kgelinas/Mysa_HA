@@ -443,6 +443,25 @@ class TestMysaClimateActions:
 
         mock_api.set_hvac_mode.assert_called()
 
+    @pytest.mark.asyncio
+    async def test_set_temperature_rounding(
+        self, hass, mock_coordinator, climate_entity, mock_api
+    ):
+        """Test async_set_temperature rounds to nearest 0.5 step."""
+        await mock_coordinator.async_refresh()
+
+        # Round Up (e.g. 26.777 -> 27.0)
+        await climate_entity.async_set_temperature(temperature=26.7777778)
+        # Verify call arguments
+        # Using mock_api.set_target_temperature because climate_entity calls self._api.set_target_temperature
+        mock_api.set_target_temperature.assert_called_with("device1", 27.0)
+
+        mock_api.set_target_temperature.reset_mock()
+
+        # Round Down (e.g. 26.2 -> 26.0)
+        await climate_entity.async_set_temperature(temperature=26.2)
+        mock_api.set_target_temperature.assert_called_with("device1", 26.0)
+
 
 # ===========================================================================
 # MysaACClimate (AC Controller) Tests

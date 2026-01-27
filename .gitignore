@@ -13,3 +13,5 @@ __pycache__/
 .agent/
 .mypy_cache/
 .coverage
+tools/build/
+tools/dist/

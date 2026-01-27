@@ -386,23 +386,45 @@ class TestParseOne:
 class TestMqttTopicBuilding:
     """Test MQTT topic building functions."""
 
-    def test_build_subscription_topics(self):
-        """Test building subscription topics for devices."""
+    def test_build_subscription_topics_with_batch(self):
+        """Test building subscription topics with /batch included."""
         from custom_components.mysa.mysa_mqtt import build_subscription_topics
 
         device_ids = ["device1", "device2"]
 
-        topics = build_subscription_topics(device_ids)
+        topics = build_subscription_topics(device_ids, include_batch=True)
 
-        # Should have 2 topics per device (out and in)
+        # Should have 3 topics per device (out, in, batch)
+        assert len(topics) == 6
+
+        # Check topic format
+        topic_strings = [t.topicfilter for t in topics]
+        assert "/v1/dev/device1/out" in topic_strings
+        assert "/v1/dev/device1/in" in topic_strings
+        assert "/v1/dev/device1/batch" in topic_strings
+        assert "/v1/dev/device2/out" in topic_strings
+        assert "/v1/dev/device2/in" in topic_strings
+        assert "/v1/dev/device2/batch" in topic_strings
+
+    def test_build_subscription_topics_without_batch(self):
+        """Test building subscription topics without /batch included."""
+        from custom_components.mysa.mysa_mqtt import build_subscription_topics
+
+        device_ids = ["device1", "device2"]
+
+        topics = build_subscription_topics(device_ids, include_batch=False)
+
+        # Should have 2 topics per device (out, in)
         assert len(topics) == 4
 
         # Check topic format
         topic_strings = [t.topicfilter for t in topics]
         assert "/v1/dev/device1/out" in topic_strings
         assert "/v1/dev/device1/in" in topic_strings
+        assert "/v1/dev/device1/batch" not in topic_strings
         assert "/v1/dev/device2/out" in topic_strings
         assert "/v1/dev/device2/in" in topic_strings
+        assert "/v1/dev/device2/batch" not in topic_strings
 
     def test_build_subscription_topics_empty(self):
         """Test building subscription topics with empty list."""

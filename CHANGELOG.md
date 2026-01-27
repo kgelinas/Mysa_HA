@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 
 
+## [0.9.1-beta2] - 2026-01-27
+### Fixed
+- **Ghost Devices**: Stopped filtering out devices not assigned to a specific Home/Zone. These devices now appear in Home Assistant (typically as "Unassigned").
+- **MQTT Connection**: Resolved persistent reconnection loop (Error 1005) caused by the broker rejecting subscriptions to the `/batch` topic.
+- **In-Floor Temperature**: Added 0.5°C rounding to setpoint operations to prevent UI "snap-back" when setting temperatures on In-Floor models.
+- **Build Tools**: Updated `mysa_debug` build dependencies to ensure successful cross-platform binary generation.
+
 ## [0.9.1-beta1] - 2026-01-26
 ### Fixed
 - **In-Floor Temperature**: Resolved issue where In-Floor units displayed Ambient (Air) temperature instead of Floor temperature.

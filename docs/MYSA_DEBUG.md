@@ -48,6 +48,7 @@ On first run, you'll be prompted for your Mysa account credentials. These are sa
 | `advanced`               | Advanced/dangerous operations            |
 | `refresh <DID>`          | Force device to check cloud (MsgType 6)  |
 | `dump <DID>`             | Force metadata dump (MsgType 7)          |
+| `batch <DID>`            | Subscribe to /batch topic (MsgType 3)    |
 | `help` or `?`            | Show command help                        |
 | `q` or `quit`            | Exit                                     |
 
@@ -202,6 +203,33 @@ CMD> state 1
   "SetPoint": {"v": 22.0},
   ...
 }
+```
+
+## Batch Data (MsgType 3)
+
+Use `batch <DID>` or `batch all` to subscribe to the device's `/batch` topic.
+
+```
+CMD> batch 1
+  • /v1/dev/aa:bb:cc:dd:ee:ff/batch
+
+⚠️ Attempting to subscribe to 1 topics...
+✓ SUBSCRIBE packet sent. Watching for readings...
+```
+
+**Note**: Some brokers may disconnect the client immediately upon subscribing to this topic (Error 1005). If this happens, avoid using this command.
+
+When successfully subscribed, the tool will decode `MsgType 3` payloads:
+```
+[2024-01-27 18:30:12.456] [SNIFF →] MsgType 3 (Batch Data):
+{
+  "msg": 3,
+  "ts": 1706380212,
+  "ver": 1
+}
+  Version: v1 (12 readings)
+    • MysaReading(ts=1706380212, unknown1=0, current=1.2, voltage=120.0, power=144.0, ...)
+    • ...
 ```
 
 ## Advanced Menu

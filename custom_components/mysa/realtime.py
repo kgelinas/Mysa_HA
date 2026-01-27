@@ -3,6 +3,7 @@ import logging
 import asyncio
 import json
 import time
+import base64
 from typing import Any, Callable, Dict, List, Optional, cast
 from homeassistant.core import HomeAssistant
 
@@ -12,6 +13,7 @@ from .mysa_mqtt import (
     connect_websocket, create_connect_packet,
 )
 from .const import MQTT_PING_INTERVAL
+from .readings import parse_batch_readings
 
 # Type hint for callback
 # on_update_callback(device_id, state_update, resolve_safe_id=False)
@@ -183,7 +185,8 @@ class MysaRealtime:
 
         # Subscribe
         if self._devices_ids:
-            sub_topics = build_subscription_topics(list(self._devices_ids))
+            # Disable batch for now as it causes disconnects on some accounts/brokers
+            sub_topics = build_subscription_topics(list(self._devices_ids), include_batch=False)
             if sub_topics:
                 sub_pkt = mqtt.subscribe(1, sub_topics)
                 await ws.send(sub_pkt)
@@ -267,22 +270,27 @@ class MysaRealtime:
         except (ValueError, TypeError):
             msg_type = None
 
-        if msg_type == 10:
-            return self._extract_boot_info(payload)
-        if msg_type == 4:
-            return self._extract_log_info(payload)
-        if msg_type == 61:
-            return {"FirmwareVersion": str(payload.get("version", ""))}
+        # Dispatch based on special message types
+        special_handlers: Dict[int, Callable[[Dict[str, Any]], Optional[Dict[str, Any]]]] = {
+            10: self._extract_boot_info,
+            4: self._extract_log_info,
+            3: self._extract_batch_info,
+            61: lambda p: cast(
+                Optional[Dict[str, Any]], {"FirmwareVersion": str(p.get("version", ""))}
+            )
+        }
+        if msg_type is not None and msg_type in special_handlers:
+            return special_handlers[msg_type](payload)
 
+        # Standard processing
         msg_ts = payload.get('time') or payload.get('Timestamp')
         update: Dict[str, Any] = {}
+        body = payload.get('body')
 
-        if msg_type == 30 and payload.get('body'):
-            update = self._extract_body_state(payload['body']) or {}
-        else:
-            body = payload.get('body')
-            if body:
-                update = self._extract_body_state(body) or {}
+        if msg_type == 30 and body:
+            update = self._extract_body_state(body) or {}
+        elif body:
+            update = self._extract_body_state(body) or {}
 
         # Timestamp and metadata
         if msg_ts:
@@ -300,7 +308,7 @@ class MysaRealtime:
 
         return update if update else None
 
-    def _extract_boot_info(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _extract_boot_info(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Extract info from MsgType 10."""
         update = {}
         if payload.get('ip'):
@@ -328,6 +336,30 @@ class MysaRealtime:
             update["serial_number"] = temp.strip()
 
         return update if update else None
+
+    def _extract_batch_info(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Extract info from MsgType 3 (Batch Data)."""
+        body = payload.get('body')
+        if not body:
+            return None
+
+        readings_b64 = body.get('readings')
+        if not readings_b64:
+            return None
+
+        try:
+            readings_raw = base64.b64decode(readings_b64)
+            parsed = parse_batch_readings(readings_raw)
+            if not parsed:
+                return None
+
+            # Use the latest reading from the batch
+            latest = parsed[-1]
+            return latest
+        except Exception as e:
+            _LOGGER.warning("Error parsing batch readings: %s", e)
+            return None
+
 
     def _extract_body_state(self, body: Any) -> Optional[Dict[str, Any]]:
         """Extract state from body."""

@@ -343,6 +343,13 @@ class MysaClimate(
         if temp is None:
             return
         try:
+            # Round to target step (default 0.5)
+            step = self._attr_target_temperature_step or 0.5
+            temp = (
+                round(temp / step)
+                * step
+            )
+
             # Optimistic update
             self._set_sticky_value("target_temperature", temp)
 

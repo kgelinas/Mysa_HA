@@ -17,6 +17,7 @@ See docs/MYSA_DEBUG.md for detailed usage instructions.
 """
 import asyncio
 import json
+import base64
 import logging
 import sys
 import os
@@ -24,6 +25,9 @@ import time
 import getpass
 from datetime import datetime
 import requests
+import struct
+from dataclasses import dataclass, field
+from typing import Optional, List, Any, Union
 
 # Add custom_components directory to path
 # Add project root directory to path to allow absolute imports
@@ -39,7 +43,7 @@ except ImportError:
     import types
 
     def mock_module(name):
-        m = types.ModuleType(name)
+        m = MagicMock()
         sys.modules[name] = m
         return m
 
@@ -49,11 +53,19 @@ except ImportError:
     mock_module("homeassistant.util")
     mock_module("homeassistant.helpers")
     mock_module("homeassistant.components")
-    core = mock_module("homeassistant.core")
-    core.HomeAssistant = MagicMock()
+    mock_module("homeassistant.core")
+    mock_module("homeassistant.config_entries")
+    mock_module("homeassistant.helpers.update_coordinator")
+    mock_module("homeassistant.helpers.aiohttp_client")
+    mock_module("homeassistant.helpers.storage")
+    mock_module("homeassistant.helpers.issue_registry")
+    mock_module("homeassistant.helpers.device_registry")
+    mock_module("homeassistant.helpers.template")
+    mock_module("homeassistant.helpers.template.extensions")
 
-    config_entries = mock_module("homeassistant.config_entries")
-    config_entries.ConfigEntry = MagicMock()
+    # Mock aiohttp and other common dependencies
+    mock_module("aiohttp")
+    mock_module("aiohttp.client")
 
     exceptions = mock_module("homeassistant.exceptions")
     exceptions.ConfigEntryAuthFailed = MagicMock
@@ -117,6 +129,123 @@ except ImportError:
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 _LOGGER = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Mysa Reading Parsers (from mysotherm)
+# =============================================================================
+
+@dataclass
+class MysaReading:
+    """Binary structure representing one raw reading from a Mysa thermostat."""
+    ts: int                 # Unix time (seconds)
+    sensor_t: float         # Unit = °C
+    ambient_t: float        # Unit = °C
+    setpoint_t: float       # Unit = °C
+    humidity: int           # Percent
+    duty: int               # Percent
+    on_ms: int              # Unit = 1 ms
+    off_ms: int             # Unit = 1 ms
+    heatsink_t: float       # Unit = °C
+    free_heap: int          # Free heap
+    rssi: int               # Unit = 1 dBm
+    onoroff: int            # Probably boolean
+    ver: int                # Version byte
+    rest: Optional[bytes]   # Trailing bytes
+
+    @classmethod
+    def parse_readings(cls, readings: bytes) -> List[Any]:
+        offset = 0
+        if len(readings) < 26:
+            return []
+
+        # Detect version from the third byte (after CA A0)
+        if readings[0:2] != b'\xca\xa0':
+            return []
+        ver = readings[2]
+
+        output = []
+        while offset < len(readings):
+            if readings[offset:offset+2] != b'\xca\xa0':
+                break
+            if readings[offset+2] != ver:
+                break
+
+            offset += 3
+            # <LhhhbbhhhHbb = Little-endian:
+            # L(4) h(2) h(2) h(2) b(1) b(1) h(2) h(2) h(2) H(2) b(1) b(1) = 22 bytes
+            sts, sens, amb, setp, hum, duty, onish, offish, heatsink, heap, rssi, onoroff = \
+                struct.unpack_from('<LhhhbbhhhHbb', readings, offset)
+            offset += 22
+
+            heap *= 10
+            sens /= 10; amb /= 10; setp /= 10; heatsink /= 10
+            rssi = -rssi
+            onish *= 100; offish *= 100
+
+            kwargs = {
+                'ts': sts, 'sensor_t': sens, 'ambient_t': amb, 'setpoint_t': setp,
+                'humidity': hum, 'duty': duty, 'on_ms': onish, 'off_ms': offish,
+                'heatsink_t': heatsink, 'free_heap': heap, 'rssi': rssi, 'onoroff': onoroff,
+                'ver': ver
+            }
+
+            # Find rest
+            next_pos = readings.find(b'\xca\xa0' + bytes([ver]), offset)
+            if next_pos < 0:
+                next_pos = len(readings)
+            kwargs['rest'] = readings[offset:next_pos]
+
+            known_vers: dict[int, type] = {0: MysaReadingV0, 1: MysaReadingV1, 3: MysaReadingV3}
+            reading_cls = known_vers.get(ver, cls)
+            reading, offset = reading_cls._make_reading(kwargs, readings, offset, next_pos)  # type: ignore[attr-defined]
+            output.append(reading)
+        return output
+
+    @classmethod
+    def _make_reading(cls, kwargs, readings, offset, next_pos):
+        return cls(**kwargs), next_pos
+
+    def __str__(self):
+        dt = datetime.fromtimestamp(self.ts).strftime('%Y-%m-%d %H:%M:%S')
+        return (f"[{dt}] temp={self.sensor_t:.1f}°C, amb={self.ambient_t:.1f}°C, "
+                f"stpt={self.setpoint_t:.1f}°C, hum={self.humidity}%, duty={self.duty}%, "
+                f"rssi={self.rssi}dBm")
+
+@dataclass
+class MysaReadingV0(MysaReading):
+    unknown2: int
+
+    @classmethod
+    def _make_reading(cls, kwargs, readings, offset, next_pos):
+        unknown2, = struct.unpack_from('<B', readings, offset)
+        return cls(**kwargs, unknown2=unknown2), offset + 1
+
+@dataclass
+class MysaReadingV1(MysaReading):
+    voltage: int
+    unknown2: int
+
+    @classmethod
+    def _make_reading(cls, kwargs, readings, offset, next_pos):
+        voltage, unknown2 = struct.unpack_from('<hB', readings, offset)
+        return cls(**kwargs, voltage=voltage, unknown2=unknown2), offset + 3
+
+@dataclass
+class MysaReadingV3(MysaReading):
+    voltage: int
+    current: int
+    always0: bytes
+    unknown2: int
+
+    @classmethod
+    def _make_reading(cls, kwargs, readings, offset, next_pos):
+        voltage, current, always0, unknown2 = struct.unpack_from('<hh3sB', readings, offset)
+        current *= 10
+        return cls(**kwargs, voltage=voltage, current=current, always0=always0, unknown2=unknown2), offset + 8
+
+    def __str__(self):
+        return super().__str__() + f", volt={self.voltage}V, curr={self.current}mA"
 
 
 class MysaDebugTool:
@@ -344,6 +473,8 @@ class MysaDebugTool:
             await self.refresh_settings(parts[1])
         elif cmd == 'dump' and len(parts) >= 2:
             await self.dump_readings(parts[1])
+        elif cmd == 'batch' and len(parts) >= 2:
+            await self.sub_batch(parts[1])
         else:
             print("Unknown command. Type 'help' or 'ex' for available commands.")
 
@@ -388,6 +519,7 @@ class MysaDebugTool:
         print("  sniff [ID]        Toggle MQTT sniffing (Optional: Filter by ID)")
         print("  refresh <ID>      Force device to check cloud settings (MsgType 6)")
         print("  dump <ID>         Force device to dump readings/info (MsgType 7)")
+        print("  batch <ID>        Try subscribing to /batch topic (WARNING: MAY DISCONNECT)")
 
         print("\n[ Device Control ]")
         print("  http <ID> <JSON>  Send HTTP command directly")
@@ -900,6 +1032,37 @@ class MysaDebugTool:
         except Exception as e:
             print(f"✗ Failed to send dump request: {e}")
 
+    async def sub_batch(self, device_ref):
+        """Try to subscribe to the /batch topic for a device (or 'all')."""
+        if device_ref.lower() == 'all':
+            dids = list(self.devices.keys())
+        else:
+            did = self._resolve_device(device_ref)
+            if not did:
+                return
+            dids = [did]
+
+        if not self.ws:
+            print("\n✗ MQTT not connected.")
+            return
+
+        from custom_components.mysa import mqtt
+        specs = []
+        for did in dids:
+            safe_did = did.replace(":", "").lower()
+            topic = f"/v1/dev/{safe_did}/batch"
+            specs.append(mqtt.SubscriptionSpec(topic, 0))
+            print(f"  • {topic}")
+
+        print(f"\n⚠️ Attempting to subscribe to {len(specs)} topics...")
+
+        try:
+            sub_pkt = mqtt.subscribe(99, specs)
+            await self.ws.send(sub_pkt)
+            print("✓ SUBSCRIBE packet sent. Watching for readings...")
+        except Exception as e:
+            print(f"✗ Failed to send subscribe: {e}")
+
 
     def _resolve_device(self, ref):
         """Resolve device by number or ID."""
@@ -937,7 +1100,9 @@ class MysaDebugTool:
                     continue
 
                 # Use MqttConnection context manager
-                async with MqttConnection(signed_url, list(self.devices.keys())) as conn:
+                async with MqttConnection(
+                    signed_url, list(self.devices.keys()), include_batch=False
+                ) as conn:
                     self.ws = conn.websocket
                     print("⚡ MQTT Connected!")
 
@@ -948,7 +1113,8 @@ class MysaDebugTool:
                             # Timeout - send ping
                             await conn.send_ping()
                         elif isinstance(pkt, mqtt.PublishPacket):
-                            if self.sniff_mode:
+                            is_batch = pkt.topic.endswith('/batch')
+                            if self.sniff_mode or is_batch:
                                 self._print_sniff(pkt)
 
                         elif hasattr(pkt, 'pkt_type') and pkt.pkt_type == mqtt.MQTT_PACKET_PINGRESP:
@@ -977,8 +1143,36 @@ class MysaDebugTool:
         try:
             payload = json.loads(pkt.payload)
             msg_type = payload.get('msg') or payload.get('MsgType')
-            print(f"\n[{timestamp}] [SNIFF {arrow}] MsgType {msg_type}: "
-                  f"{json.dumps(payload, indent=2)}")
+
+            # Special handling for Batch Data (MsgType 3)
+            if msg_type == 3:
+                print(f"\n[{timestamp}] [SNIFF {arrow}] MsgType 3 (Batch Data):")
+                print(json.dumps({k: v for k, v in payload.items() if k != 'body'}, indent=2))
+
+                body = payload.get('body', {})
+                readings_b64 = body.get('readings')
+                if readings_b64:
+                    try:
+                        readings_raw = base64.b64decode(readings_b64)
+                        parsed = MysaReading.parse_readings(readings_raw)
+                        if parsed:
+                            print(f"  Version: v{parsed[0].ver} ({len(parsed)} readings)")
+                            for r in parsed:
+                                print(f"    • {r}")
+                        else:
+                            # Fallback to hex if parsing failed
+                            version = readings_raw[0] if readings_raw else "N/A"
+                            print(f"  Readings Version: v{version} (Parse failed)")
+                            print(f"  Raw Hex ({len(readings_raw)} bytes):")
+                            hex_str = readings_raw.hex()
+                            print(f"    {' '.join(hex_str[i:i+2] for i in range(0, len(hex_str), 2))}")
+                    except Exception as b64_err:
+                        print(f"  Error decoding/parsing readings: {b64_err}")
+                else:
+                    print(f"  No readings found in body: {json.dumps(body)}")
+            else:
+                print(f"\n[{timestamp}] [SNIFF {arrow}] MsgType {msg_type}: "
+                      f"{json.dumps(payload, indent=2)}")
         except Exception:
             print(f"\n[{timestamp}] [SNIFF {arrow}] {pkt.payload.decode(errors='ignore')}")
 

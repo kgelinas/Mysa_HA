@@ -35,12 +35,16 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 
-def build_subscription_topics(device_ids: List[str]) -> List[mqtt.SubscriptionSpec]:
+def build_subscription_topics(
+    device_ids: List[str],
+    include_batch: bool = True
+) -> List[mqtt.SubscriptionSpec]:
     """
     Build MQTT subscription topic list for devices.
 
     Args:
         device_ids: List of device IDs (MAC addresses)
+        include_batch: Whether to include the /batch topic
 
     Returns:
         List of mqtt.SubscriptionSpec objects
@@ -52,6 +56,8 @@ def build_subscription_topics(device_ids: List[str]) -> List[mqtt.SubscriptionSp
             mqtt.SubscriptionSpec(f'/v1/dev/{safe_device_id}/out', 0x01),
             mqtt.SubscriptionSpec(f'/v1/dev/{safe_device_id}/in', 0x01),
         ])
+        if include_batch:
+            sub_topics.append(mqtt.SubscriptionSpec(f'/v1/dev/{safe_device_id}/batch', 0x00))
     return sub_topics
 
 
@@ -174,7 +180,8 @@ class MqttConnection:
         self,
         signed_url: str,
         device_ids: List[str],
-        keepalive: int = MQTT_KEEPALIVE
+        keepalive: int = MQTT_KEEPALIVE,
+        include_batch: bool = True
     ):
         """
         Initialize MQTT connection.
@@ -183,10 +190,12 @@ class MqttConnection:
             signed_url: AWS SigV4 signed MQTT URL
             device_ids: List of device IDs to subscribe to
             keepalive: MQTT keepalive interval in seconds
+            include_batch: Whether to include the /batch topic
         """
         self.signed_url = signed_url
         self.device_ids = device_ids
         self.keepalive = keepalive
+        self.include_batch = include_batch
         self._ws: Optional[WebSocketClientProtocol] = None
         self._connected: bool = False
 
@@ -210,7 +219,7 @@ class MqttConnection:
 
         # Subscribe to device topics
         if self.device_ids:
-            sub_topics = build_subscription_topics(self.device_ids)
+            sub_topics = build_subscription_topics(self.device_ids, self.include_batch)
             sub_pkt = mqtt.subscribe(1, sub_topics)
             await self._ws.send(sub_pkt)
 

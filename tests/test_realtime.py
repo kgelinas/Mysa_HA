@@ -740,6 +740,34 @@ class TestRealtimeCoverage:
         assert update["stpt"] == 20.0
         assert "Timestamp" not in update
 
+    def test_extract_batch_info_coverage(self, realtime):
+        """Test _extract_batch_info coverage (lines 337-357)."""
+        import base64
+        import struct
+        from unittest.mock import patch
+
+        # Hit 339-340 (no body)
+        assert realtime._extract_batch_info({}) is None
+
+        # Hit 343-344 (no readings)
+        assert realtime._extract_batch_info({"body": {}}) is None
+
+        # Hit 349-350 (not parsed)
+        assert realtime._extract_batch_info({"body": {"readings": base64.b64encode(b"not_magic").decode()}}) is None
+
+        # Hit 355-357 (Exception)
+        with patch("base64.b64decode", side_effect=ValueError("Mock Error")):
+            assert realtime._extract_batch_info({"body": {"readings": "any"}}) is None
+
+        # Hit 278-279 via _extract_state_update
+        raw_data = b'\xca\xa0\x00' + struct.pack('<LhhhbbhhhHbb', 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1) + b'\x01'
+        payload_msg3 = {"msg": 3, "body": {"readings": base64.b64encode(raw_data).decode()}}
+        assert realtime._extract_state_update(payload_msg3)["BatchVersion"] == 0
+
+        # Hit 343-344 (no readings)
+        assert realtime._extract_batch_info({"body": {"readings": None}}) is None
+        assert realtime._extract_batch_info({"body": {"readings": ""}}) is None
+
 
 @pytest.mark.asyncio
 async def test_fibonacci_backoff_sequence(mock_hass):

@@ -351,9 +351,9 @@ class TestMysaClient:
 
             devs = await client.get_devices()
 
-            # Assertions: d1 should be present, ghost_id should be filtered out
+            # Assertions: both d1 and ghost_id should be present
             assert "d1" in devs
-            assert "ghost_id" not in devs
+            assert "ghost_id" in devs
 
     async def test_get_devices_no_session(self, mock_hass):
         """Test get_devices raises if no session."""

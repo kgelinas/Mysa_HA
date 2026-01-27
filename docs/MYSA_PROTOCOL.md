@@ -40,6 +40,7 @@ Mysa uses a non-standard AWS SigV4 signing implementation. The `X-Amz-Security-T
 Each device has three topics:
 - `/v1/dev/{device_id}/out` - State FROM device
 - `/v1/dev/{device_id}/in` - Commands TO device
+- `/v1/dev/{device_id}/batch` - High-frequency energy data (MsgType 3)
 
 The `{device_id}` is the MAC address without colons, lowercase.
 
@@ -67,6 +68,7 @@ Messages are JSON objects containing a `MsgType` (or `msg` in some responses) fi
 
 | MsgType | Direction | Description                                |
 |:--------|:----------|:-------------------------------------------|
+| 3       | ← Device  | Batch Data (High-frequency energy readings)|
 | 4       | ← Device  | Device Log (Info/Error/Debug JSON)         |
 | 5       | → Device  | Killer Ping (Reset to pairing mode)        |
 | 6       | → Device  | Settings Nudge (Force cloud-to-device sync)|
@@ -191,6 +193,31 @@ Periodic status update from the device.
 }
 ```
 
+
+---
+
+### Batch Data (MsgType 3)
+High-frequency voltage/current/power readings, sent to the `/batch` topic. The payload body contains a base64-encoded binary blob of `MysaReading` structs.
+
+```json
+{
+  "msg": 3,
+  "body": {
+    "readings": "BASE64_ENCODED_DATA..."
+  },
+  "ts": 1704825600
+}
+```
+
+The binary format consists of sequential 20-byte structs:
+- `timestamp` (uint32)
+- `unknown1` (uint16)
+- `current` (uint16) / 1000.0
+- `voltage` (uint16) / 10.0
+- `power` (uint16)
+- `unknown2` (uint16)
+- `unknown3` (uint16)
+- `unknown4` (uint16)
 
 ---
 
