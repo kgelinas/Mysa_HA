@@ -1,5 +1,6 @@
 """HTTP Client for Mysa."""
 import logging
+import re
 from typing import Any, Dict, List, Optional, cast
 from time import time
 from functools import partial
@@ -225,7 +226,9 @@ class MysaClient:
             rate = home.get('ERate')
             if h_id and rate is not None:
                 try:
-                    val = float(rate.replace(',', '.') if isinstance(rate, str) else rate)
+                    # Use regex to strip everything except digits, dots, and commas
+                    clean_rate = re.sub(r'[^\d.,]', '', str(rate))
+                    val = float(clean_rate.replace(',', '.'))
                     self.home_rates[h_id] = val
                 except (ValueError, TypeError):
                     pass
@@ -294,7 +297,13 @@ class MysaClient:
         else:
             new_states = new_states_raw
 
-        # 2. Fetch device settings
+        # 2. Refresh homes/zones (to keep ERate updated)
+        try:
+            await self.fetch_homes()
+        except Exception as e:
+            _LOGGER.debug("Failed to refresh homes/zones in get_state: %s", e)
+
+        # 3. Fetch device settings
         async with session.get(
             f"{BASE_URL}/devices",
             headers=await self._get_auth_headers()

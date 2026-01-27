@@ -1,44 +1,15 @@
+
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
-env/
-.venv/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
 
-# Home Assistant
-.storage/
-.config/
-mysa_auth.json
+# Mysa Specific
 .mysa_debug_auth.json
 
-# IDEs
-.vscode/
-.idea/
-.devcontainer/
-*.swp
-*.swo
 
-# OS
-.DS_Store
-
-# Testing
+# Config
+.agent/
+.mypy_cache/
 .coverage
-htmlcov/
-coverage.xml
-.pytest_cache/

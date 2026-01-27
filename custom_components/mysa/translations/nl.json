@@ -65,6 +65,15 @@
         }
     },
     "entity": {
+        "select": {
+            "sensor_mode": {
+                "name": "Sensormodus",
+                "state": {
+                    "ambient": "Omgeving",
+                    "floor": "Vloer"
+                }
+            }
+        },
         "sensor": {
             "ip_address": {
                 "name": "IP-adres"
@@ -72,6 +81,11 @@
             "serial_number": {
                 "name": "Serienummer"
             }
+        }
+    },
+    "exceptions": {
+        "set_sensor_mode_failed": {
+            "message": "Kon sensormodus niet instellen: {error}"
         }
     }
 }

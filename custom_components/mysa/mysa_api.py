@@ -436,6 +436,32 @@ class MysaApi:
         # 2. Notify Device (Cloud -> Device via MsgType 6)
         await self.notify_settings_changed(device_id)
 
+    async def set_sensor_mode(self, device_id: str, mode: int) -> None:
+        """Set sensor mode (0=Ambient, 1=Floor) via HTTP."""
+        # 0. IMMEDIATE OPTIMISTIC UPDATE
+        self._last_command_time[device_id] = time.time()
+        _LOGGER.debug("set_sensor_mode(%s, %s) - Optimistic update", device_id, mode)
+        self._update_state_cache(
+            device_id,
+            {
+                "SensorMode": mode,
+                "Timestamp": int(time.time())
+            }
+        )
+
+        # Trigger UI refresh NOW
+        if self.coordinator_callback:
+            await self.coordinator_callback()
+
+        # 1. HTTP Command
+        # Map internal mode (1=Floor, 0=Ambient) to Mysa values (3=Floor, 5=Ambient)
+        # Note: We use TrackedSensor as the key per user instruction
+        payload_val = 3 if mode == 1 else 5
+        await self.client.set_device_setting_http(device_id, {"TrackedSensor": payload_val})
+
+        # 2. Notify Device (Cloud -> Device via MsgType 6)
+        await self.notify_settings_changed(device_id)
+
     async def set_auto_brightness(self, device_id: str, enabled: bool) -> None:
         """Set auto brightness state via HTTP."""
         # 0. IMMEDIATE OPTIMISTIC UPDATE

@@ -6,6 +6,7 @@ Tests for Switch entities.
 
 
 import pytest
+import time
 from typing import Any
 from unittest.mock import MagicMock, AsyncMock
 from custom_components.mysa.switch import MysaClimatePlusSwitch
@@ -315,3 +316,29 @@ class TestSwitchEntitySetup:
         should_create = is_ac
 
         assert should_create is True
+
+
+class TestSwitchCoverageGaps:
+    """Coverage tests moved from test_coverage_gap.py."""
+
+    def test_switch_coverage(self, mock_coordinator, mock_config_entry):
+        """Exercise switch.py missing lines."""
+        from custom_components.mysa.switch import MysaSwitch
+        entity = MysaSwitch(mock_coordinator, "dev1", {}, MagicMock(), mock_config_entry, "key", "key")
+        # 100, 115, 118, 126, 131
+        assert entity._extract_value(None, ["key"]) is None
+        mock_coordinator.data = None
+        assert entity._get_state_with_pending(["key"]) is False
+        mock_coordinator.data = {"other": {}}
+        assert entity._get_state_with_pending(["key"]) is False
+        # Expiration
+        entity._pending_state = True
+        entity._pending_timestamp = time.time() - 31
+        mock_coordinator.data = {"dev1": {"key": False}}
+        assert entity._get_state_with_pending(["key"]) is False
+        # Convergence
+        entity._pending_state = True
+        entity._pending_timestamp = time.time()
+        mock_coordinator.data = {"dev1": {"key": True}}
+        assert entity._get_state_with_pending(["key"]) is True
+        assert entity._pending_state is None

@@ -14,27 +14,27 @@ jobs:
         os: [windows-latest, ubuntu-latest, macos-latest]
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-    - name: Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r tools/requirements.txt
-        pip install pyinstaller
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r tools/requirements.txt
+          pip install pyinstaller
 
-    - name: Build Executable
-      run: |
-        # --paths . : Allows finding custom_components
-        # --paths custom_components/mysa : Allows finding mysa_auth, etc.
-        pyinstaller --onefile --name mysa_debug --paths . --paths custom_components/mysa tools/mysa_debug.py
+      - name: Build Executable
+        run: |
+          # Build using the spec file in tools/
+          cd tools
+          pyinstaller mysa_debug.spec
 
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: mysa_debug_${{ matrix.os }}
-        path: dist/mysa_debug*
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mysa_debug_${{ matrix.os }}
+          path: tools/dist/mysa_debug*

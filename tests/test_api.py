@@ -10,7 +10,14 @@ from custom_components.mysa.realtime import MysaRealtime
 
 @pytest.fixture
 def mock_hass():
-    return MagicMock()
+    hass = MagicMock()
+    def mock_async_create_task(coro):
+        """Close coroutine to avoid unawaited warnings."""
+        if hasattr(coro, "close"):
+            coro.close()
+        return MagicMock()
+    hass.async_create_task = MagicMock(side_effect=mock_async_create_task)
+    return hass
 
 @pytest.fixture
 def mock_api(mock_hass):
@@ -734,6 +741,19 @@ class TestMysaApi:
         api.update_request.assert_not_called()
         assert "dev2" not in api._metadata_requested
 
+    async def test_proactive_metadata_partial_missing(self, mock_api):
+        """Test that having FirmwareVersion but missing IP still triggers nudge."""
+        api = mock_api
+        api.update_request = AsyncMock()
+
+        # Case: Firmware OK, IP Missing -> Should Nudge
+        api.states["dev3"] = {"FirmwareVersion": "1.0.0"} # No IP
+
+        with patch("time.time", return_value=2000.0):
+            await api._on_mqtt_update("dev3", {"temp": 20})
+            api.update_request.assert_called_once_with("dev3")
+            assert api._metadata_requested["dev3"] == 2000.0
+
 
 # --- Merged from test_brightness_logic.py ---
 
@@ -868,9 +888,59 @@ async def test_extract_timestamp_invalid(mock_hass):
     # 2. Invalid nested type (e.g. dict where int expected, though unlikely)
     assert api._extract_timestamp({"time": {}}) is None
 
-    # 3. Valid
+    # Valid
     assert api._extract_timestamp({"Timestamp": 12345}) == 12345
     assert api._extract_timestamp({"time": "54321"}) == 54321
+
+@pytest.mark.asyncio
+async def test_set_sensor_mode_coverage(mock_hass):
+    """Test set_sensor_mode via HTTP (Cover mysa_api.py lines 442-463)."""
+    with patch("custom_components.mysa.mysa_api.MysaClient"), \
+         patch("custom_components.mysa.mysa_api.MysaRealtime"):
+        api = MysaApi("u", "p", mock_hass)
+        api.client.set_device_setting_http = AsyncMock()
+        api.realtime.send_command = AsyncMock()
+        api.coordinator_callback = AsyncMock()
+
+        # Call the method
+        await api.set_sensor_mode("d1", 1)
+
+        # Verify Optimistic Cache Update
+        assert api.states["d1"]["SensorMode"] == 1
+        assert "Timestamp" in api.states["d1"]
+
+        # Verify UI Refresh
+        api.coordinator_callback.assert_called_once()
+
+        # Verify HTTP Command (1=Floor -> TrackedSensor=3)
+        api.client.set_device_setting_http.assert_called_once_with("d1", {"TrackedSensor": 3})
+
+        # Verify Notify
+        # Notify calls realtime.send_command with msg_type=6
+        api.realtime.send_command.assert_called()
+        call_args = api.realtime.send_command.call_args
+        assert call_args.kwargs.get("msg_type") == 6
+
+@pytest.mark.asyncio
+async def test_device_infloor_ambient_logic(mock_hass):
+    """Test In-Floor Ambient mode detection (Cover device.py lines 207-208)."""
+    # This logic is in normalize_state, which is called by api._on_mqtt_update or get_state
+    # We can test it via _on_mqtt_update
+
+    with patch("custom_components.mysa.mysa_api.MysaClient"), \
+         patch("custom_components.mysa.mysa_api.MysaRealtime"):
+        api = MysaApi("u", "p", mock_hass)
+
+        # Test case: TrackedSensor = 5 (Ambient)
+        await api._on_mqtt_update("d1", {"TrackedSensor": 5})
+
+        # Verify SensorMode is set to 0 (Ambient)
+        assert api.states["d1"]["SensorMode"] == 0
+
+        # Verify other case (Floor) just to be sure
+        await api._on_mqtt_update("d1", {"TrackedSensor": 3})
+        assert api.states["d1"]["SensorMode"] == 1
+
 
 @pytest.mark.asyncio
 async def test_timestamp_prevents_stale_update_explicit(mock_hass):

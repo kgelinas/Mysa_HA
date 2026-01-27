@@ -31,6 +31,63 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.insert(0, parent_dir)
 
+# Mock homeassistant module for standalone execution
+try:
+    import homeassistant
+except ImportError:
+    from unittest.mock import MagicMock
+    import types
+
+    def mock_module(name):
+        m = types.ModuleType(name)
+        sys.modules[name] = m
+        return m
+
+    mock_module("homeassistant")
+    mock_module("homeassistant.const")
+    mock_module("homeassistant.exceptions")
+    mock_module("homeassistant.util")
+    mock_module("homeassistant.helpers")
+    mock_module("homeassistant.components")
+    core = mock_module("homeassistant.core")
+    core.HomeAssistant = MagicMock()
+
+    config_entries = mock_module("homeassistant.config_entries")
+    config_entries.ConfigEntry = MagicMock()
+
+    exceptions = mock_module("homeassistant.exceptions")
+    exceptions.ConfigEntryAuthFailed = MagicMock
+
+    uc = mock_module("homeassistant.helpers.update_coordinator")
+    uc.DataUpdateCoordinator = MagicMock()
+    uc.UpdateFailed = MagicMock
+
+    aio = mock_module("homeassistant.helpers.aiohttp_client")
+    aio.async_get_clientsession = MagicMock()
+
+    storage = mock_module("homeassistant.helpers.storage")
+    storage.Store = MagicMock()
+
+    ir = mock_module("homeassistant.helpers.issue_registry")
+    ir.IssueSeverity = MagicMock()
+    ir.async_create_issue = MagicMock()
+    ir.async_delete_issue = MagicMock()
+
+    dr = mock_module("homeassistant.helpers.device_registry")
+    dr.async_get = MagicMock()
+    dr.DeviceInfo = MagicMock()
+    dr.CONNECTION_NETWORK_MAC = "mac"
+
+    # Mock template and extensions specifically
+    tmpl = mock_module("homeassistant.helpers.template")
+    ext = mock_module("homeassistant.helpers.template.extensions")
+    tmpl.extensions = ext
+
+    # Mock specific constants potentially used
+    sys.modules["homeassistant.const"].Platform = MagicMock()
+    sys.modules["homeassistant.const"].Platform.CLIMATE = "climate"
+
+
 try:
     from custom_components.mysa.mysa_auth import (
         login, refresh_and_sign_url,
@@ -663,7 +720,7 @@ class MysaDebugTool:
             return
 
         try:
-            payload = json.loads(json_str)
+            payload = json.loads(json_str, strict=False)
         except json.JSONDecodeError as e:
             print(f"Invalid JSON: {e}")
             return
@@ -688,7 +745,7 @@ class MysaDebugTool:
             return
 
         try:
-            body = json.loads(json_str)
+            body = json.loads(json_str, strict=False)
         except json.JSONDecodeError as e:
             print(f"Invalid JSON: {e}")
             return
@@ -754,7 +811,11 @@ class MysaDebugTool:
         # Docs start with "Set temperature".
 
         # I will add the "Set Temperature" example to the Heating section of `mysa_debug.py` to be comprehensive.
-        pass
+        # Wrapper construction
+        wrapper = {
+            "msg": 44,
+            "body": body
+        }
 
         safe_did = did.replace(":", "").lower()
         topic = f"/v1/dev/{safe_did}/in"

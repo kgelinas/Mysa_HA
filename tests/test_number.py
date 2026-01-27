@@ -324,3 +324,17 @@ async def test_number_value_error(hass):
     )
 
     assert entity.native_value is None
+
+
+class TestNumberCoverageGaps:
+    """Coverage tests moved from test_coverage_gap.py."""
+
+    def test_number_coverage(self, mock_coordinator, mock_config_entry):
+        """Exercise number.py missing lines."""
+        from custom_components.mysa.number import MysaNumber
+        entity = MysaNumber(mock_coordinator, "dev1", {}, MagicMock(), mock_config_entry, "key", "key")
+        # 89, 95, 110
+        mock_coordinator.data = None
+        assert entity.device_info is not None
+        assert entity._extract_value(None, ["key"]) is None
+        assert entity._get_value_with_pending(["key"]) is None

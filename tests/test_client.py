@@ -516,6 +516,39 @@ class TestMysaClient:
             states = await client.get_state()
             assert "d1" in states
 
+    async def test_get_state_refreshes_homes(self, mock_hass):
+        """Test get_state calls fetch_homes to update ERate."""
+        client = MysaClient(mock_hass, "u", "p")
+        client._user_obj = MagicMock()
+        client._user_obj.id_claims = {"exp": 9999999999}
+        client._user_obj.id_token = "token"
+
+        state_response = create_mock_response({"DeviceStatesObj": []})
+        devices_response = create_mock_response({"DevicesObj": []})
+
+        call_count = [0]
+        def mock_get(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 2: # Order: get_state, fetch_homes, get_devices
+                return create_async_context_manager(devices_response)
+            return create_async_context_manager(state_response)
+
+        mock_session = MagicMock()
+        mock_session.get = mock_get
+
+        # 1. Verify fetch_homes is called
+        with patch("custom_components.mysa.client.async_get_clientsession", return_value=mock_session), \
+             patch.object(client, "fetch_homes", new_callable=AsyncMock) as mock_fetch:
+            await client.get_state()
+            mock_fetch.assert_called_once()
+
+        # 2. Verify exceptions are suppressed
+        mock_session.get = mock_get # Reset side effect logic if needed, or simple mock
+        with patch("custom_components.mysa.client.async_get_clientsession", return_value=mock_session), \
+             patch.object(client, "fetch_homes", side_effect=Exception("Fetch Fail")):
+            # Should not raise exception
+            await client.get_state()
+
     async def test_get_state_no_session(self, mock_hass):
         client = MysaClient(mock_hass, "u", "p")
         with pytest.raises(RuntimeError):
@@ -768,7 +801,7 @@ class TestClientCoverage:
     """Test new coverage areas in client.py."""
 
     async def test_fetch_homes_erate_parsing(self, mock_hass):
-        """Test parsing of different ERate formats (comma, string, float)."""
+        """Test parsing of different ERate formats (comma, string, float, currency)."""
         client = MysaClient(mock_hass, "u", "p")
         client._user_obj = MagicMock()
         client._user_obj.id_claims = {"exp": 9999999999}
@@ -776,13 +809,20 @@ class TestClientCoverage:
 
         # Case 1: Comma decimal string "0,15"
         # Case 2: Dot decimal string "0.12"
-        # Case 3: Invalid string "abc" (exception coverage)
+        # Case 3: Currency symbol "$0.07" (Fix verification)
+        # Case 4: Currency symbol "€ 0,15" (Fix verification)
+        # Case 5: Float input
+        # Case 6: Invalid string "abc" (exception coverage)
+        # Case 7: None
         mock_response = create_mock_response({
             "Homes": [
                 {"Id": "h1", "ERate": "0,15", "Zones": []},
                 {"Id": "h2", "ERate": "0.12", "Zones": []},
-                {"Id": "h3", "ERate": "abc", "Zones": []},
-                {"Id": "h4", "ERate": None, "Zones": []}
+                {"Id": "h3", "ERate": "$0.07", "Zones": []},
+                {"Id": "h4", "ERate": "€ 0,15", "Zones": []},
+                {"Id": "h5", "ERate": 0.08, "Zones": []},
+                {"Id": "h6", "ERate": "abc", "Zones": []},
+                {"Id": "h7", "ERate": None, "Zones": []}
             ]
         })
         mock_session = MagicMock()
@@ -793,8 +833,11 @@ class TestClientCoverage:
 
             assert client.home_rates.get("h1") == 0.15
             assert client.home_rates.get("h2") == 0.12
-            assert "h3" not in client.home_rates
-            assert "h4" not in client.home_rates
+            assert client.home_rates.get("h3") == 0.07
+            assert client.home_rates.get("h4") == 0.15
+            assert client.home_rates.get("h5") == 0.08
+            assert "h6" not in client.home_rates
+            assert "h7" not in client.home_rates
 
     async def test_fetch_homes_device_mapping_fallback(self, mock_hass):
         """Test device mapping fallback via Zone ID."""

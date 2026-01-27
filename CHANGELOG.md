@@ -3,6 +3,24 @@
 All notable changes to this project will be documented in this file.
 
 
+## [0.9.1-beta1] - 2026-01-26
+### Fixed
+- **In-Floor Temperature**: Resolved issue where In-Floor units displayed Ambient (Air) temperature instead of Floor temperature.
+- **Tracked Sensor Support**: Added automatic detection of `TrackedSensor` and `trackedSnsr` keys to correctly infer the active sensor mode (Ambient vs Floor).
+- **MQTT Stability**: Fixed parsing of JSON payloads containing unescaped newlines (error 1005) by using `strict=False` in JSON decoder.
+
+### Added
+- **Sensor Mode Selector**: New `Sensor Mode` select entity for In-Floor devices (INF-V1). Allows manual switching between "Ambient" and "Floor" modes, which forces the thermostat to display the correct temperature source.
+- **Beta Channel**: Documented beta release process for HACS testing.
+
+## [0.9.1] - 2026-01-25
+### Changed
+- **Documentation**: Added detailed Energy Dashboard configuration guide, including best practices for "Individual Devices" vs "Grid Consumption".
+
+### Fixed
+- **Electricity Rate**: Handled cases where the electricity rate contains a comma instead of a dot.
+- **Electricity Rate**: Now refreshes from the cloud periodically (every 120s) instead of only on startup. ensure rates are kept in sync with the Mysa App.
+
 ## [0.9.0] - 2026-01-25
 ### Added
 - **Documentation**: Added comprehensive explanations for API and Protocol documentation to improve maintainability.

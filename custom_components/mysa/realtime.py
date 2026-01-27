@@ -236,7 +236,7 @@ class MysaRealtime:
     async def _process_mqtt_publish(self, pkt: Any) -> None:
         """Process an MQTT publish packet."""
         try:
-            payload = json.loads(pkt.payload)
+            payload = json.loads(pkt.payload, strict=False)
             topic = pkt.topic
 
             # Extract Device ID logic -- maybe move to utility or keep here
@@ -478,7 +478,7 @@ class MysaRealtime:
                         resp = resp.encode()
                     pkt = parse_mqtt_packet(resp)
                     if isinstance(pkt, mqtt.PublishPacket):
-                        resp_payload = json.loads(pkt.payload)
+                        resp_payload = json.loads(pkt.payload, strict=False)
                         # Process response
                         state_update = self._extract_state_update(resp_payload)
                         if state_update:

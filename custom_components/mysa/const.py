@@ -88,3 +88,18 @@ AC_HORIZONTAL_SWING_MODES_REVERSE = {v: k for k, v in AC_HORIZONTAL_SWING_MODES.
 
 # AC Payload type for MQTT commands
 AC_PAYLOAD_TYPE = 2
+
+
+# =============================================================================
+# In-Floor Constants
+# =============================================================================
+
+SENSOR_MODE_AMBIENT = 0
+SENSOR_MODE_FLOOR = 1
+
+SENSOR_MODES = {
+    SENSOR_MODE_AMBIENT: "ambient",
+    SENSOR_MODE_FLOOR: "floor",
+}
+
+SENSOR_MODES_REVERSE = {v: k for k, v in SENSOR_MODES.items()}

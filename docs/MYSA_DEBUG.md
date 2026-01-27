@@ -34,6 +34,7 @@ If you have Python installed or want to modifying the code:
 
 On first run, you'll be prompted for your Mysa account credentials. These are saved to `~/.mysa_debug_auth.json` for future sessions.
 
+
 ## Commands
 
 | Command                  | Description                              |

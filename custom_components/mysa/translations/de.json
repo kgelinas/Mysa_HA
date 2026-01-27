@@ -65,6 +65,15 @@
         }
     },
     "entity": {
+        "select": {
+            "sensor_mode": {
+                "name": "Sensormodus",
+                "state": {
+                    "ambient": "Umgebung",
+                    "floor": "Boden"
+                }
+            }
+        },
         "sensor": {
             "ip_address": {
                 "name": "IP-Adresse"
@@ -72,6 +81,11 @@
             "serial_number": {
                 "name": "Seriennummer"
             }
+        }
+    },
+    "exceptions": {
+        "set_sensor_mode_failed": {
+            "message": "Sensormodus konnte nicht festgelegt werden: {error}"
         }
     }
 }

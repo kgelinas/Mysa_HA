@@ -1,6 +1,6 @@
 # Mysa for Home Assistant
 
-[![Version](https://img.shields.io/badge/version-0.9.0-blue.svg)](https://github.com/kgelinas/Mysa_HA)
+[![Version](https://img.shields.io/badge/version-0.9.1-blue.svg)](https://github.com/kgelinas/Mysa_HA)
 
 ...
 
@@ -58,6 +58,7 @@ A native cloud integration for Mysa devices in Home Assistant. Uses the official
 - This integrations uses a persistent MQTT connection. If updates are slow, check your internet connection or logs for "Reconnecting..." messages.
 
 ---
+
 
 ## Installation via HACS
 

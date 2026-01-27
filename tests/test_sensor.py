@@ -27,6 +27,9 @@ from custom_components.mysa.sensor import (
     MysaPowerSensor,
     MysaCurrentSensor,
     MysaEnergySensor,
+    MysaIpSensor,
+    MysaTemperatureSensor,
+    MysaHumiditySensor,
 )
 
 
@@ -2081,3 +2084,77 @@ async def test_energy_sensor_accumulation_logic(hass, mock_api, mock_entry, mock
     with patch("time.time", return_value=t3):
         energy_sensor._handle_coordinator_update()
         assert energy_sensor.native_value == 1.0
+
+
+class TestSensorCoverageGaps:
+    """Coverage tests moved from test_coverage_gap.py."""
+
+    def test_sensor_diagnostic_coverage(self, mock_coordinator, mock_entry):
+        """Exercise sensor.py diagnostic missing lines."""
+        entity = MysaDiagnosticSensor(mock_coordinator, "dev1", {}, "key", "key", None, SensorStateClass.MEASUREMENT, None, mock_entry)
+        # 299-300
+        assert entity._extract_value(None, ["key"]) is None
+        # Try to hit value conversion failure if possible
+        mock_coordinator.data = {"dev1": {"key": "not_a_number"}}
+        # Instead of mocking extract_value, let's just test that it returns the string if float fails
+        assert entity.native_value == "not_a_number"
+
+    def test_sensor_power_coverage(self, mock_coordinator, mock_entry, mock_api):
+        """Exercise sensor.py power missing lines."""
+        entity = MysaPowerSensor(mock_coordinator, "dev1", {}, mock_api, mock_entry)
+        # 351, 367, 370, 425
+        assert entity._extract_value(None, ["key"]) is None
+        mock_coordinator.data = None
+        assert entity.native_value is None
+        assert entity.extra_state_attributes == {}
+        mock_coordinator.data = {"other": {}}
+        assert entity.native_value is None
+
+    def test_sensor_current_coverage(self, mock_coordinator, mock_entry, mock_api):
+        """Exercise sensor.py current missing lines."""
+        entity = MysaCurrentSensor(mock_coordinator, "dev1", {}, mock_api, mock_entry)
+        # 479, 497
+        assert entity._extract_value(None, ["key"]) is None
+        mock_coordinator.data = None
+        assert entity.native_value is None
+        mock_coordinator.data = {"other": {}}
+        assert entity.native_value is None
+
+    def test_sensor_ip_coverage(self, mock_coordinator, mock_entry):
+        """Exercise sensor.py IP missing lines."""
+        entity = MysaIpSensor(mock_coordinator, "dev1", {}, mock_entry)
+        # 739 (native_value state None)
+        mock_coordinator.data = {} # state is None
+        assert entity.native_value is None
+        mock_coordinator.data = {"dev1": {"ip": "1.2.3.4"}}
+        assert entity.native_value == "1.2.3.4"
+        mock_coordinator.data = {"dev1": {"Local IP": "5.6.7.8"}}
+        assert entity.native_value == "5.6.7.8"
+
+        # Nested dict cases for 739-742
+        mock_coordinator.data = {"dev1": {"ip": {"v": "1.1.1.1"}}}
+        assert entity.native_value == "1.1.1.1" # Covers 739
+        mock_coordinator.data = {"dev1": {"ip": {"v": None, "Id": "2.2.2.2"}}}
+        assert entity.native_value == "2.2.2.2" # Covers 741
+        mock_coordinator.data = {"dev1": {"ip": {"v": None, "Id": None}}}
+        assert entity.native_value is None # Covers the end of loop
+
+    def test_sensor_temp_coverage(self, mock_coordinator, mock_entry):
+        """Exercise sensor.py Temperature missing lines."""
+        entity = MysaTemperatureSensor(mock_coordinator, "dev1", {}, MagicMock(), mock_entry)
+        # 774-775, 781, 784
+        mock_coordinator.data = None
+        assert entity.device_info is not None
+        assert entity.native_value is None
+        mock_coordinator.data = {"other": {}}
+        assert entity.native_value is None
+
+    def test_sensor_hum_coverage(self, mock_coordinator, mock_entry):
+        """Exercise sensor.py Humidity missing lines."""
+        entity = MysaHumiditySensor(mock_coordinator, "dev1", {}, MagicMock(), mock_entry)
+        # 837-838, 844, 847
+        mock_coordinator.data = None
+        assert entity.device_info is not None
+        assert entity.native_value is None
+        mock_coordinator.data = {"other": {}}
+        assert entity.native_value is None

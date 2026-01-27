@@ -7,6 +7,7 @@ to improve code coverage for climate.py.
 
 import sys
 import os
+import time
 
 # Add project root to path for imports
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -2764,3 +2765,142 @@ async def test_ac_dry_mode_restore_logic(hass, mock_coordinator, mock_device_dat
     # Verify set_target_temperature(21.0) was NOT called
     mock_api.set_target_temperature.assert_not_called()
     mock_api.set_hvac_mode.assert_called_with("dev1", "heat")
+
+@pytest.mark.asyncio
+async def test_climate_infloor_respects_cache(hass, mock_coordinator, mock_entry):
+    """Test behavior when SensorMode is present in cache (simulating set_sensor_mode effect)."""
+    from custom_components.mysa.climate import MysaClimate
+    entity = MysaClimate(
+        mock_coordinator,
+        "infloor_device",
+        {"Id": "infloor_device", "Name": "Bathroom", "Model": "INF-V1"},
+        MagicMock(),
+        mock_entry
+    )
+
+    mock_coordinator.data = {
+        "infloor_device": {
+            "ambTemp": 20.0,
+            "Infloor": 30.0,
+            "SensorMode": 1
+        }
+    }
+
+    # This confirms that IF the cache is updated (by select entity), Climate reads it correctly
+    assert entity.current_temperature == 30.0
+
+@pytest.mark.asyncio
+async def test_climate_infloor_tracked_sensor_fallback(hass, mock_coordinator, mock_entry):
+    """Test behavior when SensorMode is missing but TrackedSensor is present (automatic fix)."""
+    from custom_components.mysa.climate import MysaClimate
+    from custom_components.mysa.device import MysaDeviceLogic
+
+    entity = MysaClimate(
+        mock_coordinator,
+        "infloor_device",
+        {"Id": "infloor_device", "Name": "Bathroom", "Model": "INF-V1"},
+        MagicMock(),
+        mock_entry
+    )
+
+    # Payload similar to user report: No SensorMode, but TrackedSensor=3 (Floor)
+    mock_coordinator.data = {
+        "infloor_device": {
+            "ambTemp": 20.0,
+            "Infloor": 30.0,
+            "TrackedSensor": 3  # Should Map to SensorMode=1 (Floor)
+        }
+    }
+
+    # Manually invoke normalization as Climate depends on it being done upstream
+    data = mock_coordinator.data["infloor_device"]
+    MysaDeviceLogic.normalize_state(data)
+
+    # Now check if Climate picks it up
+    assert data["SensorMode"] == 1
+    assert entity.current_temperature == 30.0
+
+@pytest.mark.asyncio
+async def test_climate_infloor_tracked_sensor_camel_case(hass, mock_coordinator, mock_entry):
+    """Test behavior when using camelCase keys (trackedSnsr, flrSnsrTemp)."""
+    from custom_components.mysa.climate import MysaClimate
+    from custom_components.mysa.device import MysaDeviceLogic
+
+    entity = MysaClimate(
+        mock_coordinator,
+        "infloor_device",
+        {"Id": "infloor_device", "Name": "Bathroom", "Model": "INF-V1"},
+        MagicMock(),
+        mock_entry
+    )
+
+    # Payload from user report
+    mock_coordinator.data = {
+        "infloor_device": {
+            "ambTemp": 16.2,
+            "flrSnsrTemp": 22.2,
+            "hum": 58,
+            "trackedSnsr": 3,
+            "stpt": 22,
+        }
+    }
+
+    # Verify normalization happens
+    data = mock_coordinator.data["infloor_device"]
+    MysaDeviceLogic.normalize_state(data)
+
+    # Check if SensorMode is inferred
+    assert data.get("SensorMode") == 1
+    # Check if Infloor temp is extracted
+    assert data.get("Infloor") == 22.2
+
+    # Check Climate entity behavior
+    assert entity.current_temperature == 22.2
+
+@pytest.mark.asyncio
+async def test_climate_infloor_tracked_sensor_malformed(hass, mock_coordinator, mock_entry):
+    """Test behavior when using malformed TrackedSensor (exception handling coverage)."""
+    from custom_components.mysa.climate import MysaClimate
+    from custom_components.mysa.device import MysaDeviceLogic
+
+    entity = MysaClimate(
+        mock_coordinator,
+        "infloor_device",
+        {"Id": "infloor_device", "Name": "Bathroom", "Model": "INF-V1"},
+        MagicMock(),
+        mock_entry
+    )
+
+    # Payload with invalid TrackedSensor value
+    mock_coordinator.data = {
+        "infloor_device": {
+            "ambTemp": 16.2,
+            "flrSnsrTemp": 22.2,
+            "TrackedSensor": "invalid_int", # Should trigger ValueError
+        }
+    }
+
+    data = mock_coordinator.data["infloor_device"]
+    MysaDeviceLogic.normalize_state(data)
+
+    # Should not crash, and SensorMode should remain None
+    assert data.get("SensorMode") is None
+    # Should fall back to Ambient temp (default logic when SensorMode missing)
+    assert entity.current_temperature == 16.2
+
+
+class TestClimateCoverageGaps:
+    """Coverage tests moved from test_coverage_gap.py."""
+
+    def test_climate_coverage(self, mock_coordinator, mock_entry):
+        """Exercise climate.py missing lines."""
+        from custom_components.mysa.climate import MysaClimate
+        entity = MysaClimate(mock_coordinator, "dev1", {}, MagicMock(), mock_entry)
+        # 212-213 (None state)
+        assert entity._extract_value(None, ["key"]) is None
+        # 206-207 (None data)
+        mock_coordinator.data = None
+        assert entity._get_state_data() is None
+        # 230 sticky expiration
+        entity._pending_updates["test"] = {"value": 1, "ts": time.time() - 31}
+        assert entity._get_sticky_value("test", 0) == 0

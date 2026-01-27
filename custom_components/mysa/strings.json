@@ -102,7 +102,23 @@
         },
         "select": {
             "horizontal_swing": {
-                "name": "Horizontal Swing"
+                "name": "Horizontal Swing",
+                "state": {
+                    "auto": "Auto",
+                    "left": "Left",
+                    "left_center": "Left Center",
+                    "center": "Center",
+                    "right_center": "Right Center",
+                    "right_wide": "Right Wide",
+                    "right": "Right"
+                }
+            },
+            "sensor_mode": {
+                "name": "Sensor Mode",
+                "state": {
+                    "ambient": "Ambient",
+                    "floor": "Floor"
+                }
             }
         },
         "sensor": {
@@ -162,6 +178,32 @@
             "firmware": {
                 "name": "Firmware"
             }
+        }
+    },
+    "exceptions": {
+        "set_temperature_failed": {
+            "message": "Failed to set temperature: {error}"
+        },
+        "set_hvac_mode_failed": {
+            "message": "Failed to set HVAC mode: {error}"
+        },
+        "set_ac_hvac_mode_failed": {
+            "message": "Failed to set AC HVAC mode: {error}"
+        },
+        "set_ac_temperature_failed": {
+            "message": "Failed to set AC temperature: {error}"
+        },
+        "set_ac_fan_mode_failed": {
+            "message": "Failed to set AC fan mode: {error}"
+        },
+        "set_ac_swing_mode_failed": {
+            "message": "Failed to set AC swing mode: {error}"
+        },
+        "set_horizontal_swing_failed": {
+            "message": "Failed to set horizontal swing: {error}"
+        },
+        "set_sensor_mode_failed": {
+            "message": "Failed to set sensor mode: {error}"
         }
     }
 }

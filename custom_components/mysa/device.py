@@ -107,8 +107,6 @@ class MysaDeviceLogic:
 
     @staticmethod
     def normalize_state(state: Dict[str, Any]) -> None:
-        """Standardize keys across HTTP and MQTT responses. Modifies state in-place."""
-
         # Helper to get first available value that isn't None
         def get_v(keys: List[str], prefer_v: bool = True) -> Any:
             for k in keys:
@@ -153,7 +151,8 @@ class MysaDeviceLogic:
         if hs_val is not None:
             state['HeatSink'] = hs_val
         if 'if' in state or 'flrSnsrTemp' in state:
-            state['Infloor'] = get_v(['if', 'Infloor', 'flrSnsrTemp'])
+            val = get_v(['if', 'Infloor', 'flrSnsrTemp'])
+            state['Infloor'] = val
 
         # Brightness variants
         # prefer 'br' then 'MaxBrightness' then complex 'Brightness' dict
@@ -175,31 +174,73 @@ class MysaDeviceLogic:
                 except (ValueError, TypeError):
                     pass
 
-        # Lock variants
-        lock_val = get_v(['ButtonState', 'alk', 'lc', 'lk', 'Lock'])
-        if lock_val is not None:
-            # Handle int/string/bool
-            state['Lock'] = 1 if (str(lock_val).lower() in ['1', 'true', 'on', 'locked']) else 0
+        duty_val = get_v(['dc', 'Duty', 'DutyCycle', 'heatStat'])
+        if duty_val is not None:
+            state['DutyCycle'] = duty_val
+
+        # Voltage (lineVtg for In-Floor)
+        volt_val = get_v(['loadVtg', 'voltage', 'lineVtg'])
+        if volt_val is not None:
+            state['Voltage'] = volt_val
+
+        load_val = get_v(['loadCurr', 'current'])
+        if load_val is not None:
+            state['Current'] = load_val
+
+        # --- Device Settings ---
+
+        # 1. Zone
+        grp_val = get_v(['grp', 'Zone'])
+        if grp_val is not None:
+            state['Zone'] = grp_val
+
+        # 2. Timezone/Region
+        reg_val = get_v(['reg', 'Region'])
+        if reg_val is not None:
+            state['Region'] = reg_val
+
+        # 3. Mode/Schedule
+        # For simplicity, we just look for 'mode' or 'sched' for now if needed
+
+        # 4. Lock
+        lk_val = get_v(['lk', 'lock', 'Lock', 'ButtonState', 'alk', 'lc'])
+        if lk_val is not None:
+             # Handle int/string/bool. 'Locked' is a string value from ButtonState.
+            state['Lock'] = 1 if (str(lk_val).lower() in ['1', 'true', 'on', 'locked']) else 0
+
+        # 5. Proximity
+        px_val = get_v(['px', 'ProximityMode'])
+        if px_val is not None:
+            state['ProximityMode'] = str(px_val).lower() in ['1', 'true', 'on']
 
         # Connectivity variant
         conn_val = get_v(['Connected'])
         if conn_val is not None:
             state['Connected'] = (str(conn_val).lower() in ['1', 'true', 'on'])
 
-        # Proximity variants
-        px_val = get_v(['px', 'ProximityMode'])
-        if px_val is not None:
-            state['ProximityMode'] = str(px_val).lower() in ['1', 'true', 'on']
-
         # SensorMode variants (0=Ambient/Air, 1=Floor)
-        sm_val = get_v(['sm', 'SensorMode', 'ControlMode'])
+        sm_val = get_v(['SensorMode'])
         if sm_val is not None:
             state['SensorMode'] = int(sm_val)
+        else:
+            # Fallback: Infer from TrackedSensor (In-Floor devices)
+            # Observed: 3 = Floor, 5 = Ambient
+            ts_val = get_v(['TrackedSensor', 'trackedSnsr'])
+            if ts_val is not None:
+                try:
+                    ts_int = int(ts_val)
+                    if ts_int == 3: # 3=Floor (Active)
+                        state['SensorMode'] = 1  # Floor
+                    elif ts_int == 5: # 5=Ambient (Active)
+                        state['SensorMode'] = 0  # Ambient
+                except (ValueError, TypeError):
+                    pass
 
         # AutoBrightness variants
         ab_val = get_v(['ab', 'AutoBrightness'])
         if ab_val is not None:
             state['AutoBrightness'] = str(ab_val).lower() in ['1', 'true', 'on']
+
 
         # EcoMode / Climate+ variants
         # ecoMode/eco: 0=On, 1=Off

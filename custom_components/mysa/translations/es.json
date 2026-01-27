@@ -65,6 +65,15 @@
         }
     },
     "entity": {
+        "select": {
+            "sensor_mode": {
+                "name": "Modo de Sensor",
+                "state": {
+                    "ambient": "Ambiente",
+                    "floor": "Suelo"
+                }
+            }
+        },
         "sensor": {
             "ip_address": {
                 "name": "Direcci\u00f3n IP"
@@ -72,6 +81,11 @@
             "serial_number": {
                 "name": "N\u00famero de serie"
             }
+        }
+    },
+    "exceptions": {
+        "set_sensor_mode_failed": {
+            "message": "Error al establecer el modo de sensor: {error}"
         }
     }
 }

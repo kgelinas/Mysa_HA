@@ -18,6 +18,8 @@ from .const import (
     DOMAIN,
     AC_HORIZONTAL_SWING_MODES,
     AC_HORIZONTAL_SWING_MODES_REVERSE,
+    SENSOR_MODES,
+    SENSOR_MODES_REVERSE,
 )
 from . import MysaData
 from .mysa_api import MysaApi
@@ -44,6 +46,14 @@ async def async_setup_entry(
         if api.is_ac_device(device_id):
             entities.append(
                 MysaHorizontalSwingSelect(coordinator, device_id, device_data, api, entry)
+            )
+
+        # Add sensor mode select for In-Floor devices
+        model = str(device_data.get("Model", ""))
+        is_infloor = "INF-V1" in model or "Floor" in model
+        if is_infloor:
+            entities.append(
+                MysaSensorModeSelect(coordinator, device_id, device_data, api, entry)
             )
 
     if entities:
@@ -176,5 +186,104 @@ class MysaHorizontalSwingSelect(
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
                 translation_key="set_horizontal_swing_failed",
+                translation_placeholders={"error": str(e)},
+            ) from e
+
+
+class MysaSensorModeSelect(
+    SelectEntity, CoordinatorEntity[DataUpdateCoordinator[Dict[str, Any]]]
+):
+    """Select entity for In-Floor Sensor Mode."""
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_translation_key = "sensor_mode"
+
+    def __init__(
+        self,
+        coordinator: DataUpdateCoordinator[Dict[str, Any]],
+        device_id: str,
+        device_data: Dict[str, Any],
+        api: MysaApi,
+        entry: ConfigEntry[MysaData]
+    ) -> None:
+        """Initialize."""
+        super().__init__(coordinator)
+        self._device_id = device_id
+        self._device_data = device_data
+        self._api = api
+        self._entry = entry
+        self._attr_unique_id = f"{device_id}_sensor_mode"
+        self._pending_option: Optional[str] = None
+        self._pending_timestamp: Optional[float] = None
+        self._options = list(SENSOR_MODES.values())
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device info."""
+        state = self.coordinator.data.get(self._device_id) if self.coordinator.data else None
+        return MysaDeviceLogic.get_device_info(self._device_id, self._device_data, state)
+
+    @property
+    def options(self) -> List[str]:
+        """Return list of available options."""
+        return self._options
+
+    @property
+    def current_option(self) -> Optional[str]:
+        """Return current sensor mode using sticky optimistic logic."""
+        # Calculate current cloud option
+        state = None
+        if self.coordinator.data:
+            state = self.coordinator.data.get(self._device_id)
+
+        current_cloud_option: Optional[str] = None
+        if state:
+            # Check SensorMode/ControlMode
+            val = state.get("SensorMode")
+            # Fallback if SensorMode missing but ControlMode present?
+            # device.py normalizes to SensorMode so we should rely on it.
+            if val is not None:
+                current_cloud_option = SENSOR_MODES.get(int(val))
+
+        if self._pending_option is not None:
+            # 1. Check expiration
+            if self._pending_timestamp and (time.time() - self._pending_timestamp > 30):
+                self._pending_option = None
+                self._pending_timestamp = None
+                return current_cloud_option if current_cloud_option else "ambient"
+
+            # 2. Check convergence
+            if current_cloud_option is not None and current_cloud_option == self._pending_option:
+                self._pending_option = None
+                self._pending_timestamp = None
+                return current_cloud_option
+
+            # 3. Sticky return
+            return self._pending_option
+
+        # Default to ambient if unknown
+        return current_cloud_option if current_cloud_option else "ambient"
+
+    async def async_select_option(self, option: str) -> None:
+        """Set sensor mode."""
+        try:
+            mode = SENSOR_MODES_REVERSE.get(option.lower())
+            if mode is None:
+                _LOGGER.error("Unknown sensor mode option: %s", option)
+                return
+
+            # Optimistic update
+            self._pending_option = option
+            self._pending_timestamp = time.time()
+            self.async_write_ha_state()
+
+            await self._api.set_sensor_mode(self._device_id, mode)
+
+        except Exception as e:
+            _LOGGER.error("Failed to set sensor mode: %s", e)
+            self._pending_option = None
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_sensor_mode_failed",
                 translation_placeholders={"error": str(e)},
             ) from e

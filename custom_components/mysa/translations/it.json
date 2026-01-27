@@ -65,6 +65,15 @@
         }
     },
     "entity": {
+        "select": {
+            "sensor_mode": {
+                "name": "Modalit\u00e0 Sensore",
+                "state": {
+                    "ambient": "Ambiente",
+                    "floor": "Pavimento"
+                }
+            }
+        },
         "sensor": {
             "ip_address": {
                 "name": "Indirizzo IP"
@@ -72,6 +81,11 @@
             "serial_number": {
                 "name": "Numero di serie"
             }
+        }
+    },
+    "exceptions": {
+        "set_sensor_mode_failed": {
+            "message": "Impossibile impostare la modalit\u00e0 sensore: {error}"
         }
     }
 }

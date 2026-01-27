@@ -62,6 +62,13 @@
         "select": {
             "horizontal_swing": {
                 "name": "Horizontal Swing"
+            },
+            "sensor_mode": {
+                "name": "Sensor Mode",
+                "state": {
+                    "ambient": "Ambient",
+                    "floor": "Floor"
+                }
             }
         },
         "sensor": {
@@ -182,6 +189,9 @@
         },
         "set_horizontal_swing_failed": {
             "message": "Failed to set horizontal swing: {error}"
+        },
+        "set_sensor_mode_failed": {
+            "message": "Failed to set sensor mode: {error}"
         }
     },
     "issues": {

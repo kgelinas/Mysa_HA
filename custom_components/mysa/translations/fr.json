@@ -65,6 +65,15 @@
         }
     },
     "entity": {
+        "select": {
+            "sensor_mode": {
+                "name": "Mode de Capteur",
+                "state": {
+                    "ambient": "Ambiant",
+                    "floor": "Plancher"
+                }
+            }
+        },
         "sensor": {
             "ip_address": {
                 "name": "Adresse IP"
@@ -72,6 +81,11 @@
             "serial_number": {
                 "name": "Num\u00e9ro de s\u00e9rie"
             }
+        }
+    },
+    "exceptions": {
+        "set_sensor_mode_failed": {
+            "message": "\u00c9chec du r\u00e9glage du mode de capteur : {error}"
         }
     }
 }
