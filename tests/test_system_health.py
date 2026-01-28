@@ -1,10 +1,11 @@
 """Tests for System Health."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
 
 from custom_components.mysa.const import DOMAIN
-from custom_components.mysa.system_health import system_health_info, async_register
+from custom_components.mysa.system_health import async_register, system_health_info
 
 
 class TestSystemHealth:
@@ -82,10 +83,14 @@ class TestSystemHealth:
         # runtime_data exists but is an empty object (no api attr)
         mock_entry.runtime_data = object()
 
-        with patch("custom_components.mysa.system_health.MysaApi", side_effect=ImportError):
+        with patch(
+            "custom_components.mysa.system_health.MysaApi", side_effect=ImportError
+        ):
             # We patch config_entries.async_entries via hass object
-            with patch.object(hass.config_entries, "async_entries", return_value=[mock_entry]):
-                 result = await system_health_info(hass)
+            with patch.object(
+                hass.config_entries, "async_entries", return_value=[mock_entry]
+            ):
+                result = await system_health_info(hass)
 
         assert result["api_connected"] is False
 
@@ -102,10 +107,14 @@ class TestSystemHealth:
         mock_entry = MagicMock()
         mock_entry.runtime_data.api = mock_api
 
-        with patch("custom_components.mysa.system_health.MysaApi", side_effect=ImportError):
+        with patch(
+            "custom_components.mysa.system_health.MysaApi", side_effect=ImportError
+        ):
             # We patch config_entries.async_entries via hass object
-            with patch.object(hass.config_entries, "async_entries", return_value=[mock_entry]):
-                 result = await system_health_info(hass)
+            with patch.object(
+                hass.config_entries, "async_entries", return_value=[mock_entry]
+            ):
+                result = await system_health_info(hass)
 
         assert result["api_connected"] is True
         assert result["devices"] == 1

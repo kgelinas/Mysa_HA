@@ -1,10 +1,9 @@
-"""
-Tests for Number entities.
-"""
+"""Tests for Number entities."""
+
+from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
-from typing import Any
-from unittest.mock import MagicMock, AsyncMock
 
 
 class TestMysaBrightnessNumber:
@@ -298,9 +297,11 @@ class TestNumberEntitySetup:
 
         assert is_lite is False
 
+
 # ===========================================================================
 # Merged Edge Case Tests
 # ===========================================================================
+
 
 @pytest.mark.asyncio
 async def test_number_value_error(hass):
@@ -316,11 +317,7 @@ async def test_number_value_error(hass):
 
     # Initialize MysaMinBrightnessNumber
     entity = MysaMinBrightnessNumber(
-        mock_coordinator,
-        "device1",
-        {"Name": "Test"},
-        mock_api,
-        mock_entry
+        mock_coordinator, "device1", {"Name": "Test"}, mock_api, mock_entry
     )
 
     assert entity.native_value is None
@@ -332,7 +329,10 @@ class TestNumberCoverageGaps:
     def test_number_coverage(self, mock_coordinator, mock_config_entry):
         """Exercise number.py missing lines."""
         from custom_components.mysa.number import MysaNumber
-        entity = MysaNumber(mock_coordinator, "dev1", {}, MagicMock(), mock_config_entry, "key", "key")
+
+        entity = MysaNumber(
+            mock_coordinator, "dev1", {}, MagicMock(), mock_config_entry, "key", "key"
+        )
         # 89, 95, 110
         mock_coordinator.data = None
         assert entity.device_info is not None

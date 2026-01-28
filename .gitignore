@@ -15,3 +15,5 @@ __pycache__/
 .coverage
 tools/build/
 tools/dist/
+build/
+dist/

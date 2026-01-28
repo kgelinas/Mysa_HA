@@ -1,28 +1,22 @@
-"""
-MQTT E2E tests for Mysa integration.
+"""MQTT E2E tests for Mysa integration.
 
 Tests real-time updates using a mock MQTT broker.
 """
 
-import asyncio
-import json
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
-
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
-from homeassistant.const import CONF_USERNAME, CONF_PASSWORD
-
 
 from custom_components.mysa.const import DOMAIN
 from custom_components.mysa.mysa_auth import BASE_URL
 
 from .mqtt_broker import (
     MockMqttBroker,
-    MockMqttClient,
-    create_mysa_state_update,
     create_mysa_command,
+    create_mysa_state_update,
 )
-
 
 # ===========================================================================
 # Test Data
@@ -49,6 +43,7 @@ MOCK_STATE = {
 # Fixtures
 # ===========================================================================
 
+
 @pytest.fixture
 async def mock_mqtt_broker():
     """Create and start a mock MQTT broker."""
@@ -61,21 +56,23 @@ async def mock_mqtt_broker():
 @pytest.fixture
 def mock_auth():
     """Mock authentication."""
+
     async def side_effect(self, *args, **kwargs):
         self._user_obj = MagicMock()
         self._user_obj.id_claims = {"exp": 9999999999}
         self._user_obj.id_token = "mock_token"
         return True
 
-    with patch("custom_components.mysa.client.MysaClient.authenticate", autospec=True) as mock_method:
+    with patch(
+        "custom_components.mysa.client.MysaClient.authenticate", autospec=True
+    ) as mock_method:
         mock_method.side_effect = side_effect
         yield mock_method
 
 
 @pytest.fixture
 def mock_realtime_with_broker(mock_mqtt_broker):
-    """
-    Mock MysaRealtime to use the mock broker.
+    """Mock MysaRealtime to use the mock broker.
 
     This allows us to inject messages and verify commands.
     """
@@ -93,6 +90,7 @@ def mock_realtime_with_broker(mock_mqtt_broker):
 # ===========================================================================
 # Tests
 # ===========================================================================
+
 
 @pytest.mark.mqtt
 @pytest.mark.asyncio
@@ -134,7 +132,7 @@ async def test_mqtt_wildcard_subscription(mock_mqtt_broker):
     # Inject message matching wildcard
     await mock_mqtt_broker.inject_message(
         topic="/v1/dev/device123/out",
-        payload={"msg": 44, "body": {"state": {"sp": 22.0}}}
+        payload={"msg": 44, "body": {"state": {"sp": 22.0}}},
     )
 
     msg = await client.receive(timeout=1.0)
@@ -151,11 +149,9 @@ async def test_mqtt_state_update_injection(
     mock_auth,
     mock_realtime_with_broker,
     mock_mqtt_broker,
-    aioclient_mock
+    aioclient_mock,
 ):
-    """
-    Test injecting MQTT state updates and verifying entity state changes.
-    """
+    """Test injecting MQTT state updates and verifying entity state changes."""
     # Setup HTTP mocks
     aioclient_mock.get(f"{BASE_URL}/devices", json={"Devices": [MOCK_DEVICE]})
     aioclient_mock.get(f"{BASE_URL}/devices/state", json={"DeviceStates": [MOCK_STATE]})
@@ -184,11 +180,7 @@ async def test_mqtt_state_update_injection(
     # Inject MQTT state update
     new_setpoint = 24.0
     state_update = create_mysa_state_update(
-        MOCK_DEVICE["Id"],
-        sp=new_setpoint,
-        stpt=new_setpoint,
-        ambTemp=21.5,
-        hum=50
+        MOCK_DEVICE["Id"], sp=new_setpoint, stpt=new_setpoint, ambTemp=21.5, hum=50
     )
 
     # Simulate the MQTT update through the API
@@ -215,6 +207,7 @@ async def test_mqtt_state_update_injection(
 
     # Force time forward to clear sticky state
     import time
+
     with patch("time.time", return_value=time.time() + 40):
         # Re-set data to trigger entity update with cleared sticky state
         coordinator.async_set_updated_data(api.states)
@@ -229,14 +222,9 @@ async def test_mqtt_state_update_injection(
 @pytest.mark.mqtt
 @pytest.mark.asyncio
 async def test_mqtt_command_sent(
-    hass: HomeAssistant,
-    mock_auth,
-    mock_realtime_with_broker,
-    aioclient_mock
+    hass: HomeAssistant, mock_auth, mock_realtime_with_broker, aioclient_mock
 ):
-    """
-    Test that HA service calls result in correct MQTT commands.
-    """
+    """Test that HA service calls result in correct MQTT commands."""
     aioclient_mock.get(f"{BASE_URL}/devices", json={"Devices": [MOCK_DEVICE]})
     aioclient_mock.get(f"{BASE_URL}/devices/state", json={"DeviceStates": [MOCK_STATE]})
     aioclient_mock.get(f"{BASE_URL}/users", json={"User": {"Id": "test-user"}})
@@ -286,11 +274,7 @@ async def test_mqtt_message_helpers():
     """Test Mysa message helper functions."""
     # Test state update creation
     state_update = create_mysa_state_update(
-        "device123",
-        sp=22.0,
-        stpt=22.0,
-        ambTemp=20.0,
-        hum=45
+        "device123", sp=22.0, stpt=22.0, ambTemp=20.0, hum=45
     )
 
     assert state_update["msg"] == 44
@@ -298,12 +282,7 @@ async def test_mqtt_message_helpers():
     assert state_update["body"]["state"]["hum"] == 45
 
     # Test command creation
-    command = create_mysa_command(
-        "device123",
-        "user456",
-        sp=23.0,
-        stpt=23.0
-    )
+    command = create_mysa_command("device123", "user456", sp=23.0, stpt=23.0)
 
     assert command["msg"] == 44
     assert command["dest"]["ref"] == "device123"

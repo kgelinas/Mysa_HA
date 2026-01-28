@@ -1,11 +1,11 @@
-"""
-Tests for Select entities.
-"""
+"""Tests for Select entities."""
 
-import pytest
 import time
 from typing import Any
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
 from custom_components.mysa import MysaData
 
 
@@ -256,9 +256,9 @@ class TestSelectEntitySetup:
         mock_data.coordinator = MagicMock()
         mock_config_entry.runtime_data = mock_data
 
-        mock_api.get_devices = AsyncMock(return_value={
-            "infloor_id": {"Model": "INF-V1"}
-        })
+        mock_api.get_devices = AsyncMock(
+            return_value={"infloor_id": {"Model": "INF-V1"}}
+        )
         mock_api.is_ac_device = MagicMock(return_value=False)
 
         async_add_entities = MagicMock()
@@ -271,6 +271,7 @@ class TestSelectEntitySetup:
         assert len(args) == 1
         assert args[0]._device_id == "infloor_id"
 
+
 class TestSensorModeSelect:
     """Test MysaSensorModeSelect entity logic."""
 
@@ -278,7 +279,6 @@ class TestSensorModeSelect:
     async def test_sensor_mode_select(self, hass, mock_coordinator, mock_config_entry):
         """Test MysaSensorModeSelect entity."""
         from custom_components.mysa.select import MysaSensorModeSelect
-        from custom_components.mysa.const import SENSOR_MODES
 
         # Mock API
         mock_api = MagicMock()
@@ -290,7 +290,7 @@ class TestSensorModeSelect:
             "infloor_device",
             {"Id": "infloor_device", "Name": "Bathroom", "Model": "INF-V1"},
             mock_api,
-            mock_config_entry
+            mock_config_entry,
         )
         entity.async_write_ha_state = MagicMock()
         entity.hass = hass
@@ -300,15 +300,11 @@ class TestSensorModeSelect:
         assert "ambient" in entity.options
 
         # Test initial state (Ambient default)
-        mock_coordinator.data = {
-             "infloor_device": {}
-        }
+        mock_coordinator.data = {"infloor_device": {}}
         assert entity.current_option == "ambient"
 
         # Test with SensorMode=1 (Floor)
-        mock_coordinator.data = {
-             "infloor_device": {"SensorMode": 1}
-        }
+        mock_coordinator.data = {"infloor_device": {"SensorMode": 1}}
         # Note: entity.current_option reads from coordinator
         assert entity.current_option == "floor"
 
@@ -319,11 +315,15 @@ class TestSensorModeSelect:
         mock_api.set_sensor_mode.assert_called_with("infloor_device", 1)
 
     @pytest.mark.asyncio
-    async def test_sensor_mode_select_edge_cases(self, hass, mock_coordinator, mock_config_entry):
+    async def test_sensor_mode_select_edge_cases(
+        self, hass, mock_coordinator, mock_config_entry
+    ):
         """Test edge cases for MysaSensorModeSelect to reach 100% coverage."""
         import time
-        from custom_components.mysa.select import MysaSensorModeSelect
+
         from homeassistant.exceptions import HomeAssistantError
+
+        from custom_components.mysa.select import MysaSensorModeSelect
 
         mock_api = MagicMock()
         mock_api.set_sensor_mode = AsyncMock()
@@ -333,7 +333,7 @@ class TestSensorModeSelect:
             "infloor_device",
             {"Id": "infloor_device", "Name": "Bathroom", "Model": "INF-V1"},
             mock_api,
-            mock_config_entry
+            mock_config_entry,
         )
         entity.async_write_ha_state = MagicMock()
 
@@ -347,7 +347,7 @@ class TestSensorModeSelect:
         with pytest.raises(HomeAssistantError):
             await entity.async_select_option("floor")
         assert entity._pending_option is None
-        mock_api.set_sensor_mode.side_effect = None # Reset
+        mock_api.set_sensor_mode.side_effect = None  # Reset
 
         # 3. Test Device Info
         info = entity.device_info
@@ -359,7 +359,7 @@ class TestSensorModeSelect:
 
         # 4. Test Pending Logic
         mock_coordinator.data = {
-            "infloor_device": {"SensorMode": 0} # Ambient
+            "infloor_device": {"SensorMode": 0}  # Ambient
         }
 
         # Set pending
@@ -371,14 +371,16 @@ class TestSensorModeSelect:
 
         # 4b. Pending converged
         # Cloud updates to match pending
-        mock_coordinator.data["infloor_device"]["SensorMode"] = 1 # Floor
+        mock_coordinator.data["infloor_device"]["SensorMode"] = 1  # Floor
         assert entity.current_option == "floor"
-        assert entity._pending_option is None # Should be cleared
+        assert entity._pending_option is None  # Should be cleared
 
         # 4c. Pending expired
         entity._pending_option = "ambient"
-        entity._pending_timestamp = time.time() - 40 # Expired
-        mock_coordinator.data["infloor_device"]["SensorMode"] = 1 # Floor (Cloud says Floor)
+        entity._pending_timestamp = time.time() - 40  # Expired
+        mock_coordinator.data["infloor_device"]["SensorMode"] = (
+            1  # Floor (Cloud says Floor)
+        )
 
         # Should return Cloud value (Floor) because pending expired
         assert entity.current_option == "floor"
@@ -388,9 +390,9 @@ class TestSensorModeSelect:
         # If cloud value is missing and pending expired
         entity._pending_option = "floor"
         entity._pending_timestamp = time.time() - 40
-        mock_coordinator.data["infloor_device"] = {} # No SensorMode
+        mock_coordinator.data["infloor_device"] = {}  # No SensorMode
 
-        assert entity.current_option == "ambient" # Default fallback
+        assert entity.current_option == "ambient"  # Default fallback
 
 
 class TestSelectCoverageGaps:
@@ -398,19 +400,22 @@ class TestSelectCoverageGaps:
 
     def test_select_coverage(self, mock_coordinator, mock_config_entry):
         """Exercise select.py missing lines."""
-        from custom_components.mysa.select import MysaHorizontalSwingSelect
         from custom_components.mysa.const import AC_SWING_AUTO, AC_SWING_POSITION_3
-        entity = MysaHorizontalSwingSelect(mock_coordinator, "dev1", {}, MagicMock(), mock_config_entry)
+        from custom_components.mysa.select import MysaHorizontalSwingSelect
+
+        entity = MysaHorizontalSwingSelect(
+            mock_coordinator, "dev1", {}, MagicMock(), mock_config_entry
+        )
         # 146, 152 sticky expiration and convergence
         # Expiration
         entity._pending_option = "swing1"
         entity._pending_timestamp = time.time() - 31
-        mock_coordinator.data = {"dev1": {"ssh": AC_SWING_AUTO}} # 3 -> 'auto'
+        mock_coordinator.data = {"dev1": {"ssh": AC_SWING_AUTO}}  # 3 -> 'auto'
         assert entity.current_option == "auto"
         assert entity._pending_option is None
         # Convergence
         entity._pending_option = "center"
         entity._pending_timestamp = time.time()
-        mock_coordinator.data = {"dev1": {"ssh": AC_SWING_POSITION_3}} # 6 -> 'center'
+        mock_coordinator.data = {"dev1": {"ssh": AC_SWING_POSITION_3}}  # 6 -> 'center'
         assert entity.current_option == "center"
         assert entity._pending_option is None

@@ -1,35 +1,38 @@
 """Sensor platform for Mysa."""
+
 # pylint: disable=too-many-branches
 # Justification: Sensor mapping requires handling many device types and attributes in a single pass.
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from homeassistant.components.sensor import (
-    SensorEntity,
     SensorDeviceClass,
+    SensorEntity,
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
     SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+    EntityCategory,
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
     UnitOfTemperature,
-    EntityCategory,
 )
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.typing import StateType
-
+from homeassistant.helpers.update_coordinator import (
+    CoordinatorEntity,
+    DataUpdateCoordinator,
+)
 
 from . import MysaData
-from .mysa_api import MysaApi
 from .device import MysaDeviceLogic
+from .mysa_api import MysaApi
 
 PARALLEL_UPDATES = 0
 
@@ -51,51 +54,89 @@ async def async_setup_entry(
         is_ac = api.is_ac_device(device_id)
 
         # Ambient Temperature (all devices)
-        entities.append(MysaTemperatureSensor(coordinator, device_id, device_data, api, entry))
+        entities.append(
+            MysaTemperatureSensor(coordinator, device_id, device_data, api, entry)
+        )
 
         # Humidity (all devices - if available)
         # Check if device supports humidity (ACs do, some thermostats do)
         # We'll create it and let it be unavailable if data missing, or check logic?
         # Better to always add and let it report None/Unavailable if key missing,
         # unless we know for sure. ACs definitely have it. V1/V2 thermostats might.
-        entities.append(MysaHumiditySensor(coordinator, device_id, device_data, api, entry))
+        entities.append(
+            MysaHumiditySensor(coordinator, device_id, device_data, api, entry)
+        )
 
         # RSSI (all devices)
         entities.append(
             MysaDiagnosticSensor(
-                coordinator, device_id, device_data, "Rssi", "rssi",
-                SIGNAL_STRENGTH_DECIBELS_MILLIWATT, SensorStateClass.MEASUREMENT,
-                SensorDeviceClass.SIGNAL_STRENGTH, entry
+                coordinator,
+                device_id,
+                device_data,
+                "Rssi",
+                "rssi",
+                SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+                SensorStateClass.MEASUREMENT,
+                SensorDeviceClass.SIGNAL_STRENGTH,
+                entry,
             )
         )
 
         # Brightness (all devices - current display brightness)
         entities.append(
             MysaDiagnosticSensor(
-                coordinator, device_id, device_data, "Brightness", "brightness",
-                PERCENTAGE, SensorStateClass.MEASUREMENT, None, entry
+                coordinator,
+                device_id,
+                device_data,
+                "Brightness",
+                "brightness",
+                PERCENTAGE,
+                SensorStateClass.MEASUREMENT,
+                None,
+                entry,
             )
         )
 
         # TimeZone (all devices)
         entities.append(
             MysaDiagnosticSensor(
-                coordinator, device_id, device_data, "TimeZone", "timezone",
-                None, None, None, entry
+                coordinator,
+                device_id,
+                device_data,
+                "TimeZone",
+                "timezone",
+                None,
+                None,
+                None,
+                entry,
             )
         )
 
         # Min/Max Setpoint (all devices)
         entities.append(
             MysaDiagnosticSensor(
-                coordinator, device_id, device_data, "MinSetpoint", "min_setpoint",
-                UnitOfTemperature.CELSIUS, None, SensorDeviceClass.TEMPERATURE, entry
+                coordinator,
+                device_id,
+                device_data,
+                "MinSetpoint",
+                "min_setpoint",
+                UnitOfTemperature.CELSIUS,
+                None,
+                SensorDeviceClass.TEMPERATURE,
+                entry,
             )
         )
         entities.append(
             MysaDiagnosticSensor(
-                coordinator, device_id, device_data, "MaxSetpoint", "max_setpoint",
-                UnitOfTemperature.CELSIUS, None, SensorDeviceClass.TEMPERATURE, entry
+                coordinator,
+                device_id,
+                device_data,
+                "MaxSetpoint",
+                "max_setpoint",
+                UnitOfTemperature.CELSIUS,
+                None,
+                SensorDeviceClass.TEMPERATURE,
+                entry,
             )
         )
         # === Heating thermostat only sensors (skip for AC) ===
@@ -105,16 +146,30 @@ async def async_setup_entry(
             # Duty Cycle (heating only)
             entities.append(
                 MysaDiagnosticSensor(
-                    coordinator, device_id, device_data, "Duty", "duty_cycle",
-                    PERCENTAGE, SensorStateClass.MEASUREMENT, None, entry
+                    coordinator,
+                    device_id,
+                    device_data,
+                    "Duty",
+                    "duty_cycle",
+                    PERCENTAGE,
+                    SensorStateClass.MEASUREMENT,
+                    None,
+                    entry,
                 )
             )
 
             # Maximum Current (heating only)
             entities.append(
                 MysaDiagnosticSensor(
-                    coordinator, device_id, device_data, "MaxCurrent", "max_current",
-                    UnitOfElectricCurrent.AMPERE, None, SensorDeviceClass.CURRENT, entry
+                    coordinator,
+                    device_id,
+                    device_data,
+                    "MaxCurrent",
+                    "max_current",
+                    UnitOfElectricCurrent.AMPERE,
+                    None,
+                    SensorDeviceClass.CURRENT,
+                    entry,
                 )
             )
 
@@ -122,9 +177,15 @@ async def async_setup_entry(
             if "HeatSink" in state:
                 entities.append(
                     MysaDiagnosticSensor(
-                        coordinator, device_id, device_data, "HeatSink", "heatsink_temperature",
-                        UnitOfTemperature.CELSIUS, SensorStateClass.MEASUREMENT,
-                        SensorDeviceClass.TEMPERATURE, entry
+                        coordinator,
+                        device_id,
+                        device_data,
+                        "HeatSink",
+                        "heatsink_temperature",
+                        UnitOfTemperature.CELSIUS,
+                        SensorStateClass.MEASUREMENT,
+                        SensorDeviceClass.TEMPERATURE,
+                        entry,
                     )
                 )
 
@@ -132,9 +193,15 @@ async def async_setup_entry(
             if "Infloor" in state or "flrSnsrTemp" in state:
                 entities.append(
                     MysaDiagnosticSensor(
-                        coordinator, device_id, device_data, "Infloor", "infloor_temperature",
-                        UnitOfTemperature.CELSIUS, SensorStateClass.MEASUREMENT,
-                        SensorDeviceClass.TEMPERATURE, entry
+                        coordinator,
+                        device_id,
+                        device_data,
+                        "Infloor",
+                        "infloor_temperature",
+                        UnitOfTemperature.CELSIUS,
+                        SensorStateClass.MEASUREMENT,
+                        SensorDeviceClass.TEMPERATURE,
+                        entry,
                     )
                 )
 
@@ -142,17 +209,29 @@ async def async_setup_entry(
             if "Voltage" in state or "LineVoltage" in state:
                 entities.append(
                     MysaDiagnosticSensor(
-                        coordinator, device_id, device_data, "Voltage", "voltage",
-                        UnitOfElectricPotential.VOLT, SensorStateClass.MEASUREMENT,
-                        SensorDeviceClass.VOLTAGE, entry
+                        coordinator,
+                        device_id,
+                        device_data,
+                        "Voltage",
+                        "voltage",
+                        UnitOfElectricPotential.VOLT,
+                        SensorStateClass.MEASUREMENT,
+                        SensorDeviceClass.VOLTAGE,
+                        entry,
                     )
                 )
             if "Current" in state:
                 entities.append(
                     MysaDiagnosticSensor(
-                        coordinator, device_id, device_data, "Current", "current",
-                        UnitOfElectricCurrent.AMPERE, SensorStateClass.MEASUREMENT,
-                        SensorDeviceClass.CURRENT, entry
+                        coordinator,
+                        device_id,
+                        device_data,
+                        "Current",
+                        "current",
+                        UnitOfElectricCurrent.AMPERE,
+                        SensorStateClass.MEASUREMENT,
+                        SensorDeviceClass.CURRENT,
+                        entry,
                     )
                 )
 
@@ -160,21 +239,29 @@ async def async_setup_entry(
         if not is_ac:
             state = coordinator.data.get(device_id, {}) if coordinator.data else {}
 
-            power_sensor = MysaPowerSensor(coordinator, device_id, device_data, api, entry)
+            power_sensor = MysaPowerSensor(
+                coordinator, device_id, device_data, api, entry
+            )
             entities.append(power_sensor)
 
             # Virtual Energy Sensor (kWh)
             entities.append(
-                MysaEnergySensor(coordinator, device_id, device_data, api, entry, power_sensor)
+                MysaEnergySensor(
+                    coordinator, device_id, device_data, api, entry, power_sensor
+                )
             )
 
             # If current wasn't added as a diagnostic sensor (e.g. Lite), add it as simulated
             if "Current" not in state:
-                entities.append(MysaCurrentSensor(coordinator, device_id, device_data, api, entry))
+                entities.append(
+                    MysaCurrentSensor(coordinator, device_id, device_data, api, entry)
+                )
 
             # Electricity Rate (Cost) Sensor - based on device's home rate
             entities.append(
-                MysaElectricityRateSensor(coordinator, device_id, device_data, api, entry)
+                MysaElectricityRateSensor(
+                    coordinator, device_id, device_data, api, entry
+                )
             )
 
         # === Network Diagnostic Sensors (all devices) ===
@@ -185,22 +272,23 @@ async def async_setup_entry(
 
 
 class MysaDiagnosticSensor(
-    SensorEntity, CoordinatorEntity[DataUpdateCoordinator[Dict[str, Any]]]
+    SensorEntity, CoordinatorEntity[DataUpdateCoordinator[dict[str, Any]]]
 ):
     """Representation of a Mysa Diagnostic Sensor."""
+
     _attr_has_entity_name = True
 
     def __init__(
         self,
-        coordinator: DataUpdateCoordinator[Dict[str, Any]],
+        coordinator: DataUpdateCoordinator[dict[str, Any]],
         device_id: str,
-        device_data: Dict[str, Any],
+        device_data: dict[str, Any],
         sensor_key: str,
         translation_key: str,
-        unit: Optional[str],
-        state_class: Optional[SensorStateClass],
-        device_class: Optional[SensorDeviceClass],
-        entry: ConfigEntry[MysaData]
+        unit: str | None,
+        state_class: SensorStateClass | None,
+        device_class: SensorDeviceClass | None,
+        entry: ConfigEntry[MysaData],
     ) -> None:
         """Initialize."""
         super().__init__(coordinator)
@@ -213,7 +301,7 @@ class MysaDiagnosticSensor(
         self._attr_native_unit_of_measurement = unit
         self._attr_state_class = state_class
         self._attr_device_class: Any = device_class
-        self._attr_extra_state_attributes: Dict[str, Any] = {}
+        self._attr_extra_state_attributes: dict[str, Any] = {}
 
         # Mapping variants
         self._keys = [sensor_key]
@@ -246,8 +334,15 @@ class MysaDiagnosticSensor(
 
         # Categorize as Diagnostic AND Disable by default
         if sensor_key in [
-            "Current", "Duty", "HeatSink", "MaxCurrent",
-            "MinSetpoint", "MaxSetpoint", "Rssi", "TimeZone", "Voltage",
+            "Current",
+            "Duty",
+            "HeatSink",
+            "MaxCurrent",
+            "MinSetpoint",
+            "MaxSetpoint",
+            "Rssi",
+            "TimeZone",
+            "Voltage",
         ]:
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
             self._attr_entity_registry_enabled_default = False
@@ -255,11 +350,17 @@ class MysaDiagnosticSensor(
     @property
     def device_info(self) -> DeviceInfo:
         """Return device info."""
-        state = self.coordinator.data.get(self._device_id) if self.coordinator.data else None
-        return MysaDeviceLogic.get_device_info(self._device_id, self._device_data, state)
+        state = (
+            self.coordinator.data.get(self._device_id)
+            if self.coordinator.data
+            else None
+        )
+        return MysaDeviceLogic.get_device_info(
+            self._device_id, self._device_data, state
+        )
 
     @property
-    def extra_state_attributes(self) -> Dict[str, Any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra state attributes."""
         return {
             "device_id": self._device_id,
@@ -268,7 +369,11 @@ class MysaDiagnosticSensor(
     @property
     def native_value(self) -> StateType:
         """Return the state of the sensor."""
-        state = self.coordinator.data.get(self._device_id) if self.coordinator.data else None
+        state = (
+            self.coordinator.data.get(self._device_id)
+            if self.coordinator.data
+            else None
+        )
         if not state:
             return None
 
@@ -291,7 +396,7 @@ class MysaDiagnosticSensor(
         except (ValueError, TypeError):
             return str(val)
 
-    def _extract_value(self, state: Optional[Dict[str, Any]], keys: List[str]) -> Any:
+    def _extract_value(self, state: dict[str, Any] | None, keys: list[str]) -> Any:
         """Helper to extract a value from state dictionary."""
         if state is None:
             return None
@@ -299,27 +404,28 @@ class MysaDiagnosticSensor(
             val = state.get(key)
             if val is not None:
                 if isinstance(val, dict):
-                    v = val.get('v')
+                    v = val.get("v")
                     if v is None:
-                        v = val.get('Id')
+                        v = val.get("Id")
                     return v
                 return val
         return None
 
 
 class MysaPowerSensor(
-    SensorEntity, CoordinatorEntity[DataUpdateCoordinator[Dict[str, Any]]]
+    SensorEntity, CoordinatorEntity[DataUpdateCoordinator[dict[str, Any]]]
 ):
     """Representation of a Mysa Power Sensor (Real or Simulated)."""
+
     _attr_has_entity_name = True
 
     def __init__(
         self,
-        coordinator: DataUpdateCoordinator[Dict[str, Any]],
+        coordinator: DataUpdateCoordinator[dict[str, Any]],
         device_id: str,
-        device_data: Dict[str, Any],
+        device_data: dict[str, Any],
         api: MysaApi,
-        entry: ConfigEntry[MysaData]
+        entry: ConfigEntry[MysaData],
     ) -> None:
         """Initialize."""
         super().__init__(coordinator)
@@ -338,10 +444,16 @@ class MysaPowerSensor(
     @property
     def device_info(self) -> DeviceInfo:
         """Return device info."""
-        state = self.coordinator.data.get(self._device_id) if self.coordinator.data else None
-        return MysaDeviceLogic.get_device_info(self._device_id, self._device_data, state)
+        state = (
+            self.coordinator.data.get(self._device_id)
+            if self.coordinator.data
+            else None
+        )
+        return MysaDeviceLogic.get_device_info(
+            self._device_id, self._device_data, state
+        )
 
-    def _extract_value(self, state: Optional[Dict[str, Any]], keys: List[str]) -> Any:
+    def _extract_value(self, state: dict[str, Any] | None, keys: list[str]) -> Any:
         """Helper to extract a value from state dictionary."""
         if state is None:
             return None
@@ -349,9 +461,9 @@ class MysaPowerSensor(
             val = state.get(key)
             if val is not None:
                 if isinstance(val, dict):
-                    v = val.get('v')
+                    v = val.get("v")
                     if v is None:
-                        v = val.get('Id')
+                        v = val.get("Id")
                     return v
                 return val
         return None
@@ -414,7 +526,7 @@ class MysaPowerSensor(
         return 0.0
 
     @property
-    def extra_state_attributes(self) -> Dict[str, Any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra state attributes."""
         if self.coordinator.data is None:
             return {}
@@ -430,25 +542,26 @@ class MysaPowerSensor(
         elif current is None:
             mode = "Simulated"
 
-        attrs: Dict[str, Any] = {"tracking_mode": mode}
+        attrs: dict[str, Any] = {"tracking_mode": mode}
         if mode in ["Simulated", "Forced Simulated"]:
             attrs["configured_wattage"] = wattage
         return attrs
 
 
 class MysaCurrentSensor(
-    SensorEntity, CoordinatorEntity[DataUpdateCoordinator[Dict[str, Any]]]
+    SensorEntity, CoordinatorEntity[DataUpdateCoordinator[dict[str, Any]]]
 ):
     """Representation of a Mysa Current Sensor (Simulated)."""
+
     _attr_has_entity_name = True
 
     def __init__(
         self,
-        coordinator: DataUpdateCoordinator[Dict[str, Any]],
+        coordinator: DataUpdateCoordinator[dict[str, Any]],
         device_id: str,
-        device_data: Dict[str, Any],
+        device_data: dict[str, Any],
         api: MysaApi,
-        entry: ConfigEntry[MysaData]
+        entry: ConfigEntry[MysaData],
     ) -> None:
         """Initialize."""
         super().__init__(coordinator)
@@ -466,10 +579,16 @@ class MysaCurrentSensor(
     @property
     def device_info(self) -> DeviceInfo:
         """Return device info."""
-        state = self.coordinator.data.get(self._device_id) if self.coordinator.data else None
-        return MysaDeviceLogic.get_device_info(self._device_id, self._device_data, state)
+        state = (
+            self.coordinator.data.get(self._device_id)
+            if self.coordinator.data
+            else None
+        )
+        return MysaDeviceLogic.get_device_info(
+            self._device_id, self._device_data, state
+        )
 
-    def _extract_value(self, state: Optional[Dict[str, Any]], keys: List[str]) -> Any:
+    def _extract_value(self, state: dict[str, Any] | None, keys: list[str]) -> Any:
         """Helper to extract a value from state dictionary."""
         if state is None:
             return None
@@ -477,9 +596,9 @@ class MysaCurrentSensor(
             val = state.get(key)
             if val is not None:
                 if isinstance(val, dict):
-                    v = val.get('v')
+                    v = val.get("v")
                     if v is None:
-                        v = val.get('Id')
+                        v = val.get("Id")
                     return v
                 return val
         return None
@@ -487,7 +606,11 @@ class MysaCurrentSensor(
     @property
     def native_value(self) -> StateType:
         """Calculate current from wattage and duty cycle."""
-        state = self.coordinator.data.get(self._device_id) if self.coordinator.data else None
+        state = (
+            self.coordinator.data.get(self._device_id)
+            if self.coordinator.data
+            else None
+        )
         if state is None:
             return None
 
@@ -539,7 +662,7 @@ class MysaCurrentSensor(
         return result
 
     @property
-    def extra_state_attributes(self) -> Dict[str, Any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra state attributes."""
         if self.coordinator.data is None:
             return {}
@@ -555,26 +678,29 @@ class MysaCurrentSensor(
         elif current is None:
             mode = "Simulated"
 
-        attrs: Dict[str, Any] = {"tracking_mode": mode}
+        attrs: dict[str, Any] = {"tracking_mode": mode}
         if mode in ["Simulated", "Forced Simulated"]:
             attrs["configured_wattage"] = wattage
         return attrs
 
 
 class MysaEnergySensor(
-    SensorEntity, RestoreEntity, CoordinatorEntity[DataUpdateCoordinator[Dict[str, Any]]]
+    SensorEntity,
+    RestoreEntity,
+    CoordinatorEntity[DataUpdateCoordinator[dict[str, Any]]],
 ):
     """Integrates Power over time to provide native kWh tracking."""
+
     _attr_has_entity_name = True
 
     def __init__(
         self,
-        coordinator: DataUpdateCoordinator[Dict[str, Any]],
+        coordinator: DataUpdateCoordinator[dict[str, Any]],
         device_id: str,
-        device_data: Dict[str, Any],
+        device_data: dict[str, Any],
         api: MysaApi,
         entry: ConfigEntry[MysaData],
-        power_sensor: MysaPowerSensor
+        power_sensor: MysaPowerSensor,
     ) -> None:
         """Initialize."""
         super().__init__(coordinator)
@@ -589,7 +715,7 @@ class MysaEnergySensor(
         self._attr_state_class = SensorStateClass.TOTAL_INCREASING
         self._attr_device_class: Any = SensorDeviceClass.ENERGY
         self._attr_native_value: Any = 0.0
-        self._last_update: Optional[float] = None
+        self._last_update: float | None = None
 
     async def async_added_to_hass(self) -> None:
         """Handle entity which will be added."""
@@ -605,8 +731,14 @@ class MysaEnergySensor(
     @property
     def device_info(self) -> DeviceInfo:
         """Return device info."""
-        state = self.coordinator.data.get(self._device_id) if self.coordinator.data else None
-        return MysaDeviceLogic.get_device_info(self._device_id, self._device_data, state)
+        state = (
+            self.coordinator.data.get(self._device_id)
+            if self.coordinator.data
+            else None
+        )
+        return MysaDeviceLogic.get_device_info(
+            self._device_id, self._device_data, state
+        )
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -637,28 +769,28 @@ class MysaEnergySensor(
         self.async_write_ha_state()
 
     @property
-    def extra_state_attributes(self) -> Dict[str, Any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra state attributes."""
         return {
             "last_integration_time": self._last_update,
-            "note": "Virtual Riemann sum integration of power sensor"
+            "note": "Virtual Riemann sum integration of power sensor",
         }
 
 
 class MysaElectricityRateSensor(
-    CoordinatorEntity[DataUpdateCoordinator[Dict[str, Any]]],
-    SensorEntity
+    CoordinatorEntity[DataUpdateCoordinator[dict[str, Any]]], SensorEntity
 ):
     """Representation of the Electricity Rate for a device's home."""
+
     _attr_has_entity_name = True
 
     def __init__(
         self,
-        coordinator: DataUpdateCoordinator[Dict[str, Any]],
+        coordinator: DataUpdateCoordinator[dict[str, Any]],
         device_id: str,
-        device_data: Dict[str, Any],
+        device_data: dict[str, Any],
         api: MysaApi,
-        entry: ConfigEntry[MysaData]
+        entry: ConfigEntry[MysaData],
     ) -> None:
         """Initialize."""
         super().__init__(coordinator)
@@ -682,8 +814,14 @@ class MysaElectricityRateSensor(
     @property
     def device_info(self) -> DeviceInfo:
         """Return device info."""
-        state = self.coordinator.data.get(self._device_id) if self.coordinator.data else None
-        return MysaDeviceLogic.get_device_info(self._device_id, self._device_data, state)
+        state = (
+            self.coordinator.data.get(self._device_id)
+            if self.coordinator.data
+            else None
+        )
+        return MysaDeviceLogic.get_device_info(
+            self._device_id, self._device_data, state
+        )
 
     @property
     def native_value(self) -> StateType:
@@ -695,18 +833,18 @@ class MysaElectricityRateSensor(
 
 
 class MysaIpSensor(
-    SensorEntity,
-    CoordinatorEntity[DataUpdateCoordinator[Dict[str, Any]]]
+    SensorEntity, CoordinatorEntity[DataUpdateCoordinator[dict[str, Any]]]
 ):
     """Representation of the Device Local IP Sensor."""
+
     _attr_has_entity_name = True
 
     def __init__(
         self,
-        coordinator: DataUpdateCoordinator[Dict[str, Any]],
+        coordinator: DataUpdateCoordinator[dict[str, Any]],
         device_id: str,
-        device_data: Dict[str, Any],
-        entry: ConfigEntry[MysaData]
+        device_data: dict[str, Any],
+        entry: ConfigEntry[MysaData],
     ) -> None:
         """Initialize."""
         super().__init__(coordinator)
@@ -720,10 +858,16 @@ class MysaIpSensor(
     @property
     def device_info(self) -> DeviceInfo:
         """Return device info."""
-        state = self.coordinator.data.get(self._device_id) if self.coordinator.data else None
-        return MysaDeviceLogic.get_device_info(self._device_id, self._device_data, state)
+        state = (
+            self.coordinator.data.get(self._device_id)
+            if self.coordinator.data
+            else None
+        )
+        return MysaDeviceLogic.get_device_info(
+            self._device_id, self._device_data, state
+        )
 
-    def _extract_value(self, state: Optional[Dict[str, Any]], keys: List[str]) -> Any:
+    def _extract_value(self, state: dict[str, Any] | None, keys: list[str]) -> Any:
         """Helper to extract a value from state dictionary."""
         if state is None:
             return None
@@ -731,9 +875,9 @@ class MysaIpSensor(
             val = state.get(key)
             if val is not None:
                 if isinstance(val, dict):
-                    v = val.get('v')
+                    v = val.get("v")
                     if v is None:
-                        v = val.get('Id')
+                        v = val.get("Id")
                     return v
                 return val
         return None
@@ -745,23 +889,26 @@ class MysaIpSensor(
             return None
         state = self.coordinator.data.get(self._device_id)
         # Check multiple possible keys for IP, including space-separated
-        val = self._extract_value(state, ["ip", "Local IP", "IPAddress", "LocalIP", "IP"])
+        val = self._extract_value(
+            state, ["ip", "Local IP", "IPAddress", "LocalIP", "IP"]
+        )
         return str(val) if val else None
 
 
 class MysaTemperatureSensor(
-    SensorEntity, CoordinatorEntity[DataUpdateCoordinator[Dict[str, Any]]]
+    SensorEntity, CoordinatorEntity[DataUpdateCoordinator[dict[str, Any]]]
 ):
     """Representation of a Mysa ambient temperature sensor."""
+
     _attr_has_entity_name = True
 
     def __init__(
         self,
-        coordinator: DataUpdateCoordinator[Dict[str, Any]],
+        coordinator: DataUpdateCoordinator[dict[str, Any]],
         device_id: str,
-        device_data: Dict[str, Any],
+        device_data: dict[str, Any],
         api: MysaApi,
-        entry: ConfigEntry[MysaData]
+        entry: ConfigEntry[MysaData],
     ) -> None:
         """Initialize."""
         super().__init__(coordinator)
@@ -778,8 +925,14 @@ class MysaTemperatureSensor(
     @property
     def device_info(self) -> DeviceInfo:
         """Return device info."""
-        state = self.coordinator.data.get(self._device_id) if self.coordinator.data else None
-        return MysaDeviceLogic.get_device_info(self._device_id, self._device_data, state)
+        state = (
+            self.coordinator.data.get(self._device_id)
+            if self.coordinator.data
+            else None
+        )
+        return MysaDeviceLogic.get_device_info(
+            self._device_id, self._device_data, state
+        )
 
     @property
     def native_value(self) -> StateType:
@@ -797,11 +950,13 @@ class MysaTemperatureSensor(
             val = state.get(key)
             if val is not None:
                 if isinstance(val, dict):
-                    v = val.get('v')
+                    v = val.get("v")
                     if v is not None:
                         try:
                             f_val = float(v)
-                            return f_val if f_val != 0 else None  # Filter 0 temp if invalid?
+                            return (
+                                f_val if f_val != 0 else None
+                            )  # Filter 0 temp if invalid?
                         except (ValueError, TypeError):
                             pass
                 else:
@@ -814,18 +969,19 @@ class MysaTemperatureSensor(
 
 
 class MysaHumiditySensor(
-    SensorEntity, CoordinatorEntity[DataUpdateCoordinator[Dict[str, Any]]]
+    SensorEntity, CoordinatorEntity[DataUpdateCoordinator[dict[str, Any]]]
 ):
     """Representation of a Mysa humidity sensor."""
+
     _attr_has_entity_name = True
 
     def __init__(
         self,
-        coordinator: DataUpdateCoordinator[Dict[str, Any]],
+        coordinator: DataUpdateCoordinator[dict[str, Any]],
         device_id: str,
-        device_data: Dict[str, Any],
+        device_data: dict[str, Any],
         api: MysaApi,
-        entry: ConfigEntry[MysaData]
+        entry: ConfigEntry[MysaData],
     ) -> None:
         """Initialize."""
         super().__init__(coordinator)
@@ -842,8 +998,14 @@ class MysaHumiditySensor(
     @property
     def device_info(self) -> DeviceInfo:
         """Return device info."""
-        state = self.coordinator.data.get(self._device_id) if self.coordinator.data else None
-        return MysaDeviceLogic.get_device_info(self._device_id, self._device_data, state)
+        state = (
+            self.coordinator.data.get(self._device_id)
+            if self.coordinator.data
+            else None
+        )
+        return MysaDeviceLogic.get_device_info(
+            self._device_id, self._device_data, state
+        )
 
     @property
     def native_value(self) -> StateType:
@@ -859,7 +1021,7 @@ class MysaHumiditySensor(
             val = state.get(key)
             if val is not None:
                 if isinstance(val, dict):
-                    v = val.get('v')
+                    v = val.get("v")
                     if v is not None:
                         try:
                             return float(v)

@@ -1,5 +1,4 @@
-"""
-Home Assistant Integration Tests.
+"""Home Assistant Integration Tests.
 
 Tests using pytest-homeassistant-custom-component advanced features:
 - MockConfigEntry for config entry testing
@@ -8,20 +7,21 @@ Tests using pytest-homeassistant-custom-component advanced features:
 - Service call testing
 """
 
-import sys
 import os
+import sys
 
 # Add project root to path for imports
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(TEST_DIR)
 sys.path.insert(0, ROOT_DIR)
 
-import pytest
 from typing import Any
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 # Module-level imports after path setup
@@ -287,20 +287,16 @@ TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(TEST_DIR)
 sys.path.insert(0, ROOT_DIR)
 
-import pytest
 import logging
-from unittest.mock import MagicMock, AsyncMock, patch
 from datetime import timedelta
 
+import pytest
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (
-    MockConfigEntry,
     async_fire_time_changed,
 )
 
 # Module-level imports after path setup
-from custom_components.mysa.const import DOMAIN
-from custom_components.mysa.mysa_api import MysaApi
 
 
 class TestAioClientMock:
@@ -400,7 +396,6 @@ class TestLogging:
     @pytest.mark.asyncio
     async def test_caplog_captures_logs(self, hass, caplog):
         """Test caplog captures log output."""
-        import logging
 
         logger = logging.getLogger("custom_components.mysa.test")
 
@@ -414,7 +409,6 @@ class TestLogging:
     @pytest.mark.asyncio
     async def test_caplog_filters_by_level(self, hass, caplog):
         """Test caplog filters by log level."""
-        import logging
 
         logger = logging.getLogger("custom_components.mysa.test2")
 
@@ -552,7 +546,6 @@ ROOT_DIR = os.path.dirname(TEST_DIR)
 sys.path.insert(0, ROOT_DIR)
 
 import pytest
-from unittest.mock import MagicMock, AsyncMock
 
 
 class TestConfigEntryData:
@@ -661,6 +654,7 @@ class TestSetupFlowAsync:
     async def test_api_setup_mocked(self, hass):
         """Test MysaApi setup with mocked methods."""
         from unittest.mock import patch
+
         from custom_components.mysa.mysa_api import MysaApi
 
         # Mock aiohttp session
@@ -677,7 +671,10 @@ class TestSetupFlowAsync:
 
         with (
             patch("custom_components.mysa.client.login") as mock_login,
-            patch("custom_components.mysa.client.async_get_clientsession", return_value=mock_session),
+            patch(
+                "custom_components.mysa.client.async_get_clientsession",
+                return_value=mock_session,
+            ),
             patch("custom_components.mysa.client.Store") as mock_store,
         ):
             mock_user = MagicMock()

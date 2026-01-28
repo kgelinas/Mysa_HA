@@ -1,5 +1,4 @@
-"""
-DataUpdateCoordinator Tests.
+"""DataUpdateCoordinator Tests.
 
 Simple tests for coordinator patterns using real DataUpdateCoordinator.
 """
@@ -9,7 +8,7 @@ import os
 import sys
 from datetime import timedelta
 from typing import Any
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # Add project root to path for imports
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -20,6 +19,7 @@ import pytest
 
 # Module-level imports
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+
 from custom_components.mysa.mysa_api import MysaApi
 
 
@@ -208,8 +208,9 @@ class TestApiCoordinatorIntegration:
     async def test_coordinator_with_mocked_api(self, hass):
         """Test coordinator calling mocked MysaApi.get_state."""
         from unittest.mock import patch
-        from custom_components.mysa.mysa_api import MysaApi
+
         from custom_components.mysa.client import MysaClient
+        from custom_components.mysa.mysa_api import MysaApi
 
         mock_api = MysaApi.__new__(MysaApi)
         mock_api.hass = hass
@@ -217,8 +218,12 @@ class TestApiCoordinatorIntegration:
         mock_api.states = {}
         mock_api._last_command_time = {}
 
-        with patch.object(MysaClient, "get_state", new_callable=AsyncMock) as mock_get_state:
-            mock_get_state.return_value = {"device1": {"temperature": 22.5, "humidity": 50}}
+        with patch.object(
+            MysaClient, "get_state", new_callable=AsyncMock
+        ) as mock_get_state:
+            mock_get_state.return_value = {
+                "device1": {"temperature": 22.5, "humidity": 50}
+            }
 
             async def update_method():
                 return await mock_api.get_state()
@@ -457,7 +462,6 @@ class MockMysaApi:
 
     def _normalize_state(self, state):
         """Copy of normalization logic for testing."""
-        from custom_components.mysa.const import AC_FAN_MODES, AC_SWING_MODES
 
         def get_v(keys, prefer_v=True):
             for k in keys:
@@ -1075,7 +1079,7 @@ class TestAsyncPatterns:
         try:
             await asyncio.wait_for(connected.wait(), timeout=0.1)
             waited = True
-        except asyncio.TimeoutError:
+        except TimeoutError:
             waited = False
 
         assert waited is True
@@ -1169,7 +1173,9 @@ class TestMysaApiAsyncMocking:
         """Test mocking MysaApi.get_state with AsyncMock."""
         from custom_components.mysa.client import MysaClient
 
-        with patch.object(MysaClient, "get_state", new_callable=AsyncMock) as mock_get_state:
+        with patch.object(
+            MysaClient, "get_state", new_callable=AsyncMock
+        ) as mock_get_state:
             mock_get_state.return_value = {
                 "device1": {
                     "temperature": 21.5,

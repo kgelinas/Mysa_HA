@@ -38,3 +38,37 @@ ignore_errors = true
 [[tool.mypy.overrides]]
 module = "tools.*"
 ignore_errors = true
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+exclude = ["tests", "tools"]
+
+[tool.ruff.lint]
+select = [
+    "B",   # flake8-bugbear
+    "D",   # pydocstyle
+    "E",   # pycodestyle error
+    "F",   # Pyflakes
+    "I",   # isort
+    "SIM", # flake8-simplify
+    "UP",  # pyupgrade
+    "W",   # pycodestyle warning
+]
+ignore = [
+    "D202", # No blank lines after function docstring
+    "D203", # 1 blank line before class docstring
+    "D213", # Multi-line docstring summary should start at the second line
+    "D406", # Section name should end with a newline
+    "D407", # Missing dashed underline after section
+    "E501", # line too long (handled by formatter)
+    "D401", # First line of docstring should be in imperative mood (Relaxed for now)
+    "UP038", # Use X | Y in isinstance call (Conflict with python version support?)
+    "SIM102", # Use a single if statement instead of nested if statements
+    "SIM105", # Use contextlib.suppress instead of try-except-pass
+    "SIM117", # Combine with statements
+]
+
+[tool.ruff.lint.per-file-ignores]
+# "tests/*" = ["D", "E402", "SIM105"] # Excluded globally
+# "tools/*" = ["D", "F401", "SIM105"] # Excluded globally

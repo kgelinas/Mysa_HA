@@ -1,46 +1,40 @@
-"""
-MQTT Module Coverage Tests.
+"""MQTT Module Coverage Tests.
 
 Tests for mqtt.py: packet builders and parsers, edge cases for full coverage.
 """
 
-import sys
 import os
+import sys
 
 # Add project root to path for imports
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(TEST_DIR)
 sys.path.insert(0, ROOT_DIR)
 
-import pytest
-import struct
 import json
+import struct
 from typing import Any
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 # Module-level imports after path setup
 from custom_components.mysa.mqtt import (
+    ConnackPacket,
+    PingrespPacket,
+    PubackPacket,
+    PublishPacket,
+    SubackPacket,
+    SubscriptionSpec,
+    _encode_remaining_length,
     connect,
-    pingreq,
     disconnect,
-    subscribe,
-    publish,
     parse,
     parse_one,
-    SubscriptionSpec,
-    ConnackPacket,
-    SubackPacket,
-    PublishPacket,
-    PubackPacket,
-    PingrespPacket,
-    _encode_remaining_length,
-    MQTT_PACKET_CONNACK,
-    MQTT_PACKET_SUBACK,
-    MQTT_PACKET_PUBLISH,
-    MQTT_PACKET_PUBACK,
-    MQTT_PACKET_PINGRESP,
+    pingreq,
+    publish,
+    subscribe,
 )
-
 
 
 class TestImportFallback:
@@ -96,8 +90,6 @@ class TestImportFallback:
         finally:
             # Restore original modules
             sys.modules.update(original_modules)
-
-
 
 
 # ===========================================================================
@@ -383,6 +375,8 @@ class TestParseOne:
         result = parse_one(bytearray())
 
         assert result is None
+
+
 class TestMqttTopicBuilding:
     """Test MQTT topic building functions."""
 
@@ -468,7 +462,6 @@ class TestMqttTopicBuilding:
         assert topic == "/v1/dev/device1/in"
         assert topic.endswith("/in")
 
-
     def test_extract_device_id_from_topic(self):
         """Test extracting device ID from topic."""
         topic = "/v1/dev/device1/out"
@@ -553,7 +546,9 @@ class TestMqttPayloadParsing:
 
     def test_extract_values_from_cmd_array(self):
         """Test extracting values from cmd array."""
-        data: dict[str, list[dict[str, Any]]] = {"cmd": [{"sp": 22.0}, {"br": 80}, {"lk": 1}]}
+        data: dict[str, list[dict[str, Any]]] = {
+            "cmd": [{"sp": 22.0}, {"br": 80}, {"lk": 1}]
+        }
 
         extracted: dict[str, Any] = {}
         for item in data["cmd"]:

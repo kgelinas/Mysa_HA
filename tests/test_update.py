@@ -1,9 +1,8 @@
-"""
-Tests for Update entity.
-"""
+"""Tests for Update entity."""
+
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from unittest.mock import MagicMock, AsyncMock
 
 
 class TestMysaUpdateEntity:
@@ -163,7 +162,7 @@ class TestFirmwareErrorHandling:
 
         try:
             raise Exception("Network error")
-        except Exception as e:
+        except Exception:
             error_occurred = True
 
         assert error_occurred is True
@@ -182,9 +181,11 @@ class TestFirmwareErrorHandling:
         assert installed_version == "2.0.0"
         assert latest_version == "2.0.0"
 
+
 # ===========================================================================
 # Merged Coverage Tests
 # ===========================================================================
+
 
 @pytest.mark.asyncio
 async def test_update_installed_version_mismatch(hass):
@@ -203,7 +204,7 @@ async def test_update_installed_version_mismatch(hass):
     mock_api.fetch_firmware_info.return_value = {
         "installedVersion": "1.1.0",
         "allowedVersion": "1.2.0",
-        "update": True
+        "update": True,
     }
 
     # Verify initial state

@@ -1,5 +1,4 @@
-"""
-Pytest configuration for Mysa integration tests.
+"""Pytest configuration for Mysa integration tests.
 
 Shared fixtures and configuration for all tests.
 """
@@ -17,9 +16,8 @@ if not MYSA_RECORD:
         sys.modules["pycognito"] = MagicMock()
 
 import pytest
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
-
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 # Test directory paths (for reference, not for sys.path manipulation)
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -29,6 +27,7 @@ ROOT_DIR = os.path.dirname(TEST_DIR)
 # ===========================================================================
 # Auto-use fixtures
 # ===========================================================================
+
 
 @pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations):
@@ -43,7 +42,9 @@ def skip_notifications_fixture():
         patch("homeassistant.components.persistent_notification.async_create"),
         patch("homeassistant.components.persistent_notification.async_dismiss"),
         patch("homeassistant.setup.async_process_deps_reqs", return_value=None),
-        patch("homeassistant.requirements.async_process_requirements", return_value=None),
+        patch(
+            "homeassistant.requirements.async_process_requirements", return_value=None
+        ),
     ):
         yield
 
@@ -177,6 +178,7 @@ def vcr_cassette_dir():
 async def mock_mqtt_broker():
     """Create a mock MQTT broker for testing."""
     from .mqtt_broker import MockMqttBroker
+
     broker = MockMqttBroker()
     await broker.start()
     yield broker

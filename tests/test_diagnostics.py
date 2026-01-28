@@ -8,7 +8,6 @@ from homeassistant.core import HomeAssistant
 
 from custom_components.mysa.const import DOMAIN
 from custom_components.mysa.diagnostics import async_get_config_entry_diagnostics
-
 from tests.conftest import MockConfigEntry
 
 

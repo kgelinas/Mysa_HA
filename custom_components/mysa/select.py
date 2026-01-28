@@ -1,29 +1,33 @@
 """Select platform for Mysa AC horizontal swing."""
+
 # pylint: disable=abstract-method
 # Justification: HA Entity properties implement the required abstracts.
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.update_coordinator import (
+    CoordinatorEntity,
+    DataUpdateCoordinator,
+)
 
+from . import MysaData
 from .const import (
-    DOMAIN,
     AC_HORIZONTAL_SWING_MODES,
     AC_HORIZONTAL_SWING_MODES_REVERSE,
+    DOMAIN,
     SENSOR_MODES,
     SENSOR_MODES_REVERSE,
 )
-from . import MysaData
-from .mysa_api import MysaApi
 from .device import MysaDeviceLogic
+from .mysa_api import MysaApi
 
 PARALLEL_UPDATES = 0
 
@@ -45,7 +49,9 @@ async def async_setup_entry(
         # Add horizontal swing select only for AC devices
         if api.is_ac_device(device_id):
             entities.append(
-                MysaHorizontalSwingSelect(coordinator, device_id, device_data, api, entry)
+                MysaHorizontalSwingSelect(
+                    coordinator, device_id, device_data, api, entry
+                )
             )
 
         # Add sensor mode select for In-Floor devices
@@ -61,23 +67,24 @@ async def async_setup_entry(
 
 
 class MysaHorizontalSwingSelect(
-    SelectEntity, CoordinatorEntity[DataUpdateCoordinator[Dict[str, Any]]]
+    SelectEntity, CoordinatorEntity[DataUpdateCoordinator[dict[str, Any]]]
 ):
     """Select entity for AC horizontal swing position.
 
     TODO: Refactor MysaHorizontalSwingSelect to reduce instance attributes,
     duplicate code, and implement abstract methods.
     """
+
     _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(
         self,
-        coordinator: DataUpdateCoordinator[Dict[str, Any]],
+        coordinator: DataUpdateCoordinator[dict[str, Any]],
         device_id: str,
-        device_data: Dict[str, Any],
+        device_data: dict[str, Any],
         api: MysaApi,
-        entry: ConfigEntry[MysaData]
+        entry: ConfigEntry[MysaData],
     ) -> None:
         # TODO: Refactor __init__ to reduce arguments
         """Initialize."""
@@ -88,14 +95,14 @@ class MysaHorizontalSwingSelect(
         self._entry = entry
         self._attr_translation_key = "horizontal_swing"
         self._attr_unique_id = f"{device_id}_horizontal_swing"
-        self._pending_option: Optional[str] = None
-        self._pending_timestamp: Optional[float] = None
-        self._options: List[str] = []
+        self._pending_option: str | None = None
+        self._pending_timestamp: float | None = None
+        self._options: list[str] = []
 
         # Build options from SupportedCaps or defaults
         self._build_options(device_data)
 
-    def _build_options(self, device_data: Dict[str, Any]) -> None:
+    def _build_options(self, device_data: dict[str, Any]) -> None:
         """Build list of available horizontal swing options."""
         supported_caps = device_data.get("SupportedCaps", {})
         modes = supported_caps.get("modes", {})
@@ -121,22 +128,28 @@ class MysaHorizontalSwingSelect(
     @property
     def device_info(self) -> DeviceInfo:
         """Return device info."""
-        state = self.coordinator.data.get(self._device_id) if self.coordinator.data else None
-        return MysaDeviceLogic.get_device_info(self._device_id, self._device_data, state)
+        state = (
+            self.coordinator.data.get(self._device_id)
+            if self.coordinator.data
+            else None
+        )
+        return MysaDeviceLogic.get_device_info(
+            self._device_id, self._device_data, state
+        )
 
     @property
-    def options(self) -> List[str]:
+    def options(self) -> list[str]:
         """Return list of available options."""
         return self._options
 
     @property
-    def current_option(self) -> Optional[str]:
+    def current_option(self) -> str | None:
         """Return current horizontal swing position using sticky optimistic logic."""
         # Calculate current cloud option
         state = None
         if self.coordinator.data:
             state = self.coordinator.data.get(self._device_id)
-        current_cloud_option: Optional[str] = None
+        current_cloud_option: str | None = None
         if state:
             # Priority: MQTT (ssh), then HTTP (SwingStateHorizontal)
             val = state.get("ssh")
@@ -144,9 +157,11 @@ class MysaHorizontalSwingSelect(
                 val = state.get("SwingStateHorizontal")
 
             if isinstance(val, dict):
-                val = val.get('v')
+                val = val.get("v")
             if val is not None:
-                current_cloud_option = str(AC_HORIZONTAL_SWING_MODES.get(int(val), "auto"))
+                current_cloud_option = str(
+                    AC_HORIZONTAL_SWING_MODES.get(int(val), "auto")
+                )
 
         if self._pending_option is not None:
             # 1. Check expiration
@@ -156,7 +171,10 @@ class MysaHorizontalSwingSelect(
                 return current_cloud_option if current_cloud_option else "auto"
 
             # 2. Check convergence
-            if current_cloud_option is not None and current_cloud_option == self._pending_option:
+            if (
+                current_cloud_option is not None
+                and current_cloud_option == self._pending_option
+            ):
                 self._pending_option = None
                 self._pending_timestamp = None
                 return current_cloud_option
@@ -191,20 +209,21 @@ class MysaHorizontalSwingSelect(
 
 
 class MysaSensorModeSelect(
-    SelectEntity, CoordinatorEntity[DataUpdateCoordinator[Dict[str, Any]]]
+    SelectEntity, CoordinatorEntity[DataUpdateCoordinator[dict[str, Any]]]
 ):
     """Select entity for In-Floor Sensor Mode."""
+
     _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.CONFIG
     _attr_translation_key = "sensor_mode"
 
     def __init__(
         self,
-        coordinator: DataUpdateCoordinator[Dict[str, Any]],
+        coordinator: DataUpdateCoordinator[dict[str, Any]],
         device_id: str,
-        device_data: Dict[str, Any],
+        device_data: dict[str, Any],
         api: MysaApi,
-        entry: ConfigEntry[MysaData]
+        entry: ConfigEntry[MysaData],
     ) -> None:
         """Initialize."""
         super().__init__(coordinator)
@@ -213,30 +232,36 @@ class MysaSensorModeSelect(
         self._api = api
         self._entry = entry
         self._attr_unique_id = f"{device_id}_sensor_mode"
-        self._pending_option: Optional[str] = None
-        self._pending_timestamp: Optional[float] = None
+        self._pending_option: str | None = None
+        self._pending_timestamp: float | None = None
         self._options = list(SENSOR_MODES.values())
 
     @property
     def device_info(self) -> DeviceInfo:
         """Return device info."""
-        state = self.coordinator.data.get(self._device_id) if self.coordinator.data else None
-        return MysaDeviceLogic.get_device_info(self._device_id, self._device_data, state)
+        state = (
+            self.coordinator.data.get(self._device_id)
+            if self.coordinator.data
+            else None
+        )
+        return MysaDeviceLogic.get_device_info(
+            self._device_id, self._device_data, state
+        )
 
     @property
-    def options(self) -> List[str]:
+    def options(self) -> list[str]:
         """Return list of available options."""
         return self._options
 
     @property
-    def current_option(self) -> Optional[str]:
+    def current_option(self) -> str | None:
         """Return current sensor mode using sticky optimistic logic."""
         # Calculate current cloud option
         state = None
         if self.coordinator.data:
             state = self.coordinator.data.get(self._device_id)
 
-        current_cloud_option: Optional[str] = None
+        current_cloud_option: str | None = None
         if state:
             # Check SensorMode/ControlMode
             val = state.get("SensorMode")
@@ -253,7 +278,10 @@ class MysaSensorModeSelect(
                 return current_cloud_option if current_cloud_option else "ambient"
 
             # 2. Check convergence
-            if current_cloud_option is not None and current_cloud_option == self._pending_option:
+            if (
+                current_cloud_option is not None
+                and current_cloud_option == self._pending_option
+            ):
                 self._pending_option = None
                 self._pending_timestamp = None
                 return current_cloud_option

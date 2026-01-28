@@ -7,6 +7,15 @@ repos:
       - id: check-yaml
       - id: check-json
 
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.9
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+        exclude: ^(tests|tools)/
+      - id: ruff-format
+        exclude: ^(tests|tools)/
+
   - repo: local
     hooks:
       - id: pylint
@@ -16,8 +25,9 @@ repos:
         types: [python]
         # Exclude tests as they often violate standard linting rules (accessing protected members, etc)
         # Exclude tests and tools
+        # Exclude tests and tools
         exclude: ^(tests|tools)/
-        args: ["custom_components/mysa"]
+        args: ["--rcfile=.pylintrc"]
 
       - id: pytest
         name: pytest
@@ -33,4 +43,10 @@ repos:
         types: [python]
         # Exclude tools as they use dynamic imports not compatible with strict package typing
         exclude: ^tools/
-        args: ["--explicit-package-bases"]
+        pass_filenames: false
+        args:
+          [
+            "--explicit-package-bases",
+            "custom_components/mysa",
+            "custom_components/mysa_extended",
+          ]

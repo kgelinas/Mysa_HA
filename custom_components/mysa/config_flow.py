@@ -1,4 +1,5 @@
 """Config flow for Mysa integration."""
+
 # pylint: disable=abstract-method
 # Justification: ConfigFlow inherits abstract methods handled by base class meta-programming.
 # Suppress abstract-method check as we inherit from ConfigFlow but implement
@@ -8,14 +9,13 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
-
 from homeassistant import config_entries
-from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.config_entries import ConfigFlowResult
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-import homeassistant.helpers.config_validation as cv
 
 from .const import DOMAIN
 from .mysa_api import MysaApi
@@ -56,8 +56,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # HA domain arg pat
             try:
                 # Validate credentials
                 await self._validate_credentials(
-                    user_input[CONF_USERNAME],
-                    user_input[CONF_PASSWORD]
+                    user_input[CONF_USERNAME], user_input[CONF_PASSWORD]
                 )
 
                 return self.async_create_entry(
@@ -79,9 +78,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # HA domain arg pat
         await api.authenticate(use_cache=False)
         return api
 
-    async def async_step_reauth(
-        self, _entry_data: dict[str, Any]
-    ) -> ConfigFlowResult:
+    async def async_step_reauth(self, _entry_data: dict[str, Any]) -> ConfigFlowResult:
         """Handle configuration by re-auth."""
         self.entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
         return await self.async_step_reauth_confirm()
@@ -96,14 +93,16 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # HA domain arg pat
             try:
                 # Validate new credentials
                 await self._validate_credentials(
-                    user_input[CONF_USERNAME],
-                    user_input[CONF_PASSWORD]
+                    user_input[CONF_USERNAME], user_input[CONF_PASSWORD]
                 )
 
                 # Verify account match (email)
                 if self.entry is None:
                     errors["base"] = "unknown"
-                elif user_input[CONF_USERNAME].lower() != self.entry.data[CONF_USERNAME].lower():
+                elif (
+                    user_input[CONF_USERNAME].lower()
+                    != self.entry.data[CONF_USERNAME].lower()
+                ):
                     errors["base"] = "reauth_account_mismatch"
                 else:
                     self.hass.config_entries.async_update_entry(
@@ -149,8 +148,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # HA domain arg pat
             try:
                 # Validate credentials
                 await self._validate_credentials(
-                    user_input[CONF_USERNAME],
-                    user_input[CONF_PASSWORD]
+                    user_input[CONF_USERNAME], user_input[CONF_PASSWORD]
                 )
 
                 return self.async_update_reload_and_abort(
@@ -178,9 +176,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # HA domain arg pat
         )
 
 
-class MysaOptionsFlowHandler(
-    config_entries.OptionsFlow
-):
+class MysaOptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options flow for Mysa."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
@@ -216,11 +212,11 @@ class MysaOptionsFlowHandler(
         schema_dict: dict[Any, Any] = {
             vol.Optional(
                 "simulated_energy",
-                default=self._config_entry.options.get("simulated_energy", False)
+                default=self._config_entry.options.get("simulated_energy", False),
             ): bool,
             vol.Optional(
                 "upgraded_lite_devices",
-                default=self._config_entry.options.get("upgraded_lite_devices", [])
+                default=self._config_entry.options.get("upgraded_lite_devices", []),
             ): cv.multi_select(device_options),
         }
 
@@ -230,17 +226,17 @@ class MysaOptionsFlowHandler(
                 if not api.is_ac_device(d_id):
                     safe_id = d_id.replace(":", "").lower()
                     key = f"wattage_{safe_id}"
-                    name = d_data.get('Name', d_id)
+                    name = d_data.get("Name", d_id)
                     schema_dict[
                         vol.Optional(
                             key,
                             default=self._config_entry.options.get(key, 0),
-                            description=f"Wattage for {name}"
+                            description=f"Wattage for {name}",
                         )
                     ] = vol.All(vol.Coerce(int), vol.Range(min=0, max=5000))
 
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(schema_dict),
-            description_placeholders={}
+            description_placeholders={},
         )

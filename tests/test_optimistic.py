@@ -1,14 +1,17 @@
 """Tests for sticky optimistic UI updates."""
+
 import time
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
-from homeassistant.components.climate import HVACMode, HVACAction
+from homeassistant.components.climate import HVACAction, HVACMode
 from homeassistant.exceptions import HomeAssistantError
-from custom_components.mysa.const import DOMAIN
-from custom_components.mysa.switch import MysaLockSwitch
+
 from custom_components.mysa.climate import MysaClimate
-from custom_components.mysa.select import MysaHorizontalSwingSelect
 from custom_components.mysa.number import MysaMinBrightnessNumber
+from custom_components.mysa.select import MysaHorizontalSwingSelect
+from custom_components.mysa.switch import MysaLockSwitch
+
 
 @pytest.fixture
 def mock_coordinator():
@@ -16,6 +19,7 @@ def mock_coordinator():
     coordinator = MagicMock()
     coordinator.data = {}
     return coordinator
+
 
 @pytest.fixture
 def mock_api():
@@ -28,6 +32,7 @@ def mock_api():
     api.set_min_brightness = AsyncMock()
     return api
 
+
 @pytest.fixture
 def mock_entry():
     """Mock ConfigEntry."""
@@ -35,15 +40,14 @@ def mock_entry():
     entry.options = {}
     return entry
 
+
 class TestOptimisticSwitch:
     """Test switch optimistic updates."""
 
     @pytest.mark.asyncio
     async def test_sticky_behavior(self, mock_coordinator, mock_api, mock_entry):
         """Test sticky state persistence, expiration, and convergence."""
-        entity = MysaLockSwitch(
-            mock_coordinator, "device1", {}, mock_api, mock_entry
-        )
+        entity = MysaLockSwitch(mock_coordinator, "device1", {}, mock_api, mock_entry)
         entity.async_write_ha_state = MagicMock()
 
         # 1. Initial State (Cloud = False)
@@ -70,9 +74,7 @@ class TestOptimisticSwitch:
     @pytest.mark.asyncio
     async def test_expiration(self, mock_coordinator, mock_api, mock_entry):
         """Test sticky state expiration."""
-        entity = MysaLockSwitch(
-            mock_coordinator, "device1", {}, mock_api, mock_entry
-        )
+        entity = MysaLockSwitch(mock_coordinator, "device1", {}, mock_api, mock_entry)
         entity.async_write_ha_state = MagicMock()
 
         # Cloud = False
@@ -94,9 +96,7 @@ class TestOptimisticClimate:
     @pytest.mark.asyncio
     async def test_sticky_temperature(self, mock_coordinator, mock_api, mock_entry):
         """Test sticky temperature."""
-        entity = MysaClimate(
-            mock_coordinator, "device1", {}, mock_api, mock_entry
-        )
+        entity = MysaClimate(mock_coordinator, "device1", {}, mock_api, mock_entry)
         entity.async_write_ha_state = MagicMock()
 
         # Cloud = 20
@@ -116,9 +116,7 @@ class TestOptimisticClimate:
     @pytest.mark.asyncio
     async def test_sticky_hvac_mode(self, mock_coordinator, mock_api, mock_entry):
         """Test sticky HVAC mode."""
-        entity = MysaClimate(
-            mock_coordinator, "device1", {}, mock_api, mock_entry
-        )
+        entity = MysaClimate(mock_coordinator, "device1", {}, mock_api, mock_entry)
         entity.async_write_ha_state = MagicMock()
 
         # Cloud = OFF (1)
@@ -132,6 +130,7 @@ class TestOptimisticClimate:
         # Expiration
         with patch("time.time", return_value=time.time() + 31):
             assert entity.hvac_mode == HVACMode.OFF  # Reverts to Cloud (OFF)
+
 
 class TestCoverageEdgeCases:
     """Test edge cases for 100% coverage."""
@@ -148,7 +147,9 @@ class TestCoverageEdgeCases:
         assert entity.is_on is True
 
     @pytest.mark.asyncio
-    async def test_select_expiration_convergence(self, mock_coordinator, mock_api, mock_entry):
+    async def test_select_expiration_convergence(
+        self, mock_coordinator, mock_api, mock_entry
+    ):
         """Test select expiration and convergence branches."""
         entity = MysaHorizontalSwingSelect(
             mock_coordinator, "device1", {}, mock_api, mock_entry
@@ -156,12 +157,12 @@ class TestCoverageEdgeCases:
         entity.async_write_ha_state = MagicMock()
 
         # 1. Expiration
-        mock_coordinator.data = {"device1": {"SwingStateHorizontal": 6}} # Center (6)
+        mock_coordinator.data = {"device1": {"SwingStateHorizontal": 6}}  # Center (6)
         await entity.async_select_option("left")
         assert entity.current_option == "left"
 
         with patch("time.time", return_value=time.time() + 31):
-            assert entity.current_option == "center" # Reverts to cloud
+            assert entity.current_option == "center"  # Reverts to cloud
 
         # 2. Convergence
         entity._pending_option = "left"
@@ -170,7 +171,7 @@ class TestCoverageEdgeCases:
         # Cloud updates to 'left' (4)
         mock_coordinator.data = {"device1": {"SwingStateHorizontal": 4}}
         assert entity.current_option == "left"
-        assert entity._pending_option is None # Should clear on convergence
+        assert entity._pending_option is None  # Should clear on convergence
 
     @pytest.mark.asyncio
     async def test_number_convergence(self, mock_coordinator, mock_api, mock_entry):
@@ -191,9 +192,7 @@ class TestCoverageEdgeCases:
     @pytest.mark.asyncio
     async def test_climate_edge_cases(self, mock_coordinator, mock_api, mock_entry):
         """Test climate None data and exceptions."""
-        entity = MysaClimate(
-            mock_coordinator, "device1", {}, mock_api, mock_entry
-        )
+        entity = MysaClimate(mock_coordinator, "device1", {}, mock_api, mock_entry)
         entity.async_write_ha_state = MagicMock()
 
         # 1. None Data
@@ -201,7 +200,7 @@ class TestCoverageEdgeCases:
         assert entity.target_temperature is None
         assert entity.current_temperature is None
         assert entity.current_humidity is None
-        assert entity.hvac_mode == HVACMode.HEAT # Default fallback
+        assert entity.hvac_mode == HVACMode.HEAT  # Default fallback
         # Wait, if data is None, hvac_mode returns HEAT (line 214).
         # And hvac_action calls hvac_mode. So it gets HEAT.
         # Then it checks data again (line 239). Returns IDLE.
@@ -222,15 +221,15 @@ class TestCoverageEdgeCases:
         mock_api.set_hvac_mode.side_effect = Exception("API Error")
         # Should raise HomeAssistantError
         with pytest.raises(HomeAssistantError) as exc:
-                await entity.async_set_hvac_mode(HVACMode.OFF)
+            await entity.async_set_hvac_mode(HVACMode.OFF)
         assert exc.value.translation_key == "set_hvac_mode_failed"
 
     @pytest.mark.asyncio
-    async def test_climate_convergence_exact(self, mock_coordinator, mock_api, mock_entry):
+    async def test_climate_convergence_exact(
+        self, mock_coordinator, mock_api, mock_entry
+    ):
         """Test climate convergence with exact match logic."""
-        entity = MysaClimate(
-            mock_coordinator, "device1", {}, mock_api, mock_entry
-        )
+        entity = MysaClimate(mock_coordinator, "device1", {}, mock_api, mock_entry)
         entity.async_write_ha_state = MagicMock()
 
         # Test int/float match logic in _get_sticky_value
@@ -244,11 +243,11 @@ class TestCoverageEdgeCases:
         # Test non-numeric match
         entity._set_sticky_value("test_attr", "foo")
         # Manually inject into pending for testing generic get
-        entity._pending_updates["test_attr"] = {'value': "foo", 'ts': time.time()}
+        entity._pending_updates["test_attr"] = {"value": "foo", "ts": time.time()}
 
         # We can't easily test generic attr via public property without adding one
         # But we can test hvac_mode enum match
         entity._set_sticky_value("hvac_mode", HVACMode.HEAT)
-        mock_coordinator.data = {"device1": {"md": 3}} # Heat
+        mock_coordinator.data = {"device1": {"md": 3}}  # Heat
         assert entity.hvac_mode == HVACMode.HEAT
         assert "hvac_mode" not in entity._pending_updates

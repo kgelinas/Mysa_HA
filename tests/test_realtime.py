@@ -1,15 +1,20 @@
 """Tests for Mysa Realtime Coordinator."""
+
 import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch, ANY
-from custom_components.mysa.realtime import MysaRealtime
+
 from custom_components.mysa import mqtt
+from custom_components.mysa.realtime import MysaRealtime
+
 
 @pytest.fixture
 def mock_hass():
     hass = MagicMock()
     hass.async_add_executor_job = AsyncMock(side_effect=lambda f, *args: f(*args))
     return hass
+
 
 @pytest.fixture
 def mock_ws():
@@ -19,9 +24,9 @@ def mock_ws():
     ws.recv = AsyncMock()
     return ws
 
+
 @pytest.mark.asyncio
 class TestMysaRealtime:
-
     async def test_initialization(self, mock_hass):
         """Test initialization."""
         rt = MysaRealtime(mock_hass, AsyncMock(), AsyncMock())
@@ -91,7 +96,9 @@ class TestMysaRealtime:
         rt.set_devices(["dev1"])
 
         # Mock connection helper
-        with patch("custom_components.mysa.realtime.connect_websocket", return_value=mock_ws) as mock_connect:
+        with patch(
+            "custom_components.mysa.realtime.connect_websocket", return_value=mock_ws
+        ) as mock_connect:
             # Mock internal steps
             rt._perform_mqtt_handshake = AsyncMock()  # type: ignore[method-assign]
             rt._run_mqtt_loop = AsyncMock()  # type: ignore[method-assign]
@@ -110,23 +117,30 @@ class TestMysaRealtime:
 
         # Setup responses: Connack, Suback
         connack = mqtt.ConnackPacket(0, 0)
-        suback = mqtt.SubackPacket(1, [0]) # PacketID 1, QoS 0 check?
+        suback = mqtt.SubackPacket(1, [0])  # PacketID 1, QoS 0 check?
 
         # We need to assume parse_mqtt_packet returns objects.
         # Ideally we'd use real bytes but mocking parser is easier
-        with patch("custom_components.mysa.realtime.parse_mqtt_packet", side_effect=[connack, suback]):
+        with patch(
+            "custom_components.mysa.realtime.parse_mqtt_packet",
+            side_effect=[connack, suback],
+        ):
             await rt._perform_mqtt_handshake(mock_ws)
 
-            assert mock_ws.send.call_count == 2 # Connect + Subscribe
+            assert mock_ws.send.call_count == 2  # Connect + Subscribe
 
     async def test_perform_handshake_connack_fail(self, mock_hass, mock_ws):
         """Test handshake fails if not Connack."""
         rt = MysaRealtime(mock_hass, AsyncMock(), AsyncMock())
 
         # Return None or other packet type to simulate failure
-        with patch("custom_components.mysa.realtime.parse_mqtt_packet", return_value=None):
-            with pytest.raises(RuntimeError, match="Expected CONNACK"):
-                await rt._perform_mqtt_handshake(mock_ws)
+        with (
+            patch(
+                "custom_components.mysa.realtime.parse_mqtt_packet", return_value=None
+            ),
+            pytest.raises(RuntimeError, match="Expected CONNACK"),
+        ):
+            await rt._perform_mqtt_handshake(mock_ws)
 
     async def test_run_mqtt_loop_msg_processing(self, mock_hass, mock_ws):
         """Test message processing loop."""
@@ -145,13 +159,15 @@ class TestMysaRealtime:
         # Return packet then raise timeout/error to exit loop
         async def recv_side_effect():
             if mock_ws.recv.call_count == 1:
-                return b'packet_data'
+                return b"packet_data"
             # Trigger exit
             raise Exception("Stop loop")
 
         mock_ws.recv.side_effect = recv_side_effect
 
-        with patch("custom_components.mysa.realtime.parse_mqtt_packet", return_value=pkt):
+        with patch(
+            "custom_components.mysa.realtime.parse_mqtt_packet", return_value=pkt
+        ):
             try:
                 await rt._run_mqtt_loop(mock_ws)
             except Exception:
@@ -179,35 +195,49 @@ class TestMysaRealtime:
         """Test send_command logic."""
         rt = MysaRealtime(mock_hass, AsyncMock(return_value="https://url"), AsyncMock())
 
-        with patch("custom_components.mysa.realtime.connect_websocket", new_callable=AsyncMock) as mock_connect:
-             mock_connect.return_value = mock_ws
-             # Mock responses for handshake + puback + response
-             # connect, connack, subscribe, suback, publish, puback, wait_response
-             # Send calls: Connect, Sub, Pub
-             # Recv calls: Connack, Suback, Puback, Response
+        with patch(
+            "custom_components.mysa.realtime.connect_websocket", new_callable=AsyncMock
+        ) as mock_connect:
+            mock_connect.return_value = mock_ws
+            # Mock responses for handshake + puback + response
+            # connect, connack, subscribe, suback, publish, puback, wait_response
+            # Send calls: Connect, Sub, Pub
+            # Recv calls: Connack, Suback, Puback, Response
 
-             connack = mqtt.ConnackPacket(0, 0)
-             suback = mqtt.SubackPacket(1, [1])
-             # PublishPacket doesn't have simple return for Puback?
-             # Wait, puback is separate packet type.
-             puback = mqtt.PubackPacket(2)
+            connack = mqtt.ConnackPacket(0, 0)
+            suback = mqtt.SubackPacket(1, [1])
+            # PublishPacket doesn't have simple return for Puback?
+            # Wait, puback is separate packet type.
+            puback = mqtt.PubackPacket(2)
 
-             resp_pkt = mqtt.PublishPacket(0, 0, 0, "/v1/dev/dev1/out", None, b'{"msg": 44, "body": {"state": {"ok": 1}}}')
+            resp_pkt = mqtt.PublishPacket(
+                0,
+                0,
+                0,
+                "/v1/dev/dev1/out",
+                None,
+                b'{"msg": 44, "body": {"state": {"ok": 1}}}',
+            )
 
-             with patch("custom_components.mysa.realtime.parse_mqtt_packet", side_effect=[connack, suback, puback, resp_pkt]):
-                 mock_ws.recv.side_effect = ["connack", "suback", "puback", "response"]
+            with patch(
+                "custom_components.mysa.realtime.parse_mqtt_packet",
+                side_effect=[connack, suback, puback, resp_pkt],
+            ):
+                mock_ws.recv.side_effect = ["connack", "suback", "puback", "response"]
 
-                 await rt.send_command("dev1", {"cmd": 1}, "user1")
+                await rt.send_command("dev1", {"cmd": 1}, "user1")
 
-                 assert mock_ws.send.call_count == 3 # Connect, Sub, Pub
-                 assert mock_ws.close.call_count == 1
+                assert mock_ws.send.call_count == 3  # Connect, Sub, Pub
+                assert mock_ws.close.call_count == 1
 
     async def test_send_command_connected(self, mock_hass, mock_ws):
         """Test send_command uses persistent connection if available."""
         rt = MysaRealtime(mock_hass, AsyncMock(), AsyncMock())
-        rt._mqtt_ws = mock_ws # Simulate connected
+        rt._mqtt_ws = mock_ws  # Simulate connected
 
-        with patch.object(rt, "_send_one_off_command", new_callable=AsyncMock) as mock_send_off:
+        with patch.object(
+            rt, "_send_one_off_command", new_callable=AsyncMock
+        ) as mock_send_off:
             await rt.send_command("dev1", {"a": 1}, "u1")
             # Should NOT call one-off
             mock_send_off.assert_not_called()
@@ -220,14 +250,18 @@ class TestMysaRealtime:
 
         # Case 1: WS missing
         rt._mqtt_ws = None
-        with patch.object(rt, "_send_one_off_command", new_callable=AsyncMock) as mock_send_off:
+        with patch.object(
+            rt, "_send_one_off_command", new_callable=AsyncMock
+        ) as mock_send_off:
             await rt.send_command("dev1", {"a": 1}, "u1")
             mock_send_off.assert_called_once()
 
         # Case 2: WS fails
         rt._mqtt_ws = mock_ws
         mock_ws.send.side_effect = Exception("WS send failed")
-        with patch.object(rt, "_send_one_off_command", new_callable=AsyncMock) as mock_send_off:
+        with patch.object(
+            rt, "_send_one_off_command", new_callable=AsyncMock
+        ) as mock_send_off:
             await rt.send_command("dev1", {"a": 1}, "u1")
             mock_send_off.assert_called_once()
 
@@ -247,12 +281,7 @@ class TestMysaRealtime:
     async def test_extract_state_update_nested_complex(self, mock_hass):
         """Test complex nested structure extraction."""
         rt = MysaRealtime(mock_hass, AsyncMock(), AsyncMock())
-        payload = {
-            "msg": 44,
-            "body": {
-                "cmd": [{"sp": 25}, {"invalid": 2}]
-            }
-        }
+        payload = {"msg": 44, "body": {"cmd": [{"sp": 25}, {"invalid": 2}]}}
         # It updates existing state with cmd items (if no state key)
         res = rt._extract_state_update(payload)
         assert res is not None
@@ -266,10 +295,12 @@ class TestMysaRealtime:
 
         class MockPkt:
             topic = "topic"
-            payload = b'{ }'
+            payload = b"{ }"
 
         # Mock extract to raise
-        with patch.object(rt, "_extract_state_update", side_effect=ValueError("Bad JSON")):
+        with patch.object(
+            rt, "_extract_state_update", side_effect=ValueError("Bad JSON")
+        ):
             # Should catch and log, not raise
             await rt._process_mqtt_publish(MockPkt())
             # Verify no crash
@@ -286,8 +317,8 @@ class TestMysaRealtime:
             loop_state["iters"] += 1
             if loop_state["iters"] > 2:
                 raise Exception("Stop Loop")
-            await asyncio.sleep(0.01) # fast wait
-            raise asyncio.TimeoutError()
+            await asyncio.sleep(0.01)  # fast wait
+            raise TimeoutError()
 
         mock_ws.recv.side_effect = mock_recv
 
@@ -305,41 +336,46 @@ class TestMysaRealtime:
         """Test keepalive success path."""
         rt = MysaRealtime(mock_hass, AsyncMock(), AsyncMock())
         loop_state = {"iters": 0}
+
         async def mock_recv():
             loop_state["iters"] += 1
-            if loop_state["iters"] > 2: raise Exception("Stop Loop")
+            if loop_state["iters"] > 2:
+                raise Exception("Stop Loop")
             await asyncio.sleep(0.01)
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
+
         mock_ws.recv.side_effect = mock_recv
 
         with patch("time.time", side_effect=[100, 200, 300, 400]):
-             try:
-                 await rt._run_mqtt_loop(mock_ws)
-             except Exception:
-                 pass
-             # verify ping sent and no log error
-             mock_ws.send.assert_called()
+            try:
+                await rt._run_mqtt_loop(mock_ws)
+            except Exception:
+                pass
+            # verify ping sent and no log error
+            mock_ws.send.assert_called()
 
     async def test_mqtt_listen_exception_and_close_fail(self, mock_hass, mock_ws):
         """Test listen exception handling and close exception suppression."""
         rt = MysaRealtime(mock_hass, AsyncMock(return_value="url"), AsyncMock())
 
         # 1. connect succeeds
-        with patch("custom_components.mysa.realtime.connect_websocket", return_value=mock_ws):
-             # 2. handshake raises (hits catch block 116-120)
-             # 3. close raises (hits finally block 126-127)
+        with patch(
+            "custom_components.mysa.realtime.connect_websocket", return_value=mock_ws
+        ):
+            # 2. handshake raises (hits catch block 116-120)
+            # 3. close raises (hits finally block 126-127)
 
-             async def mock_handshake(ws):
-                 raise Exception("Handshake Fail")
+            async def mock_handshake(ws):
+                raise Exception("Handshake Fail")
 
-             rt._perform_mqtt_handshake = mock_handshake  # type: ignore[method-assign]
-             mock_ws.close.side_effect = Exception("Close Fail")
+            rt._perform_mqtt_handshake = mock_handshake  # type: ignore[method-assign]
+            mock_ws.close.side_effect = Exception("Close Fail")
 
-             with pytest.raises(Exception, match="Handshake Fail"):
-                 await rt._mqtt_listen()
+            with pytest.raises(Exception, match="Handshake Fail"):
+                await rt._mqtt_listen()
 
-             # Verify close was called
-             mock_ws.close.assert_called()
+            # Verify close was called
+            mock_ws.close.assert_called()
 
     async def test_extract_state_update_fallback(self, mock_hass):
         """Test extraction falls back to body if no state/cmd."""
@@ -353,7 +389,9 @@ class TestMysaRealtime:
         on_update = AsyncMock()
         rt = MysaRealtime(mock_hass, AsyncMock(return_value="url"), on_update)
 
-        with patch("custom_components.mysa.realtime.connect_websocket", return_value=mock_ws):
+        with patch(
+            "custom_components.mysa.realtime.connect_websocket", return_value=mock_ws
+        ):
             # Handshake
             connack = mqtt.ConnackPacket(0, 0)
             suback = mqtt.SubackPacket(1, [1])
@@ -364,13 +402,15 @@ class TestMysaRealtime:
             resp_pkt = mqtt.PublishPacket(0, 0, 0, "topic", None, resp_payload)
 
             # So side_effect should be: JUST the response packet.
-            with patch("custom_components.mysa.realtime.parse_mqtt_packet", side_effect=[resp_pkt]):
-                 mock_ws.recv.side_effect = [b'c', b's', b'p', b'resp']
+            with patch(
+                "custom_components.mysa.realtime.parse_mqtt_packet",
+                side_effect=[resp_pkt],
+            ):
+                mock_ws.recv.side_effect = [b"c", b"s", b"p", b"resp"]
 
-                 await rt.send_command("dev1", {}, "u")
+                await rt.send_command("dev1", {}, "u")
 
-                 on_update.assert_called_with("dev1", {"new": 1}, True)
-
+                on_update.assert_called_with("dev1", {"new": 1}, True)
 
     async def test_close_websocket_exception(self, mock_hass, mock_ws):
         """Test exception during close is suppressed."""
@@ -379,7 +419,7 @@ class TestMysaRealtime:
         mock_ws.close.side_effect = Exception("Close error")
 
         await rt._close_websocket()
-        assert rt._mqtt_ws is None # Should be cleared despite error
+        assert rt._mqtt_ws is None  # Should be cleared despite error
 
     async def test_mqtt_listener_loop_cancelled(self, mock_hass):
         """Test task cancellation in loop."""
@@ -393,26 +433,36 @@ class TestMysaRealtime:
             try:
                 await rt._mqtt_listener_loop()
             except asyncio.CancelledError:
-                pass # Expected
+                pass  # Expected
 
     async def test_mqtt_listen_generic_exception(self, mock_hass, mock_ws):
         """Test generic exception in listen connection."""
         rt = MysaRealtime(mock_hass, AsyncMock(return_value="url"), AsyncMock())
 
-        with patch("custom_components.mysa.realtime.connect_websocket", side_effect=Exception("Conn fail")):
-             with pytest.raises(Exception, match="Conn fail"):
-                 await rt._mqtt_listen()
+        with (
+            patch(
+                "custom_components.mysa.realtime.connect_websocket",
+                side_effect=Exception("Conn fail"),
+            ),
+            pytest.raises(Exception, match="Conn fail"),
+        ):
+            await rt._mqtt_listen()
 
     async def test_perform_handshake_suback_fail(self, mock_hass, mock_ws):
         """Test handshake fails if not Suback."""
         rt = MysaRealtime(mock_hass, AsyncMock(), AsyncMock())
-        rt.set_devices(["dev1"]) # Needed to trigger subscribe
+        rt.set_devices(["dev1"])  # Needed to trigger subscribe
 
         connack = mqtt.ConnackPacket(0, 0)
         # Return connack then something else
-        with patch("custom_components.mysa.realtime.parse_mqtt_packet", side_effect=[connack, mqtt.ConnackPacket(0,0)]):
-            with pytest.raises(RuntimeError, match="Expected SUBACK"):
-                await rt._perform_mqtt_handshake(mock_ws)
+        with (
+            patch(
+                "custom_components.mysa.realtime.parse_mqtt_packet",
+                side_effect=[connack, mqtt.ConnackPacket(0, 0)],
+            ),
+            pytest.raises(RuntimeError, match="Expected SUBACK"),
+        ):
+            await rt._perform_mqtt_handshake(mock_ws)
 
     async def test_run_mqtt_loop_pingresp(self, mock_hass, mock_ws):
         """Test PINGRESP handling and parse error."""
@@ -425,21 +475,29 @@ class TestMysaRealtime:
         # 4. Exit
 
         call_count = 0
+
         async def mock_recv():
             nonlocal call_count
             call_count += 1
-            if call_count == 1: return b'pingresp'
-            if call_count == 2: return b'garbage'
-            if call_count == 3: raise asyncio.TimeoutError()
+            if call_count == 1:
+                return b"pingresp"
+            if call_count == 2:
+                return b"garbage"
+            if call_count == 3:
+                raise TimeoutError()
             raise Exception("Stop")
 
         mock_ws.recv.side_effect = mock_recv
 
         with patch("custom_components.mysa.realtime.parse_mqtt_packet") as mock_parse:
+
             def parse_side_effect(data):
-                if data == b'pingresp': return pingresp
-                if data == b'garbage': raise ValueError("Parse Error")
+                if data == b"pingresp":
+                    return pingresp
+                if data == b"garbage":
+                    raise ValueError("Parse Error")
                 return None
+
             mock_parse.side_effect = parse_side_effect
 
             try:
@@ -459,26 +517,39 @@ class TestMysaRealtime:
         """Test send one off with wrap=False and response timeout."""
         rt = MysaRealtime(mock_hass, AsyncMock(return_value="url"), AsyncMock())
 
-        with patch("custom_components.mysa.realtime.connect_websocket", return_value=mock_ws):
+        with patch(
+            "custom_components.mysa.realtime.connect_websocket", return_value=mock_ws
+        ):
             # Mock handshake sequence
             connack = mqtt.ConnackPacket(0, 0)
             suback = mqtt.SubackPacket(1, [1])
             puback = mqtt.PubackPacket(2)
 
-            with patch("custom_components.mysa.realtime.parse_mqtt_packet", side_effect=[connack, suback, puback]):
-                 mock_ws.recv.side_effect = [b'c', b's', b'p', asyncio.TimeoutError] # Timeout waiting for response
+            with patch(
+                "custom_components.mysa.realtime.parse_mqtt_packet",
+                side_effect=[connack, suback, puback],
+            ):
+                mock_ws.recv.side_effect = [
+                    b"c",
+                    b"s",
+                    b"p",
+                    asyncio.TimeoutError,
+                ]  # Timeout waiting for response
 
-                 await rt.send_command("dev1", {"a": 1}, "u", wrap=False)
+                await rt.send_command("dev1", {"a": 1}, "u", wrap=False)
 
-                 # Verify payload sent was not wrapped
-                 # Argument capture on pub logic inside?
-                 # Actually mock_ws.send was called with pub packet containing payload.
-                 # Too complex to unpack bytes here, rely on coverage of line 302.
+                # Verify payload sent was not wrapped
+                # Argument capture on pub logic inside?
+                # Actually mock_ws.send was called with pub packet containing payload.
+                # Too complex to unpack bytes here, rely on coverage of line 302.
 
     async def test_send_one_off_exception(self, mock_hass):
         """Test top level exception in send_one_off."""
         rt = MysaRealtime(mock_hass, AsyncMock(return_value="url"), AsyncMock())
-        with patch("custom_components.mysa.realtime.connect_websocket", side_effect=Exception("Fail")):
+        with patch(
+            "custom_components.mysa.realtime.connect_websocket",
+            side_effect=Exception("Fail"),
+        ):
             await rt.send_command("d", {}, "u")
 
     async def test_extract_state_update_msg_10(self, mock_hass):
@@ -488,16 +559,13 @@ class TestMysaRealtime:
             "msg": 10,
             "ip": "192.168.1.10",
             "version": "1.2.3",
-            "device": "SERIAL123"
+            "device": "SERIAL123",
         }
         res = rt._extract_state_update(payload)
         assert res == {"ip": "192.168.1.10", "FirmwareVersion": "1.2.3"}
 
         # Partial MsgType 10 with 'ver'
-        payload_ver = {
-            "msg": 10,
-            "ver": "1.2.4"
-        }
+        payload_ver = {"msg": 10, "ver": "1.2.4"}
         res_ver = rt._extract_state_update(payload_ver)
         assert res_ver == {"FirmwareVersion": "1.2.4"}
 
@@ -506,34 +574,22 @@ class TestMysaRealtime:
         rt = MysaRealtime(mock_hass, AsyncMock(), AsyncMock())
 
         # IP Case
-        payload_ip = {
-            "msg": 4,
-            "Message": "Some log prefix Local IP: 192.168.1.50"
-        }
+        payload_ip = {"msg": 4, "Message": "Some log prefix Local IP: 192.168.1.50"}
         res_ip = rt._extract_state_update(payload_ip)
         assert res_ip == {"ip": "192.168.1.50"}
 
         # Serial Case
-        payload_serial = {
-            "msg": 4,
-            "Message": "Info Device Serial: SN999"
-        }
+        payload_serial = {"msg": 4, "Message": "Info Device Serial: SN999"}
         res_serial = rt._extract_state_update(payload_serial)
         assert res_serial == {"serial_number": "SN999"}
 
         # Both Case
-        payload_both = {
-            "msg": 4,
-            "Message": "Local IP: 1.1.1.1 Device Serial: S1"
-        }
+        payload_both = {"msg": 4, "Message": "Local IP: 1.1.1.1 Device Serial: S1"}
         res_both = rt._extract_state_update(payload_both)
         assert res_both == {"ip": "1.1.1.1", "serial_number": "S1"}
 
         # Irrelevant log
-        payload_none = {
-            "msg": 4,
-            "Message": "Just a log message"
-        }
+        payload_none = {"msg": 4, "Message": "Just a log message"}
         assert rt._extract_state_update(payload_none) is None
 
     async def test_extract_state_update_cmd_only(self, mock_hass):
@@ -544,7 +600,7 @@ class TestMysaRealtime:
             "body": {
                 # No "state" key
                 "cmd": [{"sp": 21}, {"m": 1}]
-            }
+            },
         }
         res = rt._extract_state_update(payload)
         # Should merge items from cmd list
@@ -553,20 +609,14 @@ class TestMysaRealtime:
     async def test_extract_state_update_key_variant(self, mock_hass):
         """Test extraction using 'MsgType' key instead of 'msg'."""
         rt = MysaRealtime(mock_hass, AsyncMock(), AsyncMock())
-        payload = {
-            "MsgType": 4,
-            "Message": "Local IP: 192.168.1.99"
-        }
+        payload = {"MsgType": 4, "Message": "Local IP: 192.168.1.99"}
         res = rt._extract_state_update(payload)
         assert res == {"ip": "192.168.1.99"}
 
     async def test_extract_state_update_invalid_body(self, mock_hass):
         """Test extraction with invalid body type (not dict)."""
         rt = MysaRealtime(mock_hass, AsyncMock(), AsyncMock())
-        payload = {
-            "msg": 44,
-            "body": "invalid_string_body"
-        }
+        payload = {"msg": 44, "body": "invalid_string_body"}
         res = rt._extract_state_update(payload)
         assert res is None
 
@@ -575,7 +625,7 @@ class TestMysaRealtime:
         rt = MysaRealtime(mock_hass, AsyncMock(), AsyncMock())
         payload = {
             "msg": 4,
-            "Message": "Prefix Device Serial: SN999 Local IP: 10.0.0.99"
+            "Message": "Prefix Device Serial: SN999 Local IP: 10.0.0.99",
         }
         res = rt._extract_state_update(payload)
         assert res == {"ip": "10.0.0.99", "serial_number": "SN999"}
@@ -611,24 +661,19 @@ class TestMysaRealtime:
             "msg": 44,
             "body": {"state": {"temp": 21}},
             "ip": "10.0.0.5",
-            "version": "3.0.0"
+            "version": "3.0.0",
         }
         res = rt._extract_state_update(payload)
         assert res == {"temp": 21, "ip": "10.0.0.5", "FirmwareVersion": "3.0.0"}
 
-# --- Gap Fill Tests (Merged) ---
+    # --- Gap Fill Tests (Merged) ---
 
     async def test_extract_state_update_msg_30(self, mock_hass):
         """Test extraction of MsgType 30 (Periodic Update)."""
         rt = MysaRealtime(mock_hass, AsyncMock(), AsyncMock())
         payload = {
             "msg": 30,
-            "body": {
-                "ambTemp": 20.5,
-                "hum": 44,
-                "stpt": 19.0,
-                "mode": 6
-            }
+            "body": {"ambTemp": 20.5, "hum": 44, "stpt": 19.0, "mode": 6},
         }
         res = rt._extract_state_update(payload)
         # Should return everything (mode filtering moved to device.py)
@@ -636,8 +681,7 @@ class TestMysaRealtime:
         assert res["ambTemp"] == 20.5
         assert res["mode"] == 6
 
-# --- Gap Fill Tests (Merged) ---
-
+    # --- Gap Fill Tests (Merged) ---
 
     async def test_extract_state_update_invalid_msg_type(self, mock_hass):
         """Test extraction with non-numeric msg type (hits exception block)."""
@@ -645,6 +689,7 @@ class TestMysaRealtime:
         payload = {"msg": "invalid_int"}
         # Should catch ValueError and return None (since msg_type becomes None)
         assert rt._extract_state_update(payload) is None
+
 
 class TestRealtimeException:
     """Test realtime.py exception handling."""
@@ -656,15 +701,17 @@ class TestRealtimeException:
 
         # Create a packet with invalid JSON to trigger json.loads exception
         pkt = MagicMock()
-        pkt.payload = b'{invalid json'
+        pkt.payload = b"{invalid json"
         pkt.topic = "/v1/dev/dev1/out"
 
         # Should catch exception and log error, not raise
         await rt._process_mqtt_publish(pkt)
 
+
 # ===========================================================================
 # Merged Coverage Tests
 # ===========================================================================
+
 
 class TestRealtimeCoverage:
     """Test coverage for MysaRealtime extraction logic."""
@@ -675,45 +722,26 @@ class TestRealtimeCoverage:
 
     def test_extract_boot_info(self, realtime):
         """Test MsgType 10 extraction (covers _extract_boot_info)."""
-        payload = {
-            "msg": 10,
-            "ip": "1.2.3.4",
-            "version": "1.0.0"
-        }
+        payload = {"msg": 10, "ip": "1.2.3.4", "version": "1.0.0"}
         update = realtime._extract_state_update(payload)
         assert update["ip"] == "1.2.3.4"
         assert update["FirmwareVersion"] == "1.0.0"
 
         # Variant with 'ver'
-        payload2 = {
-            "msg": 10,
-            "ver": "2.0.0"
-        }
+        payload2 = {"msg": 10, "ver": "2.0.0"}
         update2 = realtime._extract_state_update(payload2)
         assert update2["FirmwareVersion"] == "2.0.0"
 
     def test_extract_msg_type_30_timestamp(self, realtime):
         """Test MsgType 30 timestamp extraction."""
-        payload = {
-            "msg": 30,
-            "time": 1234567890,
-            "body": {
-                "ambTemp": 20.0
-            }
-        }
+        payload = {"msg": 30, "time": 1234567890, "body": {"ambTemp": 20.0}}
         update = realtime._extract_state_update(payload)
         assert update["ambTemp"] == 20.0
         assert update["Timestamp"] == 1234567890
 
     def test_extract_msg_type_30_invalid_timestamp(self, realtime):
         """Test MsgType 30 invalid timestamp handling."""
-        payload = {
-            "msg": 30,
-            "time": "bad_ts",
-            "body": {
-                "ambTemp": 21.0
-            }
-        }
+        payload = {"msg": 30, "time": "bad_ts", "body": {"ambTemp": 21.0}}
         update = realtime._extract_state_update(payload)
         assert update["ambTemp"] == 21.0
         assert "Timestamp" not in update
@@ -732,10 +760,7 @@ class TestRealtimeCoverage:
 
     def test_extract_invalid_timestamp(self, realtime):
         """Test invalid timestamp graceful handling."""
-        payload = {
-            "time": "not-a-number",
-            "body": {"stpt": 20.0}
-        }
+        payload = {"time": "not-a-number", "body": {"stpt": 20.0}}
         update = realtime._extract_state_update(payload)
         assert update["stpt"] == 20.0
         assert "Timestamp" not in update
@@ -753,15 +778,27 @@ class TestRealtimeCoverage:
         assert realtime._extract_batch_info({"body": {}}) is None
 
         # Hit 349-350 (not parsed)
-        assert realtime._extract_batch_info({"body": {"readings": base64.b64encode(b"not_magic").decode()}}) is None
+        assert (
+            realtime._extract_batch_info(
+                {"body": {"readings": base64.b64encode(b"not_magic").decode()}}
+            )
+            is None
+        )
 
         # Hit 355-357 (Exception)
         with patch("base64.b64decode", side_effect=ValueError("Mock Error")):
             assert realtime._extract_batch_info({"body": {"readings": "any"}}) is None
 
         # Hit 278-279 via _extract_state_update
-        raw_data = b'\xca\xa0\x00' + struct.pack('<LhhhbbhhhHbb', 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1) + b'\x01'
-        payload_msg3 = {"msg": 3, "body": {"readings": base64.b64encode(raw_data).decode()}}
+        raw_data = (
+            b"\xca\xa0\x00"
+            + struct.pack("<LhhhbbhhhHbb", 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1)
+            + b"\x01"
+        )
+        payload_msg3 = {
+            "msg": 3,
+            "body": {"readings": base64.b64encode(raw_data).decode()},
+        }
         assert realtime._extract_state_update(payload_msg3)["BatchVersion"] == 0
 
         # Hit 343-344 (no readings)
@@ -777,9 +814,12 @@ async def test_fibonacci_backoff_sequence(mock_hass):
 
     # Mock _mqtt_listen to always fail
     # We want to check the sequence of delays passed to asyncio.sleep
-    with patch("custom_components.mysa.realtime.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+    with patch(
+        "custom_components.mysa.realtime.asyncio.sleep", new_callable=AsyncMock
+    ) as mock_sleep:
         # Mock _mqtt_listen to raise an exception 5 times then stop the loop
         call_count = 0
+
         async def mock_listen():
             nonlocal call_count
             call_count += 1
@@ -795,15 +835,18 @@ async def test_fibonacci_backoff_sequence(mock_hass):
         sleep_calls = [call.args[0] for call in mock_sleep.call_args_list]
         assert sleep_calls == [1.0, 1.0, 2.0, 3.0, 5.0, 8.0]
 
+
 @pytest.mark.asyncio
 async def test_fibonacci_backoff_cap(mock_hass):
     """Test that the retry delay is capped at 60s."""
     rt = MysaRealtime(mock_hass, AsyncMock(), AsyncMock())
     rt._mqtt_reconnect_delay = 55.0
 
-    with patch("custom_components.mysa.realtime.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
-
+    with patch(
+        "custom_components.mysa.realtime.asyncio.sleep", new_callable=AsyncMock
+    ) as mock_sleep:
         call_count = 0
+
         async def mock_listen():
             nonlocal call_count
             call_count += 1
@@ -819,14 +862,18 @@ async def test_fibonacci_backoff_cap(mock_hass):
         assert all(s <= 60.0 for s in sleep_calls)
         assert sleep_calls[-1] == 60.0
 
+
 @pytest.mark.asyncio
 async def test_fibonacci_reset_on_success(mock_hass):
     """Test that retry sequence resets on successful connection."""
     rt = MysaRealtime(mock_hass, AsyncMock(), AsyncMock())
     rt._mqtt_reconnect_delay = 1.0
 
-    with patch("custom_components.mysa.realtime.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+    with patch(
+        "custom_components.mysa.realtime.asyncio.sleep", new_callable=AsyncMock
+    ) as mock_sleep:
         call_count = 0
+
         async def mock_listen():
             nonlocal call_count
             call_count += 1
@@ -835,7 +882,7 @@ async def test_fibonacci_reset_on_success(mock_hass):
             if call_count == 2:
                 raise Exception("Fail 2")
             if call_count == 3:
-                return # Success
+                return  # Success
             if call_count == 4:
                 rt._mqtt_should_reconnect = False
                 raise Exception("Fail 3")

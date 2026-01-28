@@ -1,7 +1,11 @@
 """Tests for the Mysa Extended config flow."""
+
 from unittest.mock import MagicMock, patch
-from custom_components.mysa_extended import config_flow
+
 from homeassistant.data_entry_flow import FlowResultType
+
+from custom_components.mysa_extended import config_flow
+
 
 async def test_options_flow(hass):
     """Test options flow."""
@@ -47,7 +51,10 @@ async def test_config_flow(hass):
     assert result["data"] == {}
 
     # Test abort if already configured
-    with patch("homeassistant.config_entries.ConfigFlow._async_current_entries", return_value=[MagicMock()]):
+    with patch(
+        "homeassistant.config_entries.ConfigFlow._async_current_entries",
+        return_value=[MagicMock()],
+    ):
         result = await flow.async_step_user()
         assert result["type"] == FlowResultType.ABORT
         assert result["reason"] == "already_configured"

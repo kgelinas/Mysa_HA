@@ -1,14 +1,13 @@
-"""
-Mock MQTT Broker for Mysa E2E testing.
+"""Mock MQTT Broker for Mysa E2E testing.
 
 Provides a lightweight in-process MQTT broker for testing real-time updates
 without connecting to actual Mysa servers.
 """
+
 import asyncio
 import json
 import logging
 import time
-from typing import Dict, List, Optional
 from dataclasses import dataclass, field
 
 _LOGGER = logging.getLogger(__name__)
@@ -17,6 +16,7 @@ _LOGGER = logging.getLogger(__name__)
 @dataclass
 class MockMqttMessage:
     """Represents an MQTT message."""
+
     topic: str
     payload: bytes
     qos: int = 0
@@ -26,9 +26,10 @@ class MockMqttMessage:
 @dataclass
 class MockMqttClient:
     """Mock MQTT client that connects to MockMqttBroker."""
+
     client_id: str
     broker: "MockMqttBroker"
-    subscriptions: List[str] = field(default_factory=list)
+    subscriptions: list[str] = field(default_factory=list)
     message_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
     connected: bool = False
 
@@ -50,22 +51,23 @@ class MockMqttClient:
         self.subscriptions.append(topic)
         _LOGGER.debug("MockMqttClient %s subscribed to %s", self.client_id, topic)
 
-    async def publish(self, topic: str, payload: bytes, qos: int = 0, retain: bool = False):
+    async def publish(
+        self, topic: str, payload: bytes, qos: int = 0, retain: bool = False
+    ):
         """Publish a message."""
         msg = MockMqttMessage(topic=topic, payload=payload, qos=qos, retain=retain)
         await self.broker.route_message(msg, sender=self.client_id)
 
-    async def receive(self, timeout: float = 5.0) -> Optional[MockMqttMessage]:
+    async def receive(self, timeout: float = 5.0) -> MockMqttMessage | None:
         """Receive a message from subscribed topics."""
         try:
             return await asyncio.wait_for(self.message_queue.get(), timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return None
 
 
 class MockMqttBroker:
-    """
-    In-memory MQTT broker for testing.
+    """In-memory MQTT broker for testing.
 
     Supports:
     - Multiple clients
@@ -75,10 +77,10 @@ class MockMqttBroker:
     """
 
     def __init__(self):
-        self.clients: Dict[str, MockMqttClient] = {}
-        self.retained_messages: Dict[str, MockMqttMessage] = {}
+        self.clients: dict[str, MockMqttClient] = {}
+        self.retained_messages: dict[str, MockMqttMessage] = {}
         self._running = False
-        self._message_log: List[MockMqttMessage] = []
+        self._message_log: list[MockMqttMessage] = []
 
     async def start(self):
         """Start the mock broker."""
@@ -114,9 +116,10 @@ class MockMqttBroker:
                     await client.message_queue.put(msg)
                     break
 
-    async def inject_message(self, topic: str, payload: dict, device_id: Optional[str] = None):
-        """
-        Inject a message into the broker for testing.
+    async def inject_message(
+        self, topic: str, payload: dict, device_id: str | None = None
+    ):
+        """Inject a message into the broker for testing.
 
         This simulates a message coming from a Mysa device.
 
@@ -130,14 +133,10 @@ class MockMqttBroker:
             safe_id = device_id.replace(":", "").lower()
             topic = f"/v1/dev/{safe_id}/out"
 
-        msg = MockMqttMessage(
-            topic=topic,
-            payload=json.dumps(payload).encode(),
-            qos=1
-        )
+        msg = MockMqttMessage(topic=topic, payload=json.dumps(payload).encode(), qos=1)
         await self.route_message(msg, sender="broker_inject")
 
-    def get_message_log(self) -> List[MockMqttMessage]:
+    def get_message_log(self) -> list[MockMqttMessage]:
         """Get all messages that have been routed through the broker."""
         return self._message_log.copy()
 
@@ -168,9 +167,9 @@ class MockMqttBroker:
 # Mysa-specific helpers
 # ===========================================================================
 
+
 def create_mysa_state_update(device_id: str, **kwargs) -> dict:
-    """
-    Create a Mysa-style state update message.
+    """Create a Mysa-style state update message.
 
     Args:
         device_id: Device ID
@@ -184,15 +183,12 @@ def create_mysa_state_update(device_id: str, **kwargs) -> dict:
         "ver": "1.0",
         "time": int(time.time()),
         "src": {"ref": device_id, "type": 1},
-        "body": {
-            "state": kwargs
-        }
+        "body": {"state": kwargs},
     }
 
 
 def create_mysa_command(device_id: str, user_id: str, **kwargs) -> dict:
-    """
-    Create a Mysa-style command message.
+    """Create a Mysa-style command message.
 
     Args:
         device_id: Target device ID
@@ -215,6 +211,6 @@ def create_mysa_command(device_id: str, user_id: str, **kwargs) -> dict:
         "body": {
             "cmd": [dict(kwargs, tm=-1)],
             "type": 4,  # BB-V2
-            "ver": 1
-        }
+            "ver": 1,
+        },
     }

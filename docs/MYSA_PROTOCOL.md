@@ -209,15 +209,27 @@ High-frequency voltage/current/power readings, sent to the `/batch` topic. The p
 }
 ```
 
-The binary format consists of sequential 20-byte structs:
-- `timestamp` (uint32)
-- `unknown1` (uint16)
-- `current` (uint16) / 1000.0
-- `voltage` (uint16) / 10.0
-- `power` (uint16)
-- `unknown2` (uint16)
-- `unknown3` (uint16)
-- `unknown4` (uint16)
+The binary format generally follows 22 bytes of common data + version-specific trailer.
+
+**Common Header (22 bytes):**
+1. `Timestamp` (uint32, LE)
+2. `SensorTemp` (int16, LE, /10.0)
+3. `AmbTemp` (int16, LE, /10.0)
+4. `Setpoint` (int16, LE, /10.0)
+5. `Humidity` (int8)
+6. `Duty` (int8)
+7. `OnMs` (int16, LE)
+8. `OffMs` (int16, LE)
+9. `HeatSink` (int16, LE, /10.0)
+10. `FreeHeap` (uint16, LE)
+11. `RSSI` (int8, negated)
+12. `State` (int8, 1=On, 0=Off)
+
+**Version 3 Trailer (8 bytes):**
+13. `Voltage` (int16, LE)
+14. `Current` (int16, LE, /1000.0)
+15. `Reserved` (3 bytes, 0x00)
+16. `Checksum` (uint8, XOR of bytes 0-31)
 
 ---
 

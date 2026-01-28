@@ -1,20 +1,21 @@
-"""
-Mysa MQTT Module
+"""Mysa MQTT Module.
 
 Shared MQTT utilities for Mysa devices.
 Used by both the Home Assistant integration and debug tool.
 """
+
 from __future__ import annotations
 
-import ssl
-import logging
 import asyncio
-from typing import TYPE_CHECKING, Any, Optional, List, Union
+import logging
+import ssl
 from types import TracebackType
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 from uuid import uuid1
 
 import websockets
+
 if TYPE_CHECKING:
     # Use Any to avoid version mismatch issues with websockets library
     WebSocketClientProtocol = Any
@@ -36,11 +37,9 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def build_subscription_topics(
-    device_ids: List[str],
-    include_batch: bool = True
-) -> List[mqtt.SubscriptionSpec]:
-    """
-    Build MQTT subscription topic list for devices.
+    device_ids: list[str], include_batch: bool = True
+) -> list[mqtt.SubscriptionSpec]:
+    """Build MQTT subscription topic list for devices.
 
     Args:
         device_ids: List of device IDs (MAC addresses)
@@ -48,59 +47,64 @@ def build_subscription_topics(
 
     Returns:
         List of mqtt.SubscriptionSpec objects
+
     """
-    sub_topics: List[mqtt.SubscriptionSpec] = []
+    sub_topics: list[mqtt.SubscriptionSpec] = []
     for device_id in device_ids:
         safe_device_id = device_id.replace(":", "").lower()
-        sub_topics.extend([
-            mqtt.SubscriptionSpec(f'/v1/dev/{safe_device_id}/out', 0x01),
-            mqtt.SubscriptionSpec(f'/v1/dev/{safe_device_id}/in', 0x01),
-        ])
+        sub_topics.extend(
+            [
+                mqtt.SubscriptionSpec(f"/v1/dev/{safe_device_id}/out", 0x01),
+                mqtt.SubscriptionSpec(f"/v1/dev/{safe_device_id}/in", 0x01),
+            ]
+        )
         if include_batch:
-            sub_topics.append(mqtt.SubscriptionSpec(f'/v1/dev/{safe_device_id}/batch', 0x00))
+            sub_topics.append(
+                mqtt.SubscriptionSpec(f"/v1/dev/{safe_device_id}/batch", 0x00)
+            )
     return sub_topics
 
 
-def parse_mqtt_packet(data: Union[bytes, bytearray]) -> Optional[Any]:
-    """
-    Parse MQTT packet from raw data.
+def parse_mqtt_packet(data: bytes | bytearray) -> Any | None:
+    """Parse MQTT packet from raw data.
 
     Args:
         data: Raw bytes from WebSocket
 
     Returns:
         Parsed MQTT packet or None if parsing failed
+
     """
     if not isinstance(data, bytearray):
         data = bytearray(data)
-    msgs: List[Any] = []
+    msgs: list[Any] = []
     mqtt.parse(data, msgs)
     return msgs[0] if msgs else None
 
 
 def get_websocket_url(signed_url: str) -> str:
-    """
-    Convert signed HTTPS URL to WSS URL.
+    """Convert signed HTTPS URL to WSS URL.
 
     Args:
         signed_url: AWS SigV4 signed HTTPS URL
 
     Returns:
         WSS URL for WebSocket connection
+
     """
     url_parts = urlparse(signed_url)
-    return url_parts._replace(scheme='wss').geturl()
+    return url_parts._replace(scheme="wss").geturl()
 
 
 async def connect_websocket(signed_url: str) -> WebSocketClientProtocol:
-    """
-    Create WebSocket connection to MQTT broker.
+    """Create WebSocket connection to MQTT broker.
 
     Args:
         signed_url: AWS SigV4 signed MQTT URL
 
     Returns:
         WebSocket connection object
+
     """
     ws_url = get_websocket_url(signed_url)
 
@@ -108,47 +112,46 @@ async def connect_websocket(signed_url: str) -> WebSocketClientProtocol:
     loop = asyncio.get_running_loop()
     ssl_context = await loop.run_in_executor(None, ssl.create_default_context)
 
-    headers = {'user-agent': MQTT_USER_AGENT}
+    headers = {"user-agent": MQTT_USER_AGENT}
 
     try:
         ws = await websockets.connect(
             ws_url,
-            subprotocols=[websockets.Subprotocol('mqtt')],
+            subprotocols=[websockets.Subprotocol("mqtt")],
             ssl=ssl_context,
             additional_headers=headers,
             ping_interval=None,
-            ping_timeout=None
+            ping_timeout=None,
         )
     except TypeError:
         # Fallback for older websockets versions
         ws = await websockets.connect(
             ws_url,
-            subprotocols=[websockets.Subprotocol('mqtt')],
+            subprotocols=[websockets.Subprotocol("mqtt")],
             ssl=ssl_context,
             extra_headers=headers,
             ping_interval=None,
-            ping_timeout=None
+            ping_timeout=None,
         )
 
     return ws
 
 
 def create_connect_packet(keepalive: int = MQTT_KEEPALIVE) -> bytes:
-    """
-    Create MQTT CONNECT packet with unique client ID.
+    """Create MQTT CONNECT packet with unique client ID.
 
     Args:
         keepalive: Keepalive interval in seconds
 
     Returns:
         MQTT CONNECT packet bytes
+
     """
     return mqtt.connect(str(uuid1()), keepalive)
 
 
-def create_subscribe_packet(device_ids: List[str], packet_id: int = 1) -> bytes:
-    """
-    Create MQTT SUBSCRIBE packet for device topics.
+def create_subscribe_packet(device_ids: list[str], packet_id: int = 1) -> bytes:
+    """Create MQTT SUBSCRIBE packet for device topics.
 
     Args:
         device_ids: List of device IDs to subscribe to
@@ -156,14 +159,14 @@ def create_subscribe_packet(device_ids: List[str], packet_id: int = 1) -> bytes:
 
     Returns:
         MQTT SUBSCRIBE packet bytes
+
     """
     topics = build_subscription_topics(device_ids)
     return mqtt.subscribe(packet_id, topics)
 
 
 class MqttConnection:
-    """
-    Async context manager for MQTT connections.
+    """Async context manager for MQTT connections.
 
     Handles WebSocket connection, MQTT handshake, and device subscription
     in a clean, reusable way.
@@ -179,27 +182,27 @@ class MqttConnection:
     def __init__(
         self,
         signed_url: str,
-        device_ids: List[str],
+        device_ids: list[str],
         keepalive: int = MQTT_KEEPALIVE,
-        include_batch: bool = True
+        include_batch: bool = True,
     ):
-        """
-        Initialize MQTT connection.
+        """Initialize MQTT connection.
 
         Args:
             signed_url: AWS SigV4 signed MQTT URL
             device_ids: List of device IDs to subscribe to
             keepalive: MQTT keepalive interval in seconds
             include_batch: Whether to include the /batch topic
+
         """
         self.signed_url = signed_url
         self.device_ids = device_ids
         self.keepalive = keepalive
         self.include_batch = include_batch
-        self._ws: Optional[WebSocketClientProtocol] = None
+        self._ws: WebSocketClientProtocol | None = None
         self._connected: bool = False
 
-    async def __aenter__(self) -> 'MqttConnection':
+    async def __aenter__(self) -> MqttConnection:
         """Connect to MQTT broker and subscribe to device topics."""
         # Connect WebSocket
         self._ws = await connect_websocket(self.signed_url)
@@ -237,9 +240,9 @@ class MqttConnection:
 
     async def __aexit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType]
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> bool:
         """Disconnect from MQTT broker."""
         self._connected = False
@@ -264,19 +267,19 @@ class MqttConnection:
         return self._connected and self._ws is not None
 
     @property
-    def websocket(self) -> Optional[WebSocketClientProtocol]:
+    def websocket(self) -> WebSocketClientProtocol | None:
         """Get underlying WebSocket connection."""
         return self._ws
 
-    async def receive(self, timeout: Optional[float] = None) -> Optional[Any]:
-        """
-        Receive and parse an MQTT packet.
+    async def receive(self, timeout: float | None = None) -> Any | None:
+        """Receive and parse an MQTT packet.
 
         Args:
             timeout: Optional timeout in seconds
 
         Returns:
             Parsed MQTT packet or None on timeout
+
         """
         if not self._ws:
             raise RuntimeError("Not connected")
@@ -287,7 +290,7 @@ class MqttConnection:
             else:
                 data = await self._ws.recv()
             return parse_mqtt_packet(data)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return None
 
     async def send_ping(self) -> None:
@@ -298,11 +301,11 @@ class MqttConnection:
         _LOGGER.debug("Sent PINGREQ keepalive")
 
     async def send(self, data: bytes) -> None:
-        """
-        Send raw data to MQTT broker.
+        """Send raw data to MQTT broker.
 
         Args:
             data: MQTT packet bytes to send
+
         """
         if not self._ws:
             raise RuntimeError("Not connected")

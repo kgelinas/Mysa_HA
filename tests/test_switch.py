@@ -1,15 +1,13 @@
-"""
-Tests for Switch entities.
-"""
+"""Tests for Switch entities."""
 
-
-
-
-import pytest
 import time
 from typing import Any
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock
+
+import pytest
+
 from custom_components.mysa.switch import MysaClimatePlusSwitch
+
 
 class TestMysaLockSwitch:
     """Test thermostat lock switch entity."""
@@ -324,7 +322,10 @@ class TestSwitchCoverageGaps:
     def test_switch_coverage(self, mock_coordinator, mock_config_entry):
         """Exercise switch.py missing lines."""
         from custom_components.mysa.switch import MysaSwitch
-        entity = MysaSwitch(mock_coordinator, "dev1", {}, MagicMock(), mock_config_entry, "key", "key")
+
+        entity = MysaSwitch(
+            mock_coordinator, "dev1", {}, MagicMock(), mock_config_entry, "key", "key"
+        )
         # 100, 115, 118, 126, 131
         assert entity._extract_value(None, ["key"]) is None
         mock_coordinator.data = None

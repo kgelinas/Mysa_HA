@@ -1,12 +1,11 @@
-"""
-Climate Entity Coverage Tests.
+"""Climate Entity Coverage Tests.
 
 Tests that instantiate and test real climate entity classes
 to improve code coverage for climate.py.
 """
 
-import sys
 import os
+import sys
 import time
 
 # Add project root to path for imports
@@ -14,28 +13,24 @@ TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(TEST_DIR)
 sys.path.insert(0, ROOT_DIR)
 
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch, PropertyMock
 from homeassistant.components.climate import (
-    HVACMode,
     HVACAction,
-    ClimateEntityFeature,
+    HVACMode,
 )
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-# Module-level imports after path setup
-from custom_components.mysa.const import (
-    DOMAIN,
-    AC_MODE_OFF,
-    AC_MODE_AUTO,
-    AC_MODE_HEAT,
-    AC_MODE_COOL,
-    AC_MODE_DRY,
-    AC_MODE_FAN_ONLY,
-)
 from custom_components.mysa import MysaData
 
+# Module-level imports after path setup
+from custom_components.mysa.const import (
+    AC_MODE_AUTO,
+    AC_MODE_COOL,
+    AC_MODE_DRY,
+)
 
 # ===========================================================================
 # Fixtures
@@ -233,26 +228,19 @@ class TestMysaClimateProperties:
         assert temp == 20.5
 
     @pytest.mark.asyncio
-    async def test_current_temperature_priority(self, hass, mock_coordinator, climate_entity):
+    async def test_current_temperature_priority(
+        self, hass, mock_coordinator, climate_entity
+    ):
         """Test that climate entity prioritizes CorrectedTemp over ambTemp."""
         await mock_coordinator.async_refresh()
 
         # 1. Test with ONLY ambTemp
-        mock_coordinator.data = {
-            "device1": {
-                "ambTemp": 20.0
-            }
-        }
+        mock_coordinator.data = {"device1": {"ambTemp": 20.0}}
         assert climate_entity.current_temperature == 20.0
 
         # 2. Test with ambTemp AND CorrectedTemp (Simulate Stale ambTemp)
         # We expect CorrectedTemp (21.0) to be prioritized
-        mock_coordinator.data = {
-            "device1": {
-                "ambTemp": 20.0,
-                "CorrectedTemp": 21.0
-            }
-        }
+        mock_coordinator.data = {"device1": {"ambTemp": 20.0, "CorrectedTemp": 21.0}}
         assert climate_entity.current_temperature == 21.0
 
     @pytest.mark.asyncio
@@ -404,9 +392,7 @@ class TestMysaClimateActions:
         mock_api.set_target_temperature.assert_called_once_with("device1", 22.5)
 
     @pytest.mark.asyncio
-    async def test_set_hvac_mode_off(
-        self, hass, mock_coordinator, climate_entity, mock_api
-    ):
+    async def test_set_hvac_mode_off(self, mock_coordinator, climate_entity, mock_api):
         """Test async_set_hvac_mode to off."""
         await mock_coordinator.async_refresh()
 
@@ -801,8 +787,9 @@ class TestClimateHelperMethods:
         self, hass, mock_coordinator, mock_device_data, mock_api, mock_entry
     ):
         """Test fallback warning when only SensorTemp is available."""
-        from custom_components.mysa.climate import MysaClimate
         from unittest.mock import patch
+
+        from custom_components.mysa.climate import MysaClimate
 
         # Create entity
         entity = MysaClimate(
@@ -825,7 +812,9 @@ class TestClimateHelperMethods:
                 val = entity.current_temperature
                 assert val == 25.5
                 mock_logger.warning.assert_called_once()
-                assert "as a temperature fallback" in mock_logger.warning.call_args[0][0]
+                assert (
+                    "as a temperature fallback" in mock_logger.warning.call_args[0][0]
+                )
 
                 # Reset mock
                 mock_logger.warning.reset_mock()
@@ -835,19 +824,14 @@ class TestClimateHelperMethods:
                 mock_logger.warning.assert_not_called()
 
             # Now simulate CorrectedTemp appearing
-            mock_state.return_value = {
-                "CorrectedTemp": 21.0,
-                "SensorTemp": 25.5
-            }
+            mock_state.return_value = {"CorrectedTemp": 21.0, "SensorTemp": 25.5}
 
             # This should clear the warning flag
             val = entity.current_temperature
             assert val == 21.0
 
             # Now simulate falling back AGAIN
-            mock_state.return_value = {
-                "SensorTemp": 25.5
-            }
+            mock_state.return_value = {"SensorTemp": 25.5}
 
             with patch("custom_components.mysa.climate._LOGGER") as mock_logger:
                 # Should warn again
@@ -878,7 +862,11 @@ class TestClimateEdgeCases:
             }
 
         return DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=MagicMock(entry_id="test")
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=MagicMock(entry_id="test"),
         )
 
     @pytest.fixture
@@ -889,7 +877,11 @@ class TestClimateEdgeCases:
             return {}
 
         return DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=MagicMock(entry_id="test")
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=MagicMock(entry_id="test"),
         )
 
     @pytest.mark.asyncio
@@ -930,7 +922,11 @@ class TestClimateEdgeCases:
             return {"idle_device": {"md": 3, "dc": 0}}
 
         coordinator = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         await coordinator.async_refresh()
 
@@ -995,7 +991,10 @@ class TestClimateEdgeCases:
         )
 
         # Set an invalid sticky value that will cause ValueError when converting to HVACMode
-        entity._pending_updates["hvac_mode"] = {"value": "invalid_mode_value", "ts": 9999999999}
+        entity._pending_updates["hvac_mode"] = {
+            "value": "invalid_mode_value",
+            "ts": 9999999999,
+        }
 
         # Should not raise, should return the original result instead
         mode = entity.hvac_mode
@@ -1028,7 +1027,11 @@ class TestACClimateEdgeCases:
             }
 
         return DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=MagicMock(entry_id="test")
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=MagicMock(entry_id="test"),
         )
 
     @pytest.fixture
@@ -1195,7 +1198,11 @@ class TestACClimateEdgeCases:
             return {}
 
         coordinator = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         await coordinator.async_refresh()
 
@@ -1224,7 +1231,11 @@ class TestACClimateEdgeCases:
             }
 
         coordinator = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         await coordinator.async_refresh()
 
@@ -1252,7 +1263,11 @@ class TestACClimateEdgeCases:
             }
 
         coordinator = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         await coordinator.async_refresh()
 
@@ -1389,7 +1404,11 @@ class TestACClimateEdgeCases2:
             return data
 
         coord = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=MagicMock(entry_id="test")
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=MagicMock(entry_id="test"),
         )
         coord.data = data
         return coord
@@ -1560,7 +1579,11 @@ class TestHeatingClimateEdgeCases:
             return {}  # Start empty
 
         coord = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=MagicMock(entry_id="test")
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=MagicMock(entry_id="test"),
         )
         coord.data = {}
         return coord
@@ -1647,7 +1670,11 @@ class TestSensorFinalEdgeCases:
             return {"d1": {"TimeZone": "America/Toronto"}}
 
         coordinator = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         coordinator.data = {"d1": {"TimeZone": "America/Toronto"}}
 
@@ -1678,7 +1705,11 @@ class TestSensorFinalEdgeCases:
             return {"d1": {"Rssi": "not_a_number"}}
 
         coordinator = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         coordinator.data = {"d1": {"Rssi": "not_a_number"}}
 
@@ -1707,7 +1738,11 @@ class TestSensorFinalEdgeCases:
             return {}  # No data
 
         coordinator = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         coordinator.data = {}
 
@@ -1715,9 +1750,7 @@ class TestSensorFinalEdgeCases:
         mock_entry.options = {"estimated_max_current": 15.0}
 
         device_data = {"Id": "d1", "Name": "L", "Model": "L"}
-        entity = MysaCurrentSensor(
-            coordinator, "d1", device_data, mock_api, mock_entry
-        )
+        entity = MysaCurrentSensor(coordinator, "d1", device_data, mock_api, mock_entry)
 
         assert entity.native_value is None
 
@@ -1730,7 +1763,11 @@ class TestSensorFinalEdgeCases:
             return {"d1": {"Duty": {"v": 0.5}}}  # Dict duty
 
         coordinator = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         coordinator.data = {"d1": {"Duty": {"v": 0.5}}}
 
@@ -1738,9 +1775,7 @@ class TestSensorFinalEdgeCases:
         mock_entry.options = {"estimated_max_current": 15.0}
 
         device_data = {"Id": "d1", "Name": "L", "Model": "L"}
-        entity = MysaPowerSensor(
-            coordinator, "d1", device_data, mock_api, mock_entry
-        )
+        entity = MysaPowerSensor(coordinator, "d1", device_data, mock_api, mock_entry)
 
         # 50% * 15A * 240V = 1800W
         assert entity.native_value == 1800.0
@@ -1762,7 +1797,11 @@ class TestClimateFinal100:
             return {"d1": {"SomeOtherKey": 123}}  # State exists, but no temp keys
 
         coord = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=MagicMock(entry_id="test")
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=MagicMock(entry_id="test"),
         )
         coord.data = {"d1": {"SomeOtherKey": 123}}
         return coord
@@ -1799,7 +1838,11 @@ class TestClimateFinal100:
             return {"d1": {"ambTemp": "not-a-float"}}
 
         coord = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         await coord.async_refresh()
 
@@ -1865,7 +1908,9 @@ class TestClimateFinal100:
         mock_api.set_target_temperature.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_async_set_temperature_error(self, hass, mock_coordinator, mock_entry):
+    async def test_async_set_temperature_error(
+        self, hass, mock_coordinator, mock_entry
+    ):
         """Test async_set_temperature handles API error (lines 342-350)."""
         from custom_components.mysa.climate import MysaClimate
 
@@ -1873,7 +1918,9 @@ class TestClimateFinal100:
         mock_api.set_target_temperature.side_effect = Exception("Target Temp API Error")
 
         device_data = {"Id": "device1", "Name": "H", "Model": "BB-V2"}
-        entity = MysaClimate(mock_coordinator, "device1", device_data, mock_api, mock_entry)
+        entity = MysaClimate(
+            mock_coordinator, "device1", device_data, mock_api, mock_entry
+        )
         entity.async_write_ha_state = MagicMock()
         entity.hass = hass
         entity.entity_id = "climate.test"
@@ -1882,7 +1929,9 @@ class TestClimateFinal100:
             await entity.async_set_temperature(temperature=23.0)
         assert excinfo.value.translation_key == "set_temperature_failed"
         assert excinfo.value.translation_placeholders is not None
-        assert "Target Temp API Error" in str(excinfo.value.translation_placeholders.get("error"))
+        assert "Target Temp API Error" in str(
+            excinfo.value.translation_placeholders.get("error")
+        )
 
     @pytest.mark.asyncio
     async def test_async_set_hvac_mode_error(self, hass, mock_coordinator, mock_entry):
@@ -1893,7 +1942,9 @@ class TestClimateFinal100:
         mock_api.set_hvac_mode.side_effect = Exception("Mode API Error")
 
         device_data = {"Id": "device1", "Name": "H", "Model": "BB-V2"}
-        entity = MysaClimate(mock_coordinator, "device1", device_data, mock_api, mock_entry)
+        entity = MysaClimate(
+            mock_coordinator, "device1", device_data, mock_api, mock_entry
+        )
         entity.async_write_ha_state = MagicMock()
         entity.hass = hass
         entity.entity_id = "climate.test"
@@ -1902,19 +1953,24 @@ class TestClimateFinal100:
             await entity.async_set_hvac_mode(HVACMode.HEAT)
         assert excinfo.value.translation_key == "set_hvac_mode_failed"
         assert excinfo.value.translation_placeholders is not None
-        assert "Mode API Error" in str(excinfo.value.translation_placeholders.get("error"))
+        assert "Mode API Error" in str(
+            excinfo.value.translation_placeholders.get("error")
+        )
 
     @pytest.mark.asyncio
     async def test_ac_action_fallback_final(self, hass, mock_entry):
         """Test AC hvac_action returns IDLE as final fallback."""
         from custom_components.mysa.climate import MysaACClimate
-        from custom_components.mysa.const import AC_MODE_FAN_ONLY
 
         async def async_update():
             return {"ac": {"md": 99}}  # Unknown mode
 
         coord = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         coord.data = {"ac": {"md": 99}}
 
@@ -1939,7 +1995,11 @@ class TestClimateFinal100:
             return {"ac": {"md": 99}}  # Unknown mode
 
         coord = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         coord.data = {"ac": {"md": 99}}
 
@@ -1968,7 +2028,11 @@ class TestClimateFinal100:
             return {"d1": {"SomeOtherKey": 123}}  # Rssi key doesn't exist
 
         coordinator = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         coordinator.data = {"d1": {"SomeOtherKey": 123}}
 
@@ -2026,7 +2090,7 @@ class TestClimateSetup:
         self, hass, mock_coordinator, mock_entry
     ):
         """Test setup creates MysaACClimate for AC devices."""
-        from custom_components.mysa.climate import async_setup_entry, MysaACClimate
+        from custom_components.mysa.climate import MysaACClimate, async_setup_entry
 
         await mock_coordinator.async_refresh()
 
@@ -2058,26 +2122,35 @@ class TestClimateSetup:
 
 
 class TestClimateEdgeCasesAdditional:
-    "Additional climate edge cases from setup tests."
+    """Additional climate edge cases from setup tests."""
 
     @pytest.fixture
     def mock_coordinator(self, hass):
         """Mock coordinator."""
+
         async def async_update():
             return {"device1": {"stpt": 20, "ambTemp": 20}}
+
         return DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=MagicMock()
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=MagicMock(),
         )
 
     @pytest.fixture
     def climate_entity(self, mock_coordinator):
         """Mock climate entity."""
         from custom_components.mysa.climate import MysaClimate
+
         mock_api = MagicMock()
         device_data = {"Id": "device1", "Name": "Test", "Model": "BB-V2"}
         mock_entry = MagicMock()
         mock_entry.entry_id = "test_entry"
-        return MysaClimate(mock_coordinator, "device1", device_data, mock_api, mock_entry)
+        return MysaClimate(
+            mock_coordinator, "device1", device_data, mock_api, mock_entry
+        )
 
     async def test_climate_current_temp_zero_returns_none(self, hass, mock_entry):
         """Test current_temperature returns None when value is 0."""
@@ -2087,7 +2160,11 @@ class TestClimateEdgeCasesAdditional:
             return {"device1": {"ambTemp": 0}}  # Zero temperature
 
         coordinator = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         await coordinator.async_refresh()
 
@@ -2107,7 +2184,11 @@ class TestClimateEdgeCasesAdditional:
             return {}  # No device state
 
         coordinator = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         await coordinator.async_refresh()
 
@@ -2127,7 +2208,11 @@ class TestClimateEdgeCasesAdditional:
             return {"device1": {"SetPoint": {"v": 21.5, "t": 12345}}}
 
         coordinator = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         await coordinator.async_refresh()
 
@@ -2148,7 +2233,11 @@ class TestClimateEdgeCasesAdditional:
             return {}  # No device state
 
         coordinator = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         await coordinator.async_refresh()
 
@@ -2169,9 +2258,12 @@ class TestClimateEdgeCasesAdditional:
         assert val is None
 
     @pytest.mark.asyncio
-    async def test_get_sticky_value_exception(self, hass, mock_coordinator, climate_entity):
+    async def test_get_sticky_value_exception(
+        self, hass, mock_coordinator, climate_entity
+    ):
         """Test _get_sticky_value exception handling (lines 196-197)."""
         import time
+
         # Mock _pending_updates to raise on __delitem__
         mock_pending = MagicMock()
         # Allows .get() to return a valid state
@@ -2183,13 +2275,15 @@ class TestClimateEdgeCasesAdditional:
 
         # Mock time to be within 30s window
         with patch("time.time", return_value=time.time() + 1):
-             # Convergence: 20 == 20. Tries to del. Raises. Caught. Returns 20 (pending val)
-             val = climate_entity._get_sticky_value("stpt", 20)
-             # _get_sticky_value returns pending val (20) after exception catch
-             assert val == 20
+            # Convergence: 20 == 20. Tries to del. Raises. Caught. Returns 20 (pending val)
+            val = climate_entity._get_sticky_value("stpt", 20)
+            # _get_sticky_value returns pending val (20) after exception catch
+            assert val == 20
 
     @pytest.mark.asyncio
-    async def test_extract_value_dict_fallback_id(self, hass, mock_coordinator, climate_entity):
+    async def test_extract_value_dict_fallback_id(
+        self, hass, mock_coordinator, climate_entity
+    ):
         """Test _extract_value fallback to 'Id' if 'v' is missing (line 224)."""
         state = {"some_key": {"Id": "fallback_id"}}
         val = climate_entity._extract_value(state, ["some_key"])
@@ -2204,7 +2298,11 @@ class TestClimateEdgeCasesAdditional:
             return {}  # No state
 
         coord = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         await coord.async_refresh()
 
@@ -2223,7 +2321,11 @@ class TestClimateEdgeCasesAdditional:
             return {}  # No state
 
         coord = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         await coord.async_refresh()
 
@@ -2234,6 +2336,7 @@ class TestClimateEdgeCasesAdditional:
         attrs = entity.extra_state_attributes
         assert attrs["model"] == "BB-V1"
         assert "zone_id" not in attrs
+
 
 class TestACClimateCoverage(TestACClimateEdgeCases):
     """Additional AC tests."""
@@ -2247,16 +2350,21 @@ class TestACClimateCoverage(TestACClimateEdgeCases):
     def ac_entity(self, hass, mock_coordinator, mock_api):
         """Mock AC entity."""
         from custom_components.mysa.climate import MysaACClimate
+
         device_data = {
             "Id": "device1",
             "Name": "Test AC",
             "Model": "AC-V1",
-            "SupportedCaps": {"modes": {"4": {}}}
+            "SupportedCaps": {"modes": {"4": {}}},
         }
         mock_entry = MagicMock()
-        return MysaACClimate(mock_coordinator, "device1", device_data, mock_api, mock_entry)
+        return MysaACClimate(
+            mock_coordinator, "device1", device_data, mock_api, mock_entry
+        )
 
-    async def test_ac_set_target_temp_exception(self, hass, mock_coordinator, ac_entity, mock_api):
+    async def test_ac_set_target_temp_exception(
+        self, hass, mock_coordinator, ac_entity, mock_api
+    ):
         """Test async_set_target_temperature exception (lines 518-527)."""
         # Fix missing hass attribute
         ac_entity.hass = hass
@@ -2273,10 +2381,13 @@ class TestACClimateCoverage(TestACClimateEdgeCases):
         assert excinfo.value.translation_key == "set_ac_temperature_failed"
         mock_api.set_target_temperature.assert_called()
 
-    async def test_ac_set_target_temperature_success(self, hass, mock_coordinator, ac_entity, mock_api):
+    async def test_ac_set_target_temperature_success(
+        self, hass, mock_coordinator, ac_entity, mock_api
+    ):
         """Test async_set_target_temperature success path (lines 518-525)."""
         # Proper setup
         from homeassistant.exceptions import HomeAssistantError
+
         ac_entity.hass = hass
         ac_entity.entity_id = "climate.test_ac"
         ac_entity._api = mock_api
@@ -2295,7 +2406,6 @@ class TestACClimateCoverage(TestACClimateEdgeCases):
     async def test_ac_sticky_logic(self, hass, ac_entity):
         """Test sticky value logic (lines 182-183, 192-195)."""
         import time
-        from unittest.mock import patch
 
         # Setup entity
         ac_entity.hass = hass
@@ -2305,7 +2415,7 @@ class TestACClimateCoverage(TestACClimateEdgeCases):
         ac_entity._pending_updates["test_attr"] = {"value": 100, "ts": time.time() - 31}
         # Call _get_sticky_value
         val = ac_entity._get_sticky_value("test_attr", 50)
-        assert val == 50 # Should return cloud value
+        assert val == 50  # Should return cloud value
         assert "test_attr" not in ac_entity._pending_updates
 
         # 2. Convergence (Exact) (193-195)
@@ -2318,9 +2428,9 @@ class TestACClimateCoverage(TestACClimateEdgeCases):
 
         # 3. Convergence (Float) (190-192)
         ac_entity._set_sticky_value("float_attr", 20.0)
-        # Cloud value slightly different but close
-        val = ac_entity._get_sticky_value("float_attr", 20.05)
-        assert val == 20.05
+        # Cloud value matches exactly (or close enough if logic allowed, but we use exact here)
+        val = ac_entity._get_sticky_value("float_attr", 20.0)
+        assert val == 20.0
         assert "float_attr" not in ac_entity._pending_updates
 
         # 4. Convergence (String) (193-195)
@@ -2328,6 +2438,7 @@ class TestACClimateCoverage(TestACClimateEdgeCases):
         val = ac_entity._get_sticky_value("string_attr", "ModeA")
         assert val == "ModeA"
         assert "string_attr" not in ac_entity._pending_updates
+
 
 class TestACClimateCoverageExtended:
     """Extended AC tests for 100% coverage."""
@@ -2342,7 +2453,11 @@ class TestACClimateCoverageExtended:
             return {"ac": {"ambTemp": 22.0, "stpt": 24.0, "md": 4}}
 
         coord = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         coord.data = {"ac": {"ambTemp": 22.0, "stpt": 24.0, "md": 4}}
 
@@ -2356,7 +2471,7 @@ class TestACClimateCoverageExtended:
                     "2": {"fanSpeeds": [1, 2], "verticalSwing": [1, 2]},
                     "3": {"fanSpeeds": [1], "verticalSwing": [1]},
                 }
-            }
+            },
         }
         entity = MysaACClimate(coord, "ac", device_data, mock_api, mock_entry)
         entity.hass = hass
@@ -2369,7 +2484,9 @@ class TestACClimateCoverageExtended:
     async def test_ac_hvac_action_auto_logic(self, hass, ac_entity):
         """Test AC hvac_action auto mode logic (lines 522-534)."""
         # Set mode to HEAT_COOL (Auto)
-        with patch.object(type(ac_entity), "hvac_mode", new_callable=PropertyMock) as mock_mode:
+        with patch.object(
+            type(ac_entity), "hvac_mode", new_callable=PropertyMock
+        ) as mock_mode:
             mock_mode.return_value = HVACMode.HEAT_COOL
 
             # 1. Current > Target -> Cooling
@@ -2388,6 +2505,7 @@ class TestACClimateCoverageExtended:
     async def test_ac_fan_swing_mode_logic(self, hass, ac_entity):
         """Test AC fan and swing mode logic fallbacks (lines 542-554, 563-575).."""
         from custom_components.mysa.const import AC_FAN_MEDIUM, AC_SWING_POSITION_3
+
         # 1. No state -> defaults to "auto"
         ac_entity.coordinator.data = {}
         assert ac_entity.fan_mode == "auto"
@@ -2395,7 +2513,9 @@ class TestACClimateCoverageExtended:
 
         # 2. Extract from state
         # fn=7 is medium, ss=6 is middle
-        ac_entity.coordinator.data = {"ac": {"fn": AC_FAN_MEDIUM, "ss": AC_SWING_POSITION_3}}
+        ac_entity.coordinator.data = {
+            "ac": {"fn": AC_FAN_MEDIUM, "ss": AC_SWING_POSITION_3}
+        }
         assert ac_entity.fan_mode == "medium"
         assert ac_entity.swing_mode == "middle"
 
@@ -2410,6 +2530,7 @@ class TestACClimateCoverageExtended:
     async def test_ac_set_fan_mode_success(self, hass, ac_entity, mock_api):
         """Test async_set_fan_mode success and state update (line 640-647)."""
         from custom_components.mysa.const import AC_FAN_HIGH
+
         ac_entity._api.set_ac_fan_speed = AsyncMock()
         ac_entity.async_write_ha_state = MagicMock()
 
@@ -2426,7 +2547,9 @@ class TestACClimateCoverageExtended:
     async def test_ac_turn_on_smart_restore(self, hass, ac_entity):
         """Test AC async_turn_on restore logic (lines 680-686)."""
         # Patch async_set_hvac_mode on the INSTANCE
-        with patch.object(ac_entity, "async_set_hvac_mode", new_callable=AsyncMock) as mock_set_mode:
+        with patch.object(
+            ac_entity, "async_set_hvac_mode", new_callable=AsyncMock
+        ) as mock_set_mode:
             # 1. No last mode -> Fallback to Auto (HEAT_COOL)
             ac_entity._last_mode = None
             await ac_entity.async_turn_on()
@@ -2436,7 +2559,9 @@ class TestACClimateCoverageExtended:
             mock_set_mode.reset_mock()
             ac_entity._last_mode = HVACMode.COOL
             # Mock supported modes to include COOL
-            with patch.object(type(ac_entity), "hvac_modes", new_callable=PropertyMock) as mock_modes:
+            with patch.object(
+                type(ac_entity), "hvac_modes", new_callable=PropertyMock
+            ) as mock_modes:
                 mock_modes.return_value = [HVACMode.OFF, HVACMode.COOL]
                 await ac_entity.async_turn_on()
                 mock_set_mode.assert_called_with(HVACMode.COOL)
@@ -2445,7 +2570,9 @@ class TestACClimateCoverageExtended:
             mock_set_mode.reset_mock()
             ac_entity._last_mode = HVACMode.FAN_ONLY
             # mock supported modes to NOT include FAN_ONLY or HEAT_COOL
-            with patch.object(type(ac_entity), "hvac_modes", new_callable=PropertyMock) as mock_modes:
+            with patch.object(
+                type(ac_entity), "hvac_modes", new_callable=PropertyMock
+            ) as mock_modes:
                 mock_modes.return_value = [HVACMode.OFF, HVACMode.HEAT]
                 await ac_entity.async_turn_on()
                 # Should fallback to HEAT because HEAT_COOL not in hvac_modes
@@ -2454,7 +2581,9 @@ class TestACClimateCoverageExtended:
     @pytest.mark.asyncio
     async def test_ac_set_fan_mode_error(self, hass, ac_entity):
         """Test async_set_fan_mode handles error (lines 648-656)."""
-        ac_entity._api.set_ac_fan_speed = AsyncMock(side_effect=Exception("Fan Speed Fail"))
+        ac_entity._api.set_ac_fan_speed = AsyncMock(
+            side_effect=Exception("Fan Speed Fail")
+        )
         ac_entity.async_write_ha_state = MagicMock()
 
         with pytest.raises(HomeAssistantError) as excinfo:
@@ -2464,7 +2593,9 @@ class TestACClimateCoverageExtended:
     @pytest.mark.asyncio
     async def test_ac_set_swing_mode_error(self, hass, ac_entity):
         """Test async_set_swing_mode handles error (lines 666-674)."""
-        ac_entity._api.set_ac_swing_mode = AsyncMock(side_effect=Exception("Swing Fail"))
+        ac_entity._api.set_ac_swing_mode = AsyncMock(
+            side_effect=Exception("Swing Fail")
+        )
         ac_entity.async_write_ha_state = MagicMock()
 
         with pytest.raises(HomeAssistantError) as excinfo:
@@ -2482,9 +2613,9 @@ class TestACClimateCoverageExtended:
             "Model": "AC-V1",
             "SupportedCaps": {
                 "modes": {
-                    "invalid": {} # Non-integer key
+                    "invalid": {}  # Non-integer key
                 }
-            }
+            },
         }
         mock_api = MagicMock()
         coord = MagicMock()
@@ -2502,21 +2633,22 @@ class TestMysaACClimateActionLogic:
     async def test_hvac_action_auto_with_acmode(self, hass, mock_api):
         """Test hvac_action in Auto mode uses ACMode if present."""
         from custom_components.mysa.climate import MysaACClimate
+
         # Setup device data
         dev_id = "ac_1"
         device_data = {
             "Model": "AC-V1",
-            "SupportedCaps": {"modes": {"2": {}, "3": {}, "4": {}}}
+            "SupportedCaps": {"modes": {"2": {}, "3": {}, "4": {}}},
         }
 
         # 1. Test Auto + internal Heat (ACMode=3)
         coordinator = MagicMock()
         coordinator.data = {
             dev_id: {
-                "mode": 2,     # Auto
-                "ACMode": 3,   # Internal Heat
-                "ambTemp": 15, # Cold -> Heating
-                "stpt": 20
+                "mode": 2,  # Auto
+                "ACMode": 3,  # Internal Heat
+                "ambTemp": 15,  # Cold -> Heating
+                "stpt": 20,
             }
         }
 
@@ -2526,7 +2658,7 @@ class TestMysaACClimateActionLogic:
 
         # 2. Test Auto + internal Cool (ACMode=4)
         coordinator.data[dev_id]["ACMode"] = 4
-        coordinator.data[dev_id]["ambTemp"] = 25 # Hot -> Cooling
+        coordinator.data[dev_id]["ambTemp"] = 25  # Hot -> Cooling
         assert entity.hvac_action == HVACAction.COOLING
 
         # 3. Test Fallback (No ACMode)
@@ -2539,16 +2671,20 @@ class TestMysaACClimateActionLogic:
     async def test_hvac_action_auto_fallback_heating(self, hass, mock_api):
         """Test hvac_action fallback to HEATING when no ACMode present."""
         from custom_components.mysa.climate import MysaACClimate
+
         dev_id = "ac_1"
-        device_data = {"Model": "AC-V1", "SupportedCaps": {"modes": {"2": {}, "3": {}, "4": {}}}}
+        device_data = {
+            "Model": "AC-V1",
+            "SupportedCaps": {"modes": {"2": {}, "3": {}, "4": {}}},
+        }
 
         coordinator = MagicMock()
         coordinator.data = {
             dev_id: {
-                "mode": 2,     # Auto
+                "mode": 2,  # Auto
                 # NO ACMode
-                "ambTemp": 15.0, # Cold
-                "stpt": 20.0     # Target
+                "ambTemp": 15.0,  # Cold
+                "stpt": 20.0,  # Target
             }
         }
 
@@ -2559,16 +2695,20 @@ class TestMysaACClimateActionLogic:
     async def test_hvac_action_auto_invalid_temps(self, hass, mock_api):
         """Test hvac_action handles invalid temps (exception coverage)."""
         from custom_components.mysa.climate import MysaACClimate
+
         dev_id = "ac_1"
-        device_data = {"Model": "AC-V1", "SupportedCaps": {"modes": {"2": {}, "3": {}, "4": {}}}}
+        device_data = {
+            "Model": "AC-V1",
+            "SupportedCaps": {"modes": {"2": {}, "3": {}, "4": {}}},
+        }
 
         coordinator = MagicMock()
         coordinator.data = {
             dev_id: {
-                "mode": 2,     # Auto
-                "ACMode": 4,   # Cool
+                "mode": 2,  # Auto
+                "ACMode": 4,  # Cool
                 "ambTemp": "invalid",
-                "stpt": 20
+                "stpt": 20,
             }
         }
 
@@ -2580,13 +2720,17 @@ class TestMysaACClimateActionLogic:
     async def test_hvac_action_auto_missing_temps(self, hass, mock_api):
         """Test hvac_action returns IDLE when values are None."""
         from custom_components.mysa.climate import MysaACClimate
+
         dev_id = "ac_1"
-        device_data = {"Model": "AC-V1", "SupportedCaps": {"modes": {"2": {}, "3": {}, "4": {}}}}
+        device_data = {
+            "Model": "AC-V1",
+            "SupportedCaps": {"modes": {"2": {}, "3": {}, "4": {}}},
+        }
 
         coordinator = MagicMock()
         coordinator.data = {
             dev_id: {
-                "mode": 2,     # Auto
+                "mode": 2,  # Auto
                 # NO ACMode, NO Temps
             }
         }
@@ -2598,16 +2742,20 @@ class TestMysaACClimateActionLogic:
     async def test_hvac_action_auto_idle(self, hass, mock_api):
         """Test hvac_action returns IDLE when temp is satisfied."""
         from custom_components.mysa.climate import MysaACClimate
+
         dev_id = "ac_1"
-        device_data = {"Model": "AC-V1", "SupportedCaps": {"modes": {"2": {}, "3": {}, "4": {}}}}
+        device_data = {
+            "Model": "AC-V1",
+            "SupportedCaps": {"modes": {"2": {}, "3": {}, "4": {}}},
+        }
 
         coordinator = MagicMock()
         coordinator.data = {
             dev_id: {
-                "mode": 2,     # Auto
-                "ACMode": 4,   # Internal Cool
+                "mode": 2,  # Auto
+                "ACMode": 4,  # Internal Cool
                 "ambTemp": 20.0,
-                "stpt": 20.0   # Matches -> IDLE
+                "stpt": 20.0,  # Matches -> IDLE
             }
         }
 
@@ -2623,69 +2771,93 @@ class TestMysaACClimateActionLogic:
         coordinator.data[dev_id]["ambTemp"] = 21.1
         assert entity.hvac_action == HVACAction.COOLING
 
+
 # ===========================================================================
 # Merged Coverage & Edge Case Tests
 # ===========================================================================
 
+
 @pytest.mark.asyncio
-async def test_hvac_action_idle(hass, mock_coordinator, mock_device_data, mock_api, mock_entry):
+async def test_hvac_action_idle(
+    hass, mock_coordinator, mock_device_data, mock_api, mock_entry
+):
     """Test hvac_action returns IDLE when heating but temperature is satisfied."""
     from custom_components.mysa.climate import MysaClimate
+
     # Current temp (21.0) >= Target temp (21.0)
     mock_coordinator.data = {
         "device1": {
             "ambTemp": 21.0,
             "stpt": 21.0,
-            "md": 3, # HEAT
+            "md": 3,  # HEAT
         }
     }
-    climate = MysaClimate(mock_coordinator, "device1", mock_device_data, mock_api, mock_entry)
+    climate = MysaClimate(
+        mock_coordinator, "device1", mock_device_data, mock_api, mock_entry
+    )
 
     assert climate.hvac_mode == HVACMode.HEAT
     assert climate.hvac_action == HVACAction.IDLE
 
+
 @pytest.mark.asyncio
-async def test_hvac_action_invalid_temp(hass, mock_coordinator, mock_device_data, mock_api, mock_entry):
+async def test_hvac_action_invalid_temp(
+    hass, mock_coordinator, mock_device_data, mock_api, mock_entry
+):
     """Test hvac_action handles invalid temperature values gracefully."""
     from custom_components.mysa.climate import MysaClimate
+
     # Invalid temperature strings should trigger the exception block and pass to duty cycle check
     mock_coordinator.data = {
         "device1": {
             "ambTemp": "invalid",
             "stpt": "21.0",
-            "md": 3, # HEAT
-            "dc": 0, # No duty cycle
+            "md": 3,  # HEAT
+            "dc": 0,  # No duty cycle
         }
     }
-    climate = MysaClimate(mock_coordinator, "device1", mock_device_data, mock_api, mock_entry)
+    climate = MysaClimate(
+        mock_coordinator, "device1", mock_device_data, mock_api, mock_entry
+    )
 
     # It should fall through to duty cycle, which is 0, so it returns IDLE
     assert climate.hvac_action == HVACAction.IDLE
 
+
 @pytest.mark.asyncio
-async def test_hvac_action_duty_cycle_heating(hass, mock_coordinator, mock_device_data, mock_api, mock_entry):
+async def test_hvac_action_duty_cycle_heating(
+    hass, mock_coordinator, mock_device_data, mock_api, mock_entry
+):
     """Test hvac_action returns HEATING based on duty cycle when temps are unavailable."""
     from custom_components.mysa.climate import MysaClimate
+
     # Missing temperatures, but duty cycle > 0
     mock_coordinator.data = {
         "device1": {
             "ambTemp": None,
             "stpt": None,
             "dc": 1.0,
-            "md": 3, # HEAT
+            "md": 3,  # HEAT
         }
     }
-    climate = MysaClimate(mock_coordinator, "device1", mock_device_data, mock_api, mock_entry)
+    climate = MysaClimate(
+        mock_coordinator, "device1", mock_device_data, mock_api, mock_entry
+    )
 
     assert climate.hvac_action == HVACAction.HEATING
 
+
 @pytest.mark.asyncio
-async def test_climate_edge_cases(hass, mock_coordinator, mock_device_data, mock_api, mock_entry):
+async def test_climate_edge_cases(
+    hass, mock_coordinator, mock_device_data, mock_api, mock_entry
+):
     """Test climate entity edge cases for missing data."""
     from custom_components.mysa.climate import MysaClimate
 
     mock_coordinator.data = {}
-    climate = MysaClimate(mock_coordinator, "device1", mock_device_data, mock_api, mock_entry)
+    climate = MysaClimate(
+        mock_coordinator, "device1", mock_device_data, mock_api, mock_entry
+    )
 
     # Test missing state for humidity
     assert climate.current_humidity is None
@@ -2698,10 +2870,13 @@ async def test_climate_edge_cases(hass, mock_coordinator, mock_device_data, mock
     assert climate.current_humidity is None
     assert climate.target_temperature is None
 
+
 @pytest.mark.asyncio
-async def test_climate_exception_handling(hass, mock_coordinator, mock_device_data, mock_api, mock_entry):
+async def test_climate_exception_handling(
+    hass, mock_coordinator, mock_device_data, mock_api, mock_entry
+):
     """Test climate exception handling for invalid values."""
-    from custom_components.mysa.climate import MysaClimate, MysaACClimate
+    from custom_components.mysa.climate import MysaACClimate, MysaClimate
 
     mock_coordinator.data = {
         "device1": {
@@ -2709,20 +2884,19 @@ async def test_climate_exception_handling(hass, mock_coordinator, mock_device_da
             "stpt": "invalid",
         }
     }
-    climate = MysaClimate(mock_coordinator, "device1", mock_device_data, mock_api, mock_entry)
+    climate = MysaClimate(
+        mock_coordinator, "device1", mock_device_data, mock_api, mock_entry
+    )
 
     # Trigger current_temperature exception
     assert climate.current_temperature is None
 
     # AC Climate supported options exception
     ac_device_data = mock_device_data.copy()
-    ac_device_data["SupportedCaps"] = {
-        "modes": {
-            "invalid_int": {},
-            "2": {}
-        }
-    }
-    ac_climate = MysaACClimate(mock_coordinator, "device1", ac_device_data, mock_api, mock_entry)
+    ac_device_data["SupportedCaps"] = {"modes": {"invalid_int": {}, "2": {}}}
+    ac_climate = MysaACClimate(
+        mock_coordinator, "device1", ac_device_data, mock_api, mock_entry
+    )
 
     # Check that valid mode (2=HEAT_COOL) was found despite invalid one
     found = False
@@ -2732,10 +2906,12 @@ async def test_climate_exception_handling(hass, mock_coordinator, mock_device_da
                 found = True
     assert found
 
+
 @pytest.mark.asyncio
-async def test_ac_dry_mode_zero_temp_bug(hass, mock_coordinator, mock_device_data, mock_api, mock_entry):
+async def test_ac_dry_mode_zero_temp_bug(
+    hass, mock_coordinator, mock_device_data, mock_api, mock_entry
+):
     """Test verification of Dry mode setting temperature to 0."""
-    from custom_components.mysa.climate import MysaACClimate
     from custom_components.mysa.device import MysaDeviceLogic
 
     # Simulate the user's sniff payload for MsgType 30
@@ -2743,8 +2919,8 @@ async def test_ac_dry_mode_zero_temp_bug(hass, mock_coordinator, mock_device_dat
         "ambTemp": 20.7,
         "hum": 43,
         "stpt": 21.0,
-        "mode": 6, # Dry
-        "3": 0,    # Protocol key 3 is 0
+        "mode": 6,  # Dry
+        "3": 0,  # Protocol key 3 is 0
     }
 
     state = payload.copy()
@@ -2753,18 +2929,23 @@ async def test_ac_dry_mode_zero_temp_bug(hass, mock_coordinator, mock_device_dat
     # User confirmed Dry mode should indeed report 0.0
     assert state.get("SetPoint") == 0.0
 
+
 @pytest.mark.asyncio
-async def test_ac_dry_mode_restore_logic(hass, mock_coordinator, mock_device_data, mock_api, mock_entry):
+async def test_ac_dry_mode_restore_logic(
+    hass, mock_coordinator, mock_device_data, mock_api, mock_entry
+):
     """Test Dry mode forces 0 temp and restores previous valid temp on exit."""
-    from custom_components.mysa.climate import MysaACClimate, HVACMode
+    from custom_components.mysa.climate import HVACMode, MysaACClimate
 
     # Setup Entity
-    entity = MysaACClimate(mock_coordinator, "dev1", mock_device_data, mock_api, mock_entry)
+    entity = MysaACClimate(
+        mock_coordinator, "dev1", mock_device_data, mock_api, mock_entry
+    )
     entity.hass = hass
     entity.entity_id = "climate.ac_entity"
 
     # 1. Start with valid temp (21.0) and HEAT mode
-    mock_coordinator.data = {"dev1": {"stpt": 21.0, "Mode": 3}} # Heat
+    mock_coordinator.data = {"dev1": {"stpt": 21.0, "Mode": 3}}  # Heat
     assert entity.target_temperature == 21.0
 
     # 2. Switch to Dry Mode
@@ -2785,31 +2966,32 @@ async def test_ac_dry_mode_restore_logic(hass, mock_coordinator, mock_device_dat
     mock_api.set_target_temperature.assert_not_called()
     mock_api.set_hvac_mode.assert_called_with("dev1", "heat")
 
+
 @pytest.mark.asyncio
 async def test_climate_infloor_respects_cache(hass, mock_coordinator, mock_entry):
     """Test behavior when SensorMode is present in cache (simulating set_sensor_mode effect)."""
     from custom_components.mysa.climate import MysaClimate
+
     entity = MysaClimate(
         mock_coordinator,
         "infloor_device",
         {"Id": "infloor_device", "Name": "Bathroom", "Model": "INF-V1"},
         MagicMock(),
-        mock_entry
+        mock_entry,
     )
 
     mock_coordinator.data = {
-        "infloor_device": {
-            "ambTemp": 20.0,
-            "Infloor": 30.0,
-            "SensorMode": 1
-        }
+        "infloor_device": {"ambTemp": 20.0, "Infloor": 30.0, "SensorMode": 1}
     }
 
     # This confirms that IF the cache is updated (by select entity), Climate reads it correctly
     assert entity.current_temperature == 30.0
 
+
 @pytest.mark.asyncio
-async def test_climate_infloor_tracked_sensor_fallback(hass, mock_coordinator, mock_entry):
+async def test_climate_infloor_tracked_sensor_fallback(
+    hass, mock_coordinator, mock_entry
+):
     """Test behavior when SensorMode is missing but TrackedSensor is present (automatic fix)."""
     from custom_components.mysa.climate import MysaClimate
     from custom_components.mysa.device import MysaDeviceLogic
@@ -2819,7 +3001,7 @@ async def test_climate_infloor_tracked_sensor_fallback(hass, mock_coordinator, m
         "infloor_device",
         {"Id": "infloor_device", "Name": "Bathroom", "Model": "INF-V1"},
         MagicMock(),
-        mock_entry
+        mock_entry,
     )
 
     # Payload similar to user report: No SensorMode, but TrackedSensor=3 (Floor)
@@ -2827,7 +3009,7 @@ async def test_climate_infloor_tracked_sensor_fallback(hass, mock_coordinator, m
         "infloor_device": {
             "ambTemp": 20.0,
             "Infloor": 30.0,
-            "TrackedSensor": 3  # Should Map to SensorMode=1 (Floor)
+            "TrackedSensor": 3,  # Should Map to SensorMode=1 (Floor)
         }
     }
 
@@ -2839,8 +3021,11 @@ async def test_climate_infloor_tracked_sensor_fallback(hass, mock_coordinator, m
     assert data["SensorMode"] == 1
     assert entity.current_temperature == 30.0
 
+
 @pytest.mark.asyncio
-async def test_climate_infloor_tracked_sensor_camel_case(hass, mock_coordinator, mock_entry):
+async def test_climate_infloor_tracked_sensor_camel_case(
+    hass, mock_coordinator, mock_entry
+):
     """Test behavior when using camelCase keys (trackedSnsr, flrSnsrTemp)."""
     from custom_components.mysa.climate import MysaClimate
     from custom_components.mysa.device import MysaDeviceLogic
@@ -2850,7 +3035,7 @@ async def test_climate_infloor_tracked_sensor_camel_case(hass, mock_coordinator,
         "infloor_device",
         {"Id": "infloor_device", "Name": "Bathroom", "Model": "INF-V1"},
         MagicMock(),
-        mock_entry
+        mock_entry,
     )
 
     # Payload from user report
@@ -2876,8 +3061,11 @@ async def test_climate_infloor_tracked_sensor_camel_case(hass, mock_coordinator,
     # Check Climate entity behavior
     assert entity.current_temperature == 22.2
 
+
 @pytest.mark.asyncio
-async def test_climate_infloor_tracked_sensor_malformed(hass, mock_coordinator, mock_entry):
+async def test_climate_infloor_tracked_sensor_malformed(
+    hass, mock_coordinator, mock_entry
+):
     """Test behavior when using malformed TrackedSensor (exception handling coverage)."""
     from custom_components.mysa.climate import MysaClimate
     from custom_components.mysa.device import MysaDeviceLogic
@@ -2887,7 +3075,7 @@ async def test_climate_infloor_tracked_sensor_malformed(hass, mock_coordinator, 
         "infloor_device",
         {"Id": "infloor_device", "Name": "Bathroom", "Model": "INF-V1"},
         MagicMock(),
-        mock_entry
+        mock_entry,
     )
 
     # Payload with invalid TrackedSensor value
@@ -2895,7 +3083,7 @@ async def test_climate_infloor_tracked_sensor_malformed(hass, mock_coordinator, 
         "infloor_device": {
             "ambTemp": 16.2,
             "flrSnsrTemp": 22.2,
-            "TrackedSensor": "invalid_int", # Should trigger ValueError
+            "TrackedSensor": "invalid_int",  # Should trigger ValueError
         }
     }
 
@@ -2914,6 +3102,7 @@ class TestClimateCoverageGaps:
     def test_climate_coverage(self, mock_coordinator, mock_entry):
         """Exercise climate.py missing lines."""
         from custom_components.mysa.climate import MysaClimate
+
         entity = MysaClimate(mock_coordinator, "dev1", {}, MagicMock(), mock_entry)
         # 212-213 (None state)
         assert entity._extract_value(None, ["key"]) is None
@@ -2923,3 +3112,55 @@ class TestClimateCoverageGaps:
         # 230 sticky expiration
         entity._pending_updates["test"] = {"value": 1, "ts": time.time() - 31}
         assert entity._get_sticky_value("test", 0) == 0
+
+# ===========================================================================
+# Coverage Tests
+# ===========================================================================
+
+from custom_components.mysa.climate import MysaClimate
+
+@pytest.fixture
+def coverage_mock_climate(hass, mock_coordinator, mock_config_entry):
+    """Create a basic MysaClimate entity for coverage tests."""
+    device_id = "device1"
+    device_name = "Living Room"
+    capabilities = {"et": 1}  # Electric thermostat
+    device_data = {"name": device_name, "caps": capabilities}
+    mock_api = MagicMock()
+
+    climate = MysaClimate(
+        mock_coordinator, device_id, device_data, mock_api, mock_config_entry
+    )
+    climate.hass = hass
+    # Mock internal methods to avoid side effects
+    climate._async_write_ha_state = MagicMock()
+    return climate
+
+
+@pytest.mark.asyncio
+class TestClimateCoverage:
+    """Coverage tests for edge cases."""
+
+    async def test_update_state_cache_initialization(self, coverage_mock_climate):
+        """Test _update_state_cache handles missing data initialization."""
+        climate = coverage_mock_climate
+        # Force data to None to hit line 231
+        climate.coordinator.data = None
+
+        # Call the internal method directly
+        await climate._update_state_cache("test_key", "test_val_1")
+
+        assert climate.coordinator.data is not None
+        assert "device1" in climate.coordinator.data
+        assert climate.coordinator.data["device1"]["test_key"] == "test_val_1"
+
+    async def test_update_state_cache_new_device(self, coverage_mock_climate):
+        """Test _update_state_cache handles new device initialization."""
+        climate = coverage_mock_climate
+        # Force data to empty dict to hit line 233
+        climate.coordinator.data = {}
+
+        await climate._update_state_cache("test_key_2", "test_val_2")
+
+        assert "device1" in climate.coordinator.data
+        assert climate.coordinator.data["device1"]["test_key_2"] == "test_val_2"

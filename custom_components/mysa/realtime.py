@@ -1,23 +1,28 @@
 """MQTT Realtime Coordinator for Mysa."""
-import logging
+
 import asyncio
-import json
-import time
 import base64
-from typing import Any, Callable, Dict, List, Optional, cast
+import json
+import logging
+import time
+from collections.abc import Callable
+from typing import Any, cast
+
 from homeassistant.core import HomeAssistant
 
 from . import mqtt
-from .mysa_mqtt import (
-    build_subscription_topics, parse_mqtt_packet,
-    connect_websocket, create_connect_packet,
-)
 from .const import MQTT_PING_INTERVAL
+from .mysa_mqtt import (
+    build_subscription_topics,
+    connect_websocket,
+    create_connect_packet,
+    parse_mqtt_packet,
+)
 from .readings import parse_batch_readings
 
 # Type hint for callback
 # on_update_callback(device_id, state_update, resolve_safe_id=False)
-UpdateCallback = Callable[[str, Dict[str, Any], Optional[bool]], Any]
+UpdateCallback = Callable[[str, dict[str, Any], bool | None], Any]
 SignedUrlCallback = Callable[[], Any]
 
 _LOGGER = logging.getLogger(__name__)
@@ -25,6 +30,7 @@ _LOGGER = logging.getLogger(__name__)
 
 class MysaRealtime:
     """Mysa MQTT Realtime Coordinator."""
+
     # pylint: disable=too-many-instance-attributes
     # Justification: Class maintains complex MQTT state and connection parameters.
 
@@ -32,19 +38,19 @@ class MysaRealtime:
         self,
         hass: HomeAssistant,
         get_signed_url_callback: SignedUrlCallback,
-        on_update_callback: UpdateCallback
+        on_update_callback: UpdateCallback,
     ) -> None:
         """Initialize the MQTT coordinator."""
         self.hass = hass
         self._get_signed_url = get_signed_url_callback
         self._on_update = on_update_callback
 
-        self._mqtt_listener_task: Optional[asyncio.Task[None]] = None
+        self._mqtt_listener_task: asyncio.Task[None] | None = None
         self._mqtt_connected = asyncio.Event()
         self._mqtt_ws: Any = None  # ws object from `connect_websocket`
         self._mqtt_should_reconnect = True
         self._mqtt_reconnect_delay = 1.0
-        self._devices_ids: List[str] = []  # List of device IDs to subscribe to
+        self._devices_ids: list[str] = []  # List of device IDs to subscribe to
 
     @property
     def is_running(self) -> bool:
@@ -56,10 +62,10 @@ class MysaRealtime:
         try:
             await asyncio.wait_for(self._mqtt_connected.wait(), timeout=timeout)
             return True
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return False
 
-    def set_devices(self, device_ids: List[str]) -> None:
+    def set_devices(self, device_ids: list[str]) -> None:
         """Update list of devices to subscribe to."""
         self._devices_ids = device_ids
 
@@ -71,7 +77,7 @@ class MysaRealtime:
 
         self._mqtt_should_reconnect = True
         self._mqtt_listener_task = asyncio.create_task(self._mqtt_listener_loop())
-        _LOGGER.info("Started MQTT listener task")
+        _LOGGER.debug("Started MQTT listener task")
 
     async def stop(self) -> None:
         """Stop the persistent MQTT listener."""
@@ -128,14 +134,18 @@ class MysaRealtime:
                     first_failure_logged = True
                 else:
                     _LOGGER.debug(
-                        "MQTT connection lost: %s, reconnecting in %ds", e, int(reconnect_delay)
+                        "MQTT connection lost: %s, reconnecting in %ds",
+                        e,
+                        int(reconnect_delay),
                     )
 
                 self._mqtt_connected.clear()
                 await asyncio.sleep(reconnect_delay)
 
                 # Fibonacci backoff
-                next_delay = reconnect_delay + (prev_delay if 'prev_delay' in locals() else 0)
+                next_delay = reconnect_delay + (
+                    prev_delay if "prev_delay" in locals() else 0
+                )
                 prev_delay = reconnect_delay
                 reconnect_delay = min(next_delay, 60.0)
 
@@ -181,12 +191,14 @@ class MysaRealtime:
         if not isinstance(pkt, mqtt.ConnackPacket):
             raise RuntimeError(f"Expected CONNACK, got {pkt}")
 
-        _LOGGER.info("MQTT connected successfully")
+        _LOGGER.debug("MQTT connected successfully")
 
         # Subscribe
         if self._devices_ids:
             # Disable batch for now as it causes disconnects on some accounts/brokers
-            sub_topics = build_subscription_topics(list(self._devices_ids), include_batch=False)
+            sub_topics = build_subscription_topics(
+                list(self._devices_ids), include_batch=False
+            )
             if sub_topics:
                 sub_pkt = mqtt.subscribe(1, sub_topics)
                 await ws.send(sub_pkt)
@@ -197,7 +209,7 @@ class MysaRealtime:
                 if not isinstance(pkt, mqtt.SubackPacket):
                     raise RuntimeError(f"Expected SUBACK, got {pkt}")
 
-                _LOGGER.info("Subscribed to %d device topics", len(self._devices_ids))
+                _LOGGER.debug("Subscribed to %d device topics", len(self._devices_ids))
 
     async def _run_mqtt_loop(self, ws: Any) -> None:
         """Run the main MQTT message and keepalive loop."""
@@ -209,22 +221,31 @@ class MysaRealtime:
                 elapsed = time.time() - last_ping
                 time_until_ping = max(0.1, ping_interval - elapsed)
 
-                msg = await asyncio.wait_for(ws.recv(), timeout=min(time_until_ping, 20.0))
+                msg = await asyncio.wait_for(
+                    ws.recv(), timeout=min(time_until_ping, 20.0)
+                )
 
                 try:
                     pkt = parse_mqtt_packet(msg)
                     if pkt:
                         if isinstance(pkt, mqtt.PublishPacket):
                             await self._process_mqtt_publish(pkt)
-                        elif hasattr(pkt, 'pkt_type') and pkt.pkt_type == mqtt.MQTT_PACKET_PINGRESP:
+                        elif (
+                            hasattr(pkt, "pkt_type")
+                            and pkt.pkt_type == mqtt.MQTT_PACKET_PINGRESP
+                        ):
                             _LOGGER.debug("Received PINGRESP")
                 except Exception as parse_error:
-                    _LOGGER.warning("Error parsing MQTT packet: %s", parse_error, exc_info=True)
+                    _LOGGER.warning(
+                        "Error parsing MQTT packet: %s", parse_error, exc_info=True
+                    )
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
             except Exception as recv_error:
-                _LOGGER.error("Error receiving MQTT message: %s", recv_error, exc_info=True)
+                _LOGGER.error(
+                    "Error receiving MQTT message: %s", recv_error, exc_info=True
+                )
                 raise
 
             if time.time() - last_ping >= ping_interval:
@@ -241,10 +262,11 @@ class MysaRealtime:
         try:
             payload = json.loads(pkt.payload, strict=False)
             topic = pkt.topic
+            _LOGGER.debug("Received MQTT message on %s: %s", topic, payload)
 
             # Extract Device ID logic -- maybe move to utility or keep here
             # Topic format: /v1/dev/{device_id}/out
-            topic_parts = topic.split('/')
+            topic_parts = topic.split("/")
             device_id = None
             if len(topic_parts) >= 4:
                 safe_id = topic_parts[3]
@@ -262,67 +284,67 @@ class MysaRealtime:
         except Exception as e:
             _LOGGER.error("Error processing MQTT publish: %s", e, exc_info=True)
 
-    def _extract_state_update(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _extract_state_update(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         """Extract state update from payload."""
-        msg_type_raw = payload.get('msg') or payload.get('MsgType')
+        msg_type_raw = payload.get("msg") or payload.get("MsgType")
         try:
             msg_type = int(msg_type_raw) if msg_type_raw is not None else None
         except (ValueError, TypeError):
             msg_type = None
 
         # Dispatch based on special message types
-        special_handlers: Dict[int, Callable[[Dict[str, Any]], Optional[Dict[str, Any]]]] = {
+        special_handlers: dict[
+            int, Callable[[dict[str, Any]], dict[str, Any] | None]
+        ] = {
             10: self._extract_boot_info,
             4: self._extract_log_info,
             3: self._extract_batch_info,
             61: lambda p: cast(
-                Optional[Dict[str, Any]], {"FirmwareVersion": str(p.get("version", ""))}
-            )
+                dict[str, Any] | None, {"FirmwareVersion": str(p.get("version", ""))}
+            ),
         }
         if msg_type is not None and msg_type in special_handlers:
             return special_handlers[msg_type](payload)
 
         # Standard processing
-        msg_ts = payload.get('time') or payload.get('Timestamp')
-        update: Dict[str, Any] = {}
-        body = payload.get('body')
+        msg_ts = payload.get("time") or payload.get("Timestamp")
+        update: dict[str, Any] = {}
+        body = payload.get("body")
 
-        if msg_type == 30 and body:
-            update = self._extract_body_state(body) or {}
-        elif body:
+        if msg_type == 30 and body or body:
             update = self._extract_body_state(body) or {}
 
         # Timestamp and metadata
         if msg_ts:
             try:
-                update['Timestamp'] = int(msg_ts)
+                update["Timestamp"] = int(msg_ts)
             except (ValueError, TypeError):
                 pass
 
         # Merge top-level metadata
-        if (ip := payload.get('ip')) and 'ip' not in update:
-            update['ip'] = ip
-        if not update.get('FirmwareVersion'):
-            if (ver := payload.get('version') or payload.get('ver')):
-                update['FirmwareVersion'] = str(ver)
+        if (ip := payload.get("ip")) and "ip" not in update:
+            update["ip"] = ip
+        if not update.get("FirmwareVersion"):
+            if ver := payload.get("version") or payload.get("ver"):
+                update["FirmwareVersion"] = str(ver)
 
         return update if update else None
 
-    def _extract_boot_info(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _extract_boot_info(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         """Extract info from MsgType 10."""
         update = {}
-        if payload.get('ip'):
-            update['ip'] = payload.get('ip')
-        if payload.get('version'):
-            update['FirmwareVersion'] = str(payload.get('version'))
-        elif payload.get('ver'):
-            update['FirmwareVersion'] = str(payload.get('ver'))
+        if payload.get("ip"):
+            update["ip"] = payload.get("ip")
+        if payload.get("version"):
+            update["FirmwareVersion"] = str(payload.get("version"))
+        elif payload.get("ver"):
+            update["FirmwareVersion"] = str(payload.get("ver"))
 
         return update
 
-    def _extract_log_info(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _extract_log_info(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         """Extract info from MsgType 4."""
-        message = payload.get('Message', '')
+        message = payload.get("Message", "")
         update = {}
         if "Local IP:" in message:
             temp = message.split("Local IP:")[-1]
@@ -337,13 +359,13 @@ class MysaRealtime:
 
         return update if update else None
 
-    def _extract_batch_info(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _extract_batch_info(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         """Extract info from MsgType 3 (Batch Data)."""
-        body = payload.get('body')
+        body = payload.get("body")
         if not body:
             return None
 
-        readings_b64 = body.get('readings')
+        readings_b64 = body.get("readings")
         if not readings_b64:
             return None
 
@@ -360,17 +382,16 @@ class MysaRealtime:
             _LOGGER.warning("Error parsing batch readings: %s", e)
             return None
 
-
-    def _extract_body_state(self, body: Any) -> Optional[Dict[str, Any]]:
+    def _extract_body_state(self, body: Any) -> dict[str, Any] | None:
         """Extract state from body."""
         if not isinstance(body, dict):
             return None
 
-        state_update = body.get('state', {})
+        state_update = body.get("state", {})
         if state_update:
-            return cast(Dict[str, Any], state_update)
+            return cast(dict[str, Any], state_update)
 
-        cmd_list = body.get('cmd')
+        cmd_list = body.get("cmd")
         if isinstance(cmd_list, list):
             combined = {}
             for item in cmd_list:
@@ -379,16 +400,16 @@ class MysaRealtime:
             return combined
 
         # Fallback: if no state/cmd, use body itself
-        return cast(Dict[str, Any], body)
+        return cast(dict[str, Any], body)
 
     async def send_command(
         self,
         device_id: str,
-        payload: Dict[str, Any],
-        user_id: Optional[str] = None,
+        payload: dict[str, Any],
+        user_id: str | None = None,
         msg_type: int = 44,
         src_type: int = 100,
-        wrap: bool = True
+        wrap: bool = True,
     ) -> None:
         """Send a command to a device."""
         if not user_id:
@@ -397,7 +418,11 @@ class MysaRealtime:
 
         # If we have a persistent connection, use it!
         if self._mqtt_ws:
-            _LOGGER.debug("Sending MQTT command via persistent connection to %s", device_id)
+            _LOGGER.debug(
+                "Sending MQTT command via persistent connection to %s: %s",
+                device_id,
+                payload,
+            )
             try:
                 # 1. Prepare message
                 timestamp = int(time.time())
@@ -413,7 +438,7 @@ class MysaRealtime:
                         "resp": 2,  # Request response
                         "src": {"ref": user_id, "type": src_type},
                         "time": timestamp,
-                        "ver": "1.0"
+                        "ver": "1.0",
                     }
                 else:
                     outer_payload = payload
@@ -431,21 +456,24 @@ class MysaRealtime:
                 return  # Success
             except Exception as e:
                 _LOGGER.warning(
-                    "Failed to send via persistent connection, falling back to one-off: %s", e
+                    "Failed to send via persistent connection, falling back to one-off: %s",
+                    e,
                 )
                 # Fall through to one-off fallback
 
         # Fallback to one-off
-        await self._send_one_off_command(device_id, payload, user_id, msg_type, src_type, wrap)
+        await self._send_one_off_command(
+            device_id, payload, user_id, msg_type, src_type, wrap
+        )
 
     async def _send_one_off_command(
         self,
         device_id: str,
-        payload: Dict[str, Any],
-        user_id: Optional[str],
+        payload: dict[str, Any],
+        user_id: str | None,
         msg_type: int,
         src_type: int,
-        wrap: bool
+        wrap: bool,
     ) -> None:
         # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
         # Justification: Internal helper method requiring all connection parameters.
@@ -470,7 +498,7 @@ class MysaRealtime:
                 "resp": 2,  # Request response
                 "src": {"ref": user_id, "type": src_type},
                 "time": timestamp,
-                "ver": "1.0"
+                "ver": "1.0",
             }
         else:
             outer_payload = payload
@@ -479,7 +507,7 @@ class MysaRealtime:
         safe_device_id = device_id.replace(":", "").lower()
         topic = f"/v1/dev/{safe_device_id}/in"
 
-        _LOGGER.debug("Sending one-off MQTT command to %s", topic)
+        _LOGGER.debug("Sending one-off MQTT command to %s: %s", topic, json_payload)
 
         try:
             ws = await connect_websocket(signed_url)
@@ -490,8 +518,8 @@ class MysaRealtime:
 
                 # 2. Subscribe (to get response)
                 sub_topics = [
-                    mqtt.SubscriptionSpec(f'/v1/dev/{safe_device_id}/out', 0x01),
-                    mqtt.SubscriptionSpec(f'/v1/dev/{safe_device_id}/in', 0x01),
+                    mqtt.SubscriptionSpec(f"/v1/dev/{safe_device_id}/out", 0x01),
+                    mqtt.SubscriptionSpec(f"/v1/dev/{safe_device_id}/in", 0x01),
                 ]
                 await ws.send(mqtt.subscribe(1, sub_topics))
                 await ws.recv()  # Suback
@@ -515,7 +543,7 @@ class MysaRealtime:
                         state_update = self._extract_state_update(resp_payload)
                         if state_update:
                             await self._on_update(device_id, state_update, True)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     pass
 
             finally:

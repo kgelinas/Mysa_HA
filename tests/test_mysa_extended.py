@@ -1,18 +1,20 @@
 """Tests for the Mysa Extended integration."""
-from unittest.mock import MagicMock, patch, AsyncMock
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+
+from custom_components.mysa.const import DOMAIN as MYSA_DOMAIN
 from custom_components.mysa_extended import (
+    async_service_downgrade_lite,
+    async_service_killer_ping,
+    async_service_upgrade_lite,
     async_setup,
     async_setup_entry,
     async_unload_entry,
-    async_service_upgrade_lite,
-    async_service_downgrade_lite,
-    async_service_killer_ping,
 )
-from custom_components.mysa.const import DOMAIN as MYSA_DOMAIN
-
 
 
 @pytest.mark.asyncio
@@ -53,8 +55,6 @@ async def test_async_unload_entry(hass: HomeAssistant):
     assert result is True
 
 
-
-
 @pytest.mark.asyncio
 async def test_upgrade_lite_device_success(hass: HomeAssistant):
     """Test successful upgrade of lite device and option sync."""
@@ -68,9 +68,7 @@ async def test_upgrade_lite_device_success(hass: HomeAssistant):
     mock_entry.options = {}
 
     # Setup hass data
-    hass.data[MYSA_DOMAIN] = {
-        "test_entry": {"api": mock_api}
-    }
+    hass.data[MYSA_DOMAIN] = {"test_entry": {"api": mock_api}}
 
     # Mock device registry
     mock_device_registry = MagicMock()
@@ -79,10 +77,14 @@ async def test_upgrade_lite_device_success(hass: HomeAssistant):
     mock_device_entry.config_entries = {"test_entry"}
     mock_device_registry.async_get.return_value = mock_device_entry
 
-    with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_device_registry), \
-         patch.object(hass.config_entries, "async_get_entry", return_value=mock_entry), \
-         patch.object(hass.config_entries, "async_update_entry") as mock_update:
-
+    with (
+        patch(
+            "homeassistant.helpers.device_registry.async_get",
+            return_value=mock_device_registry,
+        ),
+        patch.object(hass.config_entries, "async_get_entry", return_value=mock_entry),
+        patch.object(hass.config_entries, "async_update_entry") as mock_update,
+    ):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
@@ -111,9 +113,7 @@ async def test_downgrade_lite_device_success(hass: HomeAssistant):
     mock_entry.options = {"upgraded_lite_devices": ["device_123"]}
 
     # Setup hass data
-    hass.data[MYSA_DOMAIN] = {
-        "test_entry": {"api": mock_api}
-    }
+    hass.data[MYSA_DOMAIN] = {"test_entry": {"api": mock_api}}
 
     # Mock device registry
     mock_device_registry = MagicMock()
@@ -122,10 +122,14 @@ async def test_downgrade_lite_device_success(hass: HomeAssistant):
     mock_device_entry.config_entries = {"test_entry"}
     mock_device_registry.async_get.return_value = mock_device_entry
 
-    with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_device_registry), \
-         patch.object(hass.config_entries, "async_get_entry", return_value=mock_entry), \
-         patch.object(hass.config_entries, "async_update_entry") as mock_update:
-
+    with (
+        patch(
+            "homeassistant.helpers.device_registry.async_get",
+            return_value=mock_device_registry,
+        ),
+        patch.object(hass.config_entries, "async_get_entry", return_value=mock_entry),
+        patch.object(hass.config_entries, "async_update_entry") as mock_update,
+    ):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
@@ -146,7 +150,10 @@ async def test_upgrade_lite_device_no_device(hass: HomeAssistant):
     mock_device_registry = MagicMock()
     mock_device_registry.async_get.return_value = None
 
-    with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_device_registry):
+    with patch(
+        "homeassistant.helpers.device_registry.async_get",
+        return_value=mock_device_registry,
+    ):
         call = MagicMock()
         call.data = {"device_id": "invalid_device"}
 
@@ -168,7 +175,10 @@ async def test_upgrade_lite_device_no_mysa_integration(hass: HomeAssistant):
     # hass.data[MYSA_DOMAIN] is empty
     hass.data[MYSA_DOMAIN] = {}
 
-    with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_device_registry):
+    with patch(
+        "homeassistant.helpers.device_registry.async_get",
+        return_value=mock_device_registry,
+    ):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
@@ -187,9 +197,7 @@ async def test_upgrade_lite_device_api_failure(hass: HomeAssistant):
     mock_entry = MagicMock()
     mock_entry.entry_id = "test_entry"
 
-    hass.data[MYSA_DOMAIN] = {
-        "test_entry": {"api": mock_api}
-    }
+    hass.data[MYSA_DOMAIN] = {"test_entry": {"api": mock_api}}
 
     mock_device_registry = MagicMock()
     mock_device_entry = MagicMock()
@@ -197,9 +205,13 @@ async def test_upgrade_lite_device_api_failure(hass: HomeAssistant):
     mock_device_entry.config_entries = {"test_entry"}
     mock_device_registry.async_get.return_value = mock_device_entry
 
-    with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_device_registry), \
-         patch.object(hass.config_entries, "async_get_entry", return_value=mock_entry):
-
+    with (
+        patch(
+            "homeassistant.helpers.device_registry.async_get",
+            return_value=mock_device_registry,
+        ),
+        patch.object(hass.config_entries, "async_get_entry", return_value=mock_entry),
+    ):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
@@ -214,7 +226,10 @@ async def test_service_downgrade_no_device(hass: HomeAssistant):
     mock_device_registry = MagicMock()
     mock_device_registry.async_get.return_value = None
 
-    with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_device_registry):
+    with patch(
+        "homeassistant.helpers.device_registry.async_get",
+        return_value=mock_device_registry,
+    ):
         call = MagicMock()
         call.data = {"device_id": "invalid_device"}
 
@@ -234,7 +249,10 @@ async def test_service_downgrade_no_mysa_integration(hass: HomeAssistant):
 
     hass.data[MYSA_DOMAIN] = {}
 
-    with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_device_registry):
+    with patch(
+        "homeassistant.helpers.device_registry.async_get",
+        return_value=mock_device_registry,
+    ):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
@@ -257,7 +275,10 @@ async def test_service_upgrade_integration_not_loaded(hass: HomeAssistant):
     if MYSA_DOMAIN in hass.data:
         hass.data.pop(MYSA_DOMAIN)
 
-    with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_device_registry):
+    with patch(
+        "homeassistant.helpers.device_registry.async_get",
+        return_value=mock_device_registry,
+    ):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
@@ -279,8 +300,13 @@ async def test_service_upgrade_api_not_initialized(hass: HomeAssistant):
     hass.data[MYSA_DOMAIN] = {"test_entry": {"loaded": True}}
     mock_entry = MagicMock(entry_id="test_entry")
 
-    with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_device_registry), \
-         patch.object(hass.config_entries, "async_get_entry", return_value=mock_entry):
+    with (
+        patch(
+            "homeassistant.helpers.device_registry.async_get",
+            return_value=mock_device_registry,
+        ),
+        patch.object(hass.config_entries, "async_get_entry", return_value=mock_entry),
+    ):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
@@ -301,8 +327,13 @@ async def test_service_downgrade_api_not_initialized(hass: HomeAssistant):
     hass.data[MYSA_DOMAIN] = {"test_entry": {"loaded": True}}
     mock_entry = MagicMock(entry_id="test_entry")
 
-    with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_device_registry), \
-         patch.object(hass.config_entries, "async_get_entry", return_value=mock_entry):
+    with (
+        patch(
+            "homeassistant.helpers.device_registry.async_get",
+            return_value=mock_device_registry,
+        ),
+        patch.object(hass.config_entries, "async_get_entry", return_value=mock_entry),
+    ):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
@@ -326,8 +357,13 @@ async def test_downgrade_api_failure(hass: HomeAssistant):
     mock_device_entry.config_entries = {"test_entry"}
     mock_device_registry.async_get.return_value = mock_device_entry
 
-    with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_device_registry), \
-         patch.object(hass.config_entries, "async_get_entry", return_value=mock_entry):
+    with (
+        patch(
+            "homeassistant.helpers.device_registry.async_get",
+            return_value=mock_device_registry,
+        ),
+        patch.object(hass.config_entries, "async_get_entry", return_value=mock_entry),
+    ):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
@@ -339,7 +375,10 @@ async def test_downgrade_api_failure(hass: HomeAssistant):
 @pytest.mark.asyncio
 async def test_upgrade_generic_exception(hass: HomeAssistant):
     """Test upgrade handles generic exceptions."""
-    with patch("homeassistant.helpers.device_registry.async_get", side_effect=ValueError("Boom")):
+    with patch(
+        "homeassistant.helpers.device_registry.async_get",
+        side_effect=ValueError("Boom"),
+    ):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
@@ -351,7 +390,10 @@ async def test_upgrade_generic_exception(hass: HomeAssistant):
 @pytest.mark.asyncio
 async def test_downgrade_generic_exception(hass: HomeAssistant):
     """Test downgrade handles generic exceptions."""
-    with patch("homeassistant.helpers.device_registry.async_get", side_effect=ValueError("Boom")):
+    with patch(
+        "homeassistant.helpers.device_registry.async_get",
+        side_effect=ValueError("Boom"),
+    ):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
@@ -377,8 +419,13 @@ async def test_killer_ping_success(hass: HomeAssistant):
     mock_device_entry.config_entries = {"test_entry"}
     mock_device_registry.async_get.return_value = mock_device_entry
 
-    with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_device_registry), \
-         patch.object(hass.config_entries, "async_get_entry", return_value=mock_entry):
+    with (
+        patch(
+            "homeassistant.helpers.device_registry.async_get",
+            return_value=mock_device_registry,
+        ),
+        patch.object(hass.config_entries, "async_get_entry", return_value=mock_entry),
+    ):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
@@ -392,7 +439,10 @@ async def test_killer_ping_device_not_found(hass: HomeAssistant):
     mock_device_registry = MagicMock()
     mock_device_registry.async_get.return_value = None
 
-    with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_device_registry):
+    with patch(
+        "homeassistant.helpers.device_registry.async_get",
+        return_value=mock_device_registry,
+    ):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
@@ -412,7 +462,10 @@ async def test_killer_ping_mysa_not_found(hass: HomeAssistant):
     mock_device_entry.config_entries = {"other_entry"}
     mock_device_registry.async_get.return_value = mock_device_entry
 
-    with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_device_registry):
+    with patch(
+        "homeassistant.helpers.device_registry.async_get",
+        return_value=mock_device_registry,
+    ):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
@@ -433,8 +486,13 @@ async def test_killer_ping_api_not_initialized(hass: HomeAssistant):
     mock_device_entry.config_entries = {"test_entry"}
     mock_device_registry.async_get.return_value = mock_device_entry
 
-    with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_device_registry), \
-         patch.object(hass.config_entries, "async_get_entry", return_value=mock_entry):
+    with (
+        patch(
+            "homeassistant.helpers.device_registry.async_get",
+            return_value=mock_device_registry,
+        ),
+        patch.object(hass.config_entries, "async_get_entry", return_value=mock_entry),
+    ):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
@@ -458,8 +516,13 @@ async def test_killer_ping_api_failure(hass: HomeAssistant):
     mock_device_entry.config_entries = {"test_entry"}
     mock_device_registry.async_get.return_value = mock_device_entry
 
-    with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_device_registry), \
-         patch.object(hass.config_entries, "async_get_entry", return_value=mock_entry):
+    with (
+        patch(
+            "homeassistant.helpers.device_registry.async_get",
+            return_value=mock_device_registry,
+        ),
+        patch.object(hass.config_entries, "async_get_entry", return_value=mock_entry),
+    ):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
@@ -471,13 +534,17 @@ async def test_killer_ping_api_failure(hass: HomeAssistant):
 @pytest.mark.asyncio
 async def test_killer_ping_generic_exception(hass: HomeAssistant):
     """Test killer ping handles generic exceptions."""
-    with patch("homeassistant.helpers.device_registry.async_get", side_effect=ValueError("Boom")):
+    with patch(
+        "homeassistant.helpers.device_registry.async_get",
+        side_effect=ValueError("Boom"),
+    ):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 
         with pytest.raises(HomeAssistantError) as excinfo:
             await async_service_killer_ping(call, hass)
         assert excinfo.value.translation_key == "killer_ping_error"
+
 
 @pytest.mark.asyncio
 async def test_upgrade_lite_device_invalid_data(hass: HomeAssistant):
@@ -492,9 +559,13 @@ async def test_upgrade_lite_device_invalid_data(hass: HomeAssistant):
     hass.data[MYSA_DOMAIN] = {"test_entry": "invalid_string"}
     mock_entry = MagicMock(entry_id="test_entry")
 
-    with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_device_registry), \
-         patch.object(hass.config_entries, "async_get_entry", return_value=mock_entry):
-
+    with (
+        patch(
+            "homeassistant.helpers.device_registry.async_get",
+            return_value=mock_device_registry,
+        ),
+        patch.object(hass.config_entries, "async_get_entry", return_value=mock_entry),
+    ):
         call = MagicMock()
         call.data = {"device_id": "ha_device_id"}
 

@@ -1,36 +1,36 @@
-"""
-Authentication Module Tests.
+"""Authentication Module Tests.
 
 Tests for mysa_auth.py: async Cognito authentication.
 """
 
-import sys
 import os
+import sys
 
 # Add project root to path for imports
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(TEST_DIR)
 sys.path.insert(0, ROOT_DIR)
 
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch, PropertyMock
-from datetime import datetime, timezone, timedelta
 
 # Import module to be tested
 from custom_components.mysa.mysa_auth import (
+    CLIENT_ID,
+    IDENTITY_POOL_ID,
+    MQTT_WS_HOST,
+    REGION,
+    USER_POOL_ID,
     CognitoUser,
     login,
     refresh_and_sign_url,
     sigv4_sign_mqtt_url,
-    REGION,
-    USER_POOL_ID,
-    MQTT_WS_HOST,
-    CLIENT_ID,
-    IDENTITY_POOL_ID
 )
 
 # Valid-looking token for testing (structure only, signature ignored by mocks)
 MOCK_ID_TOKEN = "header.payload.signature"
+
 
 @pytest.fixture
 def mock_jwt():
@@ -41,15 +41,16 @@ def mock_jwt():
         mock_jwt_lib.get_unverified_claims.return_value = {
             "iss": "https://cognito-idp.us-east-1.amazonaws.com/test",
             "token_use": "id",
-            "exp": 9999999999
+            "exp": 9999999999,
         }
         mock_jwt_lib.decode.return_value = {
             "iss": "https://cognito-idp.us-east-1.amazonaws.com/test",
             "token_use": "id",
             "exp": 9999999999,
-            "sub": "test_subject"
+            "sub": "test_subject",
         }
         yield mock_jwt_lib
+
 
 @pytest.fixture
 def mock_cognito_client():
@@ -84,7 +85,9 @@ class TestCognitoUser:
         with patch("jose.jwt.get_unverified_claims", return_value={"test": "claim"}):
             claims = await user.async_verify_token("some_token", "id")
             assert claims == {"test": "claim"}
-            mock_cognito_client.verify_token.assert_called_with("some_token", "id", "id")
+            mock_cognito_client.verify_token.assert_called_with(
+                "some_token", "id", "id"
+            )
 
         # Test failure (pycognito raises)
         mock_cognito_client.verify_token.side_effect = ValueError("Invalid token")
@@ -111,33 +114,37 @@ class TestCognitoUser:
         }
 
         mock_creds = {
-            'AccessKeyId': 'AKIATEST',
-            'SecretKey': 'SECRETTEST',
-            'SessionToken': 'SESSIONTEST'
+            "AccessKeyId": "AKIATEST",
+            "SecretKey": "SECRETTEST",
+            "SessionToken": "SESSIONTEST",
         }
 
         with patch("boto3.client") as mock_boto:
             mock_identity = MagicMock()
             mock_boto.return_value = mock_identity
-            mock_identity.get_id.return_value = {'IdentityId': 'us-east-1:id'}
-            mock_identity.get_credentials_for_identity.return_value = {'Credentials': mock_creds}
+            mock_identity.get_id.return_value = {"IdentityId": "us-east-1:id"}
+            mock_identity.get_credentials_for_identity.return_value = {
+                "Credentials": mock_creds
+            }
 
             creds = await user.get_aws_credentials()
 
-            assert creds['access_key'] == 'AKIATEST'
-            assert creds['secret_key'] == 'SECRETTEST'
-            assert creds['session_token'] == 'SESSIONTEST'
+            assert creds["access_key"] == "AKIATEST"
+            assert creds["secret_key"] == "SECRETTEST"
+            assert creds["session_token"] == "SESSIONTEST"
 
             mock_identity.get_id.assert_called_once_with(
                 IdentityPoolId=IDENTITY_POOL_ID,
-                Logins={"cognito-idp.us-east-1.amazonaws.com/test_pool": MOCK_ID_TOKEN}
+                Logins={"cognito-idp.us-east-1.amazonaws.com/test_pool": MOCK_ID_TOKEN},
             )
 
     async def test_get_aws_credentials_no_token(self, mock_cognito_client):
         """Test get_aws_credentials with no token."""
         mock_cognito_client.id_token = None
         user = CognitoUser(mock_cognito_client)
-        with pytest.raises(KeyError): # id_claims will fail or return {} which has no 'iss'
+        with pytest.raises(
+            KeyError
+        ):  # id_claims will fail or return {} which has no 'iss'
             await user.get_aws_credentials()
 
     async def test_renew_access_token_errors(self, mock_cognito_client):
@@ -152,7 +159,9 @@ class TestCognitoUser:
     async def test_verify_token_errors(self, mock_cognito_client):
         """Test verify_token errors."""
         user = CognitoUser(mock_cognito_client)
-        mock_cognito_client.verify_token.side_effect = ValueError("Public key not found")
+        mock_cognito_client.verify_token.side_effect = ValueError(
+            "Public key not found"
+        )
 
         with pytest.raises(ValueError, match="Public key not found"):
             await user.async_verify_token("bad_token", "id")
@@ -175,16 +184,22 @@ class TestCognitoUser:
         mock_cognito_client.id_token = None
         user = CognitoUser(mock_cognito_client)
 
-        with patch.object(user, 'renew_access_token', new_callable=AsyncMock) as mock_renew, \
-             patch.object(user, 'get_aws_credentials', new_callable=AsyncMock) as mock_creds:
-
+        with (
+            patch.object(
+                user, "renew_access_token", new_callable=AsyncMock
+            ) as mock_renew,
+            patch.object(
+                user, "get_aws_credentials", new_callable=AsyncMock
+            ) as mock_creds,
+        ):
             mock_creds.return_value = {
-                "access_key": "k", "secret_key": "s", "session_token": "t"
+                "access_key": "k",
+                "secret_key": "s",
+                "session_token": "t",
             }
 
             await refresh_and_sign_url(user)
             mock_renew.assert_awaited_once()
-
 
 
 class TestLogin:
@@ -193,13 +208,15 @@ class TestLogin:
     async def test_login_no_refresh_token(self, mock_cognito_client):
         """Test login when refresh token is missing (should not raise)."""
         mock_cognito_client.refresh_token = None
-        with patch('custom_components.mysa.mysa_auth.Cognito', return_value=mock_cognito_client):
+        with patch(
+            "custom_components.mysa.mysa_auth.Cognito", return_value=mock_cognito_client
+        ):
             user = await login("u", "p")
             assert user.refresh_token is None
 
     async def test_login_success(self, mock_jwt, mock_cognito_client):
         """Test successful login."""
-        with patch('custom_components.mysa.mysa_auth.Cognito') as MockCognito:
+        with patch("custom_components.mysa.mysa_auth.Cognito") as MockCognito:
             MockCognito.return_value = mock_cognito_client
             # authenticate is called in executor, we just need it to not raise
 
@@ -211,13 +228,18 @@ class TestLogin:
             assert user._client == mock_cognito_client
 
             MockCognito.assert_called_with(
-                USER_POOL_ID, CLIENT_ID, user_pool_region=REGION, username="test@example.com"
+                USER_POOL_ID,
+                CLIENT_ID,
+                user_pool_region=REGION,
+                username="test@example.com",
             )
-            mock_cognito_client.authenticate.assert_called_once_with(password="password123")
+            mock_cognito_client.authenticate.assert_called_once_with(
+                password="password123"
+            )
 
     async def test_login_failure(self):
         """Test login failure."""
-        with patch('custom_components.mysa.mysa_auth.Cognito') as MockCognito:
+        with patch("custom_components.mysa.mysa_auth.Cognito") as MockCognito:
             mock_instance = MockCognito.return_value
             mock_instance.authenticate.side_effect = Exception("Autherr")
 
@@ -226,12 +248,15 @@ class TestLogin:
 
     async def test_login_failure_unknown_service(self):
         """Test login failure with Unknown service error diagnostic logic."""
-        with patch('custom_components.mysa.mysa_auth.Cognito') as MockCognito:
+        with patch("custom_components.mysa.mysa_auth.Cognito") as MockCognito:
             MockCognito.side_effect = Exception("Unknown service: 'cognito-idp'")
 
             # Mock boto3.Session().get_available_services()
-            with patch('custom_components.mysa.mysa_auth.boto3.Session') as MockSession:
-                MockSession.return_value.get_available_services.return_value = ["s3", "sts"]
+            with patch("custom_components.mysa.mysa_auth.boto3.Session") as MockSession:
+                MockSession.return_value.get_available_services.return_value = [
+                    "s3",
+                    "sts",
+                ]
 
                 with pytest.raises(Exception, match="Unknown service: 'cognito-idp'"):
                     await login("test@example.com", "fail")
@@ -243,21 +268,21 @@ class TestSigv4SignMqttUrl:
     def test_sigv4_sign_mqtt_url(self):
         """Test signing MQTT URL with SigV4."""
         aws_credentials = {
-            'access_key': 'AKIATEST123',
-            'secret_key': 'secret_key_test',
-            'session_token': 'session/token+test='
+            "access_key": "AKIATEST123",
+            "secret_key": "secret_key_test",
+            "session_token": "session/token+test=",
         }
 
         result = sigv4_sign_mqtt_url(aws_credentials)
 
         # Verify the result is a signed WebSocket URL
         assert isinstance(result, str)
-        assert result.startswith('wss://')
-        assert 'X-Amz-Algorithm' in result
-        assert 'X-Amz-Signature' in result
-        assert 'X-Amz-Security-Token' in result
+        assert result.startswith("wss://")
+        assert "X-Amz-Algorithm" in result
+        assert "X-Amz-Signature" in result
+        assert "X-Amz-Security-Token" in result
         # Check for URL encoded token: / -> %2F, + -> %2B, = -> %3D
-        assert 'session%2Ftoken%2Btest%3D' in result
+        assert "session%2Ftoken%2Btest%3D" in result
 
 
 class TestRefreshAndSignUrl:
@@ -268,14 +293,24 @@ class TestRefreshAndSignUrl:
         user = CognitoUser(mock_cognito_client)
 
         # Mock id_claims to look expired
-        expired_claims = {"iss": "https://prov", "exp": 100} # Very old
+        expired_claims = {"iss": "https://prov", "exp": 100}  # Very old
 
-        with patch("custom_components.mysa.mysa_auth.jwt.get_unverified_claims", return_value=expired_claims), \
-             patch.object(user, 'renew_access_token', new_callable=AsyncMock) as mock_renew, \
-             patch.object(user, 'get_aws_credentials', new_callable=AsyncMock) as mock_creds:
-
+        with (
+            patch(
+                "custom_components.mysa.mysa_auth.jwt.get_unverified_claims",
+                return_value=expired_claims,
+            ),
+            patch.object(
+                user, "renew_access_token", new_callable=AsyncMock
+            ) as mock_renew,
+            patch.object(
+                user, "get_aws_credentials", new_callable=AsyncMock
+            ) as mock_creds,
+        ):
             mock_creds.return_value = {
-                "access_key": "k", "secret_key": "s", "session_token": "t"
+                "access_key": "k",
+                "secret_key": "s",
+                "session_token": "t",
             }
 
             signed_url, returned_user = await refresh_and_sign_url(user)
@@ -290,13 +325,22 @@ class TestRefreshAndSignUrl:
         user = CognitoUser(mock_cognito_client)
 
         # Mock id_claims to raise an exception
-        with patch.object(user.__class__, 'id_claims', new_callable=PropertyMock) as mock_claims, \
-             patch.object(user, 'renew_access_token', new_callable=AsyncMock) as mock_renew, \
-             patch.object(user, 'get_aws_credentials', new_callable=AsyncMock) as mock_creds:
-
+        with (
+            patch.object(
+                user.__class__, "id_claims", new_callable=PropertyMock
+            ) as mock_claims,
+            patch.object(
+                user, "renew_access_token", new_callable=AsyncMock
+            ) as mock_renew,
+            patch.object(
+                user, "get_aws_credentials", new_callable=AsyncMock
+            ) as mock_creds,
+        ):
             mock_claims.side_effect = Exception("Claims Error")
             mock_creds.return_value = {
-                "access_key": "k", "secret_key": "s", "session_token": "t"
+                "access_key": "k",
+                "secret_key": "s",
+                "session_token": "t",
             }
 
             signed_url, returned_user = await refresh_and_sign_url(user)
@@ -315,4 +359,39 @@ class TestConstants:
         assert REGION == "us-east-1"
         assert USER_POOL_ID == "us-east-1_GUFWfhI7g"
         assert "iot.us-east-1.amazonaws.com" in MQTT_WS_HOST
-        assert IDENTITY_POOL_ID == "us-east-1:ebd95d52-9995-45da-b059-56b865a18379"
+
+@pytest.mark.asyncio
+async def test_authenticate_cognito_missing_service_crash():
+    """Test authenticate where Cognito fails with 'Unknown service'
+    AND boto3 crashes when trying to list services (covering the except pass block).
+    """
+    # Mock pycognito to raise the specific "Unknown service" error
+    # Note: str(e) must contain "Unknown service: 'cognito-idp'"
+    error_msg = "Unknown service: 'cognito-idp'"
+
+    with (
+        patch("custom_components.mysa.mysa_auth.Cognito") as mock_cognito_cls,
+        patch("custom_components.mysa.mysa_auth.boto3") as mock_boto3,
+    ):
+        # Configure Cognito to raise exception on instantiation or when run in executor
+        # login() calls: await loop.run_in_executor(None, partial(Cognito, ...))
+        # So the side_effect should come from the class constructor or the partial execution?
+        # Actually, it calls loop.run_in_executor(None, partial(Cognito...))
+        # If Cognito(...) raises, run_in_executor raises it.
+        mock_cognito_cls.side_effect = Exception(error_msg)
+
+        # Configure boto3 to crash when getting services
+        mock_session = MagicMock()
+        mock_boto3.Session.return_value = mock_session
+        mock_session.get_available_services.side_effect = Exception(
+            "Crash inside crash handler"
+        )
+
+        # Expect the original authentication error to re-raised
+        with pytest.raises(Exception) as excinfo:
+            await login("test_user", "test_pass")
+
+        assert "Unknown service: 'cognito-idp'" in str(excinfo.value)
+
+        # Verify get_available_services was called (proving we entered the if block)
+        mock_session.get_available_services.assert_called_once()

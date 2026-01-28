@@ -1,7 +1,10 @@
 """Tests for Mysa Device Logic."""
+
 import pytest
-from custom_components.mysa.device import MysaDeviceLogic
+
 from custom_components.mysa.const import AC_PAYLOAD_TYPE
+from custom_components.mysa.device import MysaDeviceLogic
+
 
 @pytest.mark.unit
 class TestMysaDeviceLogic:
@@ -29,7 +32,9 @@ class TestMysaDeviceLogic:
 
         # Lite (BB-V2-L)
         assert MysaDeviceLogic.get_payload_type({"Model": "BB-V2-L"}) == 5
-        assert MysaDeviceLogic.get_payload_type({"Model": "Lite"}) == 1 # Unknown model returns 1
+        assert (
+            MysaDeviceLogic.get_payload_type({"Model": "Lite"}) == 1
+        )  # Unknown model returns 1
 
         # In-Floor (INF-V1 or Floor)
         assert MysaDeviceLogic.get_payload_type({"Model": "INF-V1"}) == 3
@@ -39,8 +44,18 @@ class TestMysaDeviceLogic:
         assert MysaDeviceLogic.get_payload_type({"Model": "AC-V1"}) == AC_PAYLOAD_TYPE
 
         # Upgraded Lite
-        assert MysaDeviceLogic.get_payload_type({"Id": "dev1"}, upgraded_lite_devices=["dev1"]) == 5
-        assert MysaDeviceLogic.get_payload_type({"Id": "dev1:00"}, upgraded_lite_devices=["dev100"]) == 5
+        assert (
+            MysaDeviceLogic.get_payload_type(
+                {"Id": "dev1"}, upgraded_lite_devices=["dev1"]
+            )
+            == 5
+        )
+        assert (
+            MysaDeviceLogic.get_payload_type(
+                {"Id": "dev1:00"}, upgraded_lite_devices=["dev100"]
+            )
+            == 5
+        )
 
         # Fallback
         assert MysaDeviceLogic.get_payload_type({"Model": "Unknown"}) == 1
@@ -61,7 +76,7 @@ class TestMysaDeviceLogic:
             "zn": "zone1",
             "px": 1,
             "ab": 1,
-            "eco": 0
+            "eco": 0,
         }
         MysaDeviceLogic.normalize_state(state)
 
@@ -96,7 +111,7 @@ class TestMysaDeviceLogic:
             "zone_id": "z2",
             "ProximityMode": "On",
             "AutoBrightness": "On",
-            "ecoMode": 1
+            "ecoMode": 1,
         }
         MysaDeviceLogic.normalize_state(state)
 
@@ -105,8 +120,7 @@ class TestMysaDeviceLogic:
         assert state["Duty"] == 50
         assert state["Lock"] == 1
         assert state["ProximityMode"] is True
-        assert state["EcoMode"] is False # 1 is Off
-
+        assert state["EcoMode"] is False  # 1 is Off
 
     def test_sensor_mode_priority(self):
         """Test that TrackedSensor takes priority over ControlMode."""
@@ -147,11 +161,7 @@ class TestMysaDeviceLogic:
         """Test In-Floor specialized keys (heatStat, lineVtg)."""
         # heatStat -> DutyCycle
         # lineVtg -> Voltage
-        state = {
-            "heatStat": 50,
-            "lineVtg": 240,
-            "sl": 3
-        }
+        state = {"heatStat": 50, "lineVtg": 240, "sl": 3}
         MysaDeviceLogic.normalize_state(state)
 
         assert state["DutyCycle"] == 50
@@ -174,8 +184,8 @@ class TestMysaDeviceLogic:
         # Key: {"v": value}
         state = {
             "sp": {"v": 23.0},
-            "Brightness": {"a_br": 90}, # V2 brightness special handling
-            "lk": {"v": "off"}
+            "Brightness": {"a_br": 90},  # V2 brightness special handling
+            "lk": {"v": "off"},
         }
         MysaDeviceLogic.normalize_state(state)
 
@@ -197,13 +207,13 @@ class TestMysaDeviceLogic:
             "TstatMode": 1,
             "ACState": {
                 "v": {
-                    "1": 1, # Power
-                    "2": 2, # Mode
-                    "3": 24.5, # Temp
-                    "4": 2, # Fan
-                    "5": 1 # Swing
+                    "1": 1,  # Power
+                    "2": 2,  # Mode
+                    "3": 24.5,  # Temp
+                    "4": 2,  # Fan
+                    "5": 1,  # Swing
                 }
-            }
+            },
         }
         MysaDeviceLogic.normalize_state(state)
 
@@ -212,8 +222,8 @@ class TestMysaDeviceLogic:
         assert state["MaxCurrent"] == 16
         assert state["MaxSetpoint"] == 30
         assert state["TimeZone"] == "UTC"
-        assert state["FanSpeed"] == 1 # From fn
-        assert state["SwingState"] == 3 # From ss
+        assert state["FanSpeed"] == 1  # From fn
+        assert state["SwingState"] == 3  # From ss
         assert state["SwingStateHorizontal"] == 2
 
         # But wait, ACState usually overrides or complements?
@@ -226,11 +236,11 @@ class TestMysaDeviceLogic:
         state = {
             "ACState": {
                 "v": {
-                    "1": 1, # Power
-                    "2": 2, # Mode
-                    "3": 24.5, # Temp
-                    "4": 2, # Fan
-                    "5": 1 # Swing
+                    "1": 1,  # Power
+                    "2": 2,  # Mode
+                    "3": 24.5,  # Temp
+                    "4": 2,  # Fan
+                    "5": 1,  # Swing
                 }
             }
         }
@@ -249,20 +259,17 @@ class TestMysaDeviceLogic:
         # min_br = get_v(['MinBrightness', 'mnbr'])
         # So we set MinBrightness to the bad dict, and mnbr to the backup value.
         state = {
-            "MinBrightness": {"bad": 1}, # returns dict, no 'v'
-            "mnbr": 10  # fallback key
+            "MinBrightness": {"bad": 1},  # returns dict, no 'v'
+            "mnbr": 10,  # fallback key
         }
         MysaDeviceLogic.normalize_state(state)
         # Should skip MinBrightness and pick up mnbr
         assert state["MinBrightness"] == 10
 
-
     def test_normalize_state_exceptions(self):
         """Test exception handling in normalize_state."""
         # TstatMode invalid value (lines 192-193 of device.py)
-        state = {
-            "TstatMode": "invalid"
-        }
+        state = {"TstatMode": "invalid"}
         MysaDeviceLogic.normalize_state(state)
         # Should keep "invalid" string (except caught)
         assert state["TstatMode"] == "invalid"
@@ -293,7 +300,6 @@ class TestMysaDeviceLogic:
     def test_get_device_info_mac_formatting(self):
         """Test MAC address formatting in get_device_info."""
         from homeassistant.helpers.device_registry import CONNECTION_NETWORK_MAC
-        from custom_components.mysa.const import DOMAIN
 
         # 12-char hex string should be formatted with colons
         info = MysaDeviceLogic.get_device_info("aabbccddeeff", {})
@@ -314,7 +320,7 @@ class TestMysaDeviceLogic:
         state = {"br": {"val": 100}}
         MysaDeviceLogic.normalize_state(state)
         assert state["BrightnessSettings"] == {"val": 100}
-        assert "Brightness" not in state # Should be popped
+        assert "Brightness" not in state  # Should be popped
 
         # 2. loadCurr -> Current
         state = {"loadCurr": 2.5}
@@ -372,11 +378,7 @@ class TestMysaDeviceLogic:
     def test_normalize_state_ac_conflict_flat(self):
         """Test that internal AC key '2' overrides generic 'mode'."""
         # Generic mode says Auto (2), Internal engine says Cool (4)
-        state = {
-            "mode": 2,
-            "2": 4,
-            "ambTemp": 21.0
-        }
+        state = {"mode": 2, "2": 4, "ambTemp": 21.0}
         MysaDeviceLogic.normalize_state(state)
         # Should favor Cool (4)
         assert state["Mode"] == 4
@@ -384,13 +386,7 @@ class TestMysaDeviceLogic:
 
     def test_normalize_state_ac_conflict_nested(self):
         """Test that nested ACState key '2' overrides generic 'mode'."""
-        state = {
-            "mode": 2,
-            "ACState": {
-                "2": 4,
-                "3": 22.0
-            }
-        }
+        state = {"mode": 2, "ACState": {"2": 4, "3": 22.0}}
         MysaDeviceLogic.normalize_state(state)
         assert state["Mode"] == 4
         assert state["ACMode"] == 4
@@ -400,12 +396,12 @@ class TestMysaDeviceLogic:
     def test_normalize_state_flat_ac_keys(self):
         """Test logic handles flattened keys (1-5) from MsgType 30."""
         state = {
-            "mode": 2, # Generic Auto
+            "mode": 2,  # Generic Auto
             "1": 1,  # Power On
             "2": 4,  # Mode Cool
-            "3": 21.5, # Temp
-            "4": 2, # Fan Med (assuming 2=Med)
-            "5": 0 # Swing Off
+            "3": 21.5,  # Temp
+            "4": 2,  # Fan Med (assuming 2=Med)
+            "5": 0,  # Swing Off
         }
         MysaDeviceLogic.normalize_state(state)
 

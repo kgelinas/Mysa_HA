@@ -1,23 +1,23 @@
 """Update platform for Mysa."""
+
 # pylint: disable=abstract-method
 # Justification: HA Entity properties implement the required abstracts.
 import logging
 from datetime import timedelta
-from typing import Any, Dict
+from typing import Any
 
 from homeassistant.components.update import (
-    UpdateEntity,
     UpdateDeviceClass,
+    UpdateEntity,
     UpdateEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-
-from .mysa_api import MysaApi
 from . import MysaData
 from .device import MysaDeviceLogic
+from .mysa_api import MysaApi
 
 PARALLEL_UPDATES = 0
 
@@ -51,7 +51,9 @@ class MysaUpdate(UpdateEntity):
     _attr_supported_features = UpdateEntityFeature(0)
     _attr_has_entity_name = True
 
-    def __init__(self, api: MysaApi, device_id: str, device_data: Dict[str, Any]) -> None:
+    def __init__(
+        self, api: MysaApi, device_id: str, device_data: dict[str, Any]
+    ) -> None:
         """Initialize."""
         self._api = api
         self._device_id = device_id
@@ -61,7 +63,9 @@ class MysaUpdate(UpdateEntity):
         self._attr_unique_id = f"{device_id}_firmware"
 
         self._attr_installed_version = str(device_data.get("FirmwareVersion"))
-        self._attr_latest_version = self._attr_installed_version  # Default to current until check
+        self._attr_latest_version = (
+            self._attr_installed_version
+        )  # Default to current until check
         self._attr_in_progress = False
 
         # Link to Device
@@ -87,7 +91,9 @@ class MysaUpdate(UpdateEntity):
                     info.get("allowedVersion", self._attr_installed_version)
                 )
 
-                if self._attr_installed_version != self._device_data.get("FirmwareVersion"):
+                if self._attr_installed_version != self._device_data.get(
+                    "FirmwareVersion"
+                ):
                     self._device_data["FirmwareVersion"] = self._attr_installed_version
                     # Update our own device_info (though usually static)
                     self._attr_device_info = MysaDeviceLogic.get_device_info(
@@ -99,7 +105,7 @@ class MysaUpdate(UpdateEntity):
                     self._device_id,
                     self._attr_installed_version,
                     self._attr_latest_version,
-                    info.get("update")
+                    info.get("update"),
                 )
 
         except Exception as e:

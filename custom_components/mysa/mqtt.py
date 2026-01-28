@@ -1,5 +1,4 @@
-"""
-MQTT 3.1.1 Packet Builders and Parsers
+"""MQTT 3.1.1 Packet Builders and Parsers.
 
 Simplified implementation for Home Assistant integration.
 Only includes the functions needed for Mysa cloud communication.
@@ -10,9 +9,10 @@ https://github.com/jlitzingerdev/mqttpacket
 
 Adapted and simplified for the Mysa Home Assistant integration.
 """
+
 import struct
 from dataclasses import dataclass
-from typing import List, Optional, Union, Any
+from typing import Any
 
 # MQTT 3.1.1 Packet Types
 MQTT_PACKET_CONNECT = 1
@@ -27,14 +27,16 @@ MQTT_PACKET_DISCONNECT = 14
 
 PROTOCOL_LEVEL = 4  # MQTT 3.1.1
 VALID_QOS = (0x00, 0x01, 0x02)
-PROTOCOL_NAME = b'MQTT'
+PROTOCOL_NAME = b"MQTT"
 
 
 # --- Packet Data Classes ---
 
+
 @dataclass
 class ConnackPacket:
     """Parsed CONNACK packet."""
+
     return_code: int
     session_present: int
     pkt_type: int = MQTT_PACKET_CONNACK
@@ -43,19 +45,21 @@ class ConnackPacket:
 @dataclass
 class SubackPacket:
     """Parsed SUBACK packet."""
+
     packet_id: int
-    return_codes: List[int]
+    return_codes: list[int]
     pkt_type: int = MQTT_PACKET_SUBACK
 
 
 @dataclass
 class PublishPacket:
     """Parsed PUBLISH packet."""
+
     dup: int
     qos: int
     retain: int
     topic: str
-    packetid: Optional[int]
+    packetid: int | None
     payload: bytes
     pkt_type: int = MQTT_PACKET_PUBLISH
 
@@ -63,6 +67,7 @@ class PublishPacket:
 @dataclass
 class PubackPacket:
     """Parsed PUBACK packet."""
+
     packet_id: int
     pkt_type: int = MQTT_PACKET_PUBACK
 
@@ -70,26 +75,29 @@ class PubackPacket:
 @dataclass
 class PingrespPacket:
     """Parsed PINGRESP packet."""
+
     pkt_type: int = MQTT_PACKET_PINGRESP
 
 
 @dataclass
 class SubscriptionSpec:
     """Subscription topic/QoS pair."""
+
     topicfilter: str
     qos: int
 
     def remaining_len(self) -> int:
         """Calculate the remaining length for this subscription spec."""
-        return 3 + len(self.topicfilter.encode('utf-8'))
+        return 3 + len(self.topicfilter.encode("utf-8"))
 
     def to_bytes(self) -> bytes:
         """Convert the subscription spec to bytes."""
-        encoded = self.topicfilter.encode('utf-8')
-        return struct.pack('!H', len(encoded)) + encoded + struct.pack('!B', self.qos)
+        encoded = self.topicfilter.encode("utf-8")
+        return struct.pack("!H", len(encoded)) + encoded + struct.pack("!B", self.qos)
 
 
 # --- Helper Functions ---
+
 
 def _encode_remaining_length(remaining_length: int) -> bytes:
     """Encode the remaining length for the packet."""
@@ -107,24 +115,27 @@ def _encode_remaining_length(remaining_length: int) -> bytes:
 
 def _encode_string(text: str) -> bytes:
     """Encode a string as per MQTT spec: two byte length, UTF-8 data."""
-    encoded_text = text.encode('utf-8')
-    return struct.pack('!H', len(encoded_text)) + encoded_text
+    encoded_text = text.encode("utf-8")
+    return struct.pack("!H", len(encoded_text)) + encoded_text
 
 
 # --- Packet Builders ---
 
+
 def connect(client_id: str, keepalive: int = 60) -> bytes:
     """Create a CONNECT packet."""
     msg = bytes([MQTT_PACKET_CONNECT << 4])
-    meta = struct.pack("!H4sBBH", 0x0004, PROTOCOL_NAME, PROTOCOL_LEVEL, 0x02, keepalive)
-    encoded_client_id = _encode_string(client_id) if client_id else b''
+    meta = struct.pack(
+        "!H4sBBH", 0x0004, PROTOCOL_NAME, PROTOCOL_LEVEL, 0x02, keepalive
+    )
+    encoded_client_id = _encode_string(client_id) if client_id else b""
     remaining_length = len(meta) + len(encoded_client_id)
     return msg + _encode_remaining_length(remaining_length) + meta + encoded_client_id
 
 
 def pingreq() -> bytes:
     """Create a PINGREQ packet."""
-    return b'\xc0\x00'
+    return b"\xc0\x00"
 
 
 def disconnect() -> bytes:
@@ -132,16 +143,16 @@ def disconnect() -> bytes:
     return struct.pack("!BB", MQTT_PACKET_DISCONNECT << 4, 0)
 
 
-def subscribe(packetid: int, topicspecs: List[SubscriptionSpec]) -> bytes:
+def subscribe(packetid: int, topicspecs: list[SubscriptionSpec]) -> bytes:
     """Create a SUBSCRIBE packet."""
     remaining_len = 2  # packetid
     for spec in topicspecs:
         remaining_len += spec.remaining_len()
 
     msg = bytes([(MQTT_PACKET_SUBSCRIBE << 4) | 0x02])
-    parts = [msg, _encode_remaining_length(remaining_len), struct.pack('!H', packetid)]
+    parts = [msg, _encode_remaining_length(remaining_len), struct.pack("!H", packetid)]
     parts.extend(s.to_bytes() for s in topicspecs)
-    return b''.join(parts)
+    return b"".join(parts)
 
 
 def publish(  # TODO: Refactor to reduce arguments
@@ -150,19 +161,19 @@ def publish(  # TODO: Refactor to reduce arguments
     qos: int,
     retain: bool,
     payload: bytes,
-    packet_id: Optional[int] = None
+    packet_id: int | None = None,
 ) -> bytes:
     """Create a PUBLISH packet."""
     # pylint: disable=too-many-arguments,too-many-positional-arguments
     # Justification: Helper function used internally for packet construction.
     if qos > 0 and packet_id is None:
-        raise ValueError('QoS > 0 requires a packet_id')
+        raise ValueError("QoS > 0 requires a packet_id")
 
     remaining_len = len(payload)
-    encoded_packet_id = b''
+    encoded_packet_id = b""
     if qos > 0:
         remaining_len += 2
-        encoded_packet_id = struct.pack('!H', packet_id)
+        encoded_packet_id = struct.pack("!H", packet_id)
 
     encoded_topic = _encode_string(topic)
     remaining_len += len(encoded_topic)
@@ -182,7 +193,7 @@ def publish(  # TODO: Refactor to reduce arguments
 _MULTIPLIERS = (1, 128, 128 * 128, 128 * 128 * 128, 0)
 
 
-def parse(data: bytearray, output: List[Any]) -> int:
+def parse(data: bytearray, output: list[Any]) -> int:
     """Parse packets from data into output list. Returns bytes consumed."""
     if not isinstance(data, bytearray):
         raise TypeError("data must be a bytearray")
@@ -212,7 +223,9 @@ def parse(data: bytearray, output: List[Any]) -> int:
         if (len(data) - offset) < (remaining_length + 1 + size_rem_len):
             return consumed
 
-        pkt = _parse_packet(pkt_type, first_byte, data, remaining_length, variable_begin)
+        pkt = _parse_packet(
+            pkt_type, first_byte, data, remaining_length, variable_begin
+        )
         if pkt:
             output.append(pkt)
 
@@ -223,19 +236,23 @@ def parse(data: bytearray, output: List[Any]) -> int:
 
 
 def parse_one(
-    data: Union[bytes, bytearray]
-) -> Optional[Union[ConnackPacket, SubackPacket, PublishPacket, PubackPacket, PingrespPacket]]:
+    data: bytes | bytearray,
+) -> (
+    ConnackPacket | SubackPacket | PublishPacket | PubackPacket | PingrespPacket | None
+):
     """Parse a single packet from data."""
     if not isinstance(data, bytearray):
         data = bytearray(data)
-    output: List[Any] = []
+    output: list[Any] = []
     parse(data, output)
     return output[0] if output else None
 
 
 def parse_mqtt_packet(
-    data: Union[bytes, bytearray]
-) -> Optional[Union[ConnackPacket, SubackPacket, PublishPacket, PubackPacket, PingrespPacket]]:
+    data: bytes | bytearray,
+) -> (
+    ConnackPacket | SubackPacket | PublishPacket | PubackPacket | PingrespPacket | None
+):
     """Parse a single packet from data (legacy alias)."""
     return parse_one(data)
 
@@ -245,8 +262,10 @@ def _parse_packet(
     first_byte: int,
     data: bytearray,
     remaining_length: int,
-    variable_begin: int
-) -> Optional[Union[ConnackPacket, SubackPacket, PublishPacket, PubackPacket, PingrespPacket]]:
+    variable_begin: int,
+) -> (
+    ConnackPacket | SubackPacket | PublishPacket | PubackPacket | PingrespPacket | None
+):
     """Parse a single packet based on type."""
     if pkt_type == MQTT_PACKET_CONNACK:
         return ConnackPacket(data[variable_begin + 1], data[variable_begin])
@@ -254,7 +273,7 @@ def _parse_packet(
     if pkt_type == MQTT_PACKET_SUBACK:
         end_payload = remaining_length + variable_begin
         packet_id = (data[variable_begin] << 8) | data[variable_begin + 1]
-        return SubackPacket(packet_id, list(data[variable_begin + 2:end_payload]))
+        return SubackPacket(packet_id, list(data[variable_begin + 2 : end_payload]))
 
     if pkt_type == MQTT_PACKET_PUBLISH:
         flags = first_byte & 0x0F
@@ -262,7 +281,7 @@ def _parse_packet(
         end_packet = remaining_length + variable_begin
         topic_len = (data[variable_begin] << 8) | data[variable_begin + 1]
         topic_start = variable_begin + 2
-        topic = data[topic_start:topic_start + topic_len].decode('utf-8')
+        topic = data[topic_start : topic_start + topic_len].decode("utf-8")
         payload_start = topic_start + topic_len
         packetid = None
         if qos:
@@ -274,7 +293,7 @@ def _parse_packet(
             flags & 0x1,
             topic,
             packetid,
-            bytes(data[payload_start:end_packet])
+            bytes(data[payload_start:end_packet]),
         )
 
     if pkt_type == MQTT_PACKET_PUBACK:

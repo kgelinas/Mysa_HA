@@ -1,25 +1,24 @@
-"""
-Binary Sensor Entity Coverage Tests.
+"""Binary Sensor Entity Coverage Tests.
 
 Tests for custom_components/mysa/binary_sensor.py
 """
 
-import sys
 import os
+import sys
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
-from unittest.mock import MagicMock, AsyncMock
 import pytest
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 from homeassistant.const import EntityCategory
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from custom_components.mysa.const import DOMAIN
-from custom_components.mysa.binary_sensor import (
-    async_setup_entry,
-    MysaConnectionSensor,
-)
 from custom_components.mysa import MysaData
+from custom_components.mysa.binary_sensor import (
+    MysaConnectionSensor,
+    async_setup_entry,
+)
+from custom_components.mysa.const import DOMAIN
 
 # Add project root to path for imports
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -30,6 +29,7 @@ sys.path.insert(0, ROOT_DIR)
 @pytest.fixture
 def mock_coordinator(hass, mock_config_entry):
     """Create a mock coordinator with test data."""
+
     async def async_update():
         return {
             "device1": {
@@ -41,13 +41,18 @@ def mock_coordinator(hass, mock_config_entry):
                 "Connected": False,
                 "Name": "Offline Device",
                 "Model": "BB-V1",
-            }
+            },
         }
 
     coordinator = DataUpdateCoordinator(
-        hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_config_entry
+        hass,
+        MagicMock(),
+        name="test",
+        update_method=async_update,
+        config_entry=mock_config_entry,
     )
     return coordinator
+
 
 @pytest.mark.asyncio
 class TestMysaBinarySensor:
@@ -59,7 +64,11 @@ class TestMysaBinarySensor:
         mock_api.get_devices = AsyncMock(
             return_value={
                 "device1": {"Id": "device1", "Name": "Test Device", "Model": "BB-V2"},
-                "device2": {"Id": "device2", "Name": "Offline Device", "Model": "BB-V1"},
+                "device2": {
+                    "Id": "device2",
+                    "Name": "Offline Device",
+                    "Model": "BB-V1",
+                },
             }
         )
 
@@ -76,9 +85,7 @@ class TestMysaBinarySensor:
         assert len(entities) == 2
         assert isinstance(entities[0], MysaConnectionSensor)
 
-    async def test_sensor_attributes(
-        self, mock_coordinator
-    ):
+    async def test_sensor_attributes(self, mock_coordinator):
         """Test sensor status attributes."""
         await mock_coordinator.async_refresh()
 
@@ -96,9 +103,7 @@ class TestMysaBinarySensor:
         assert info["model"] == "BB-V2"
         assert info["name"] == "Test Device"
 
-    async def test_is_on_state(
-        self, mock_coordinator
-    ):
+    async def test_is_on_state(self, mock_coordinator):
         """Test is_on property based on Connected state."""
         await mock_coordinator.async_refresh()
 
@@ -114,15 +119,16 @@ class TestMysaBinarySensor:
 
     async def test_is_on_missing_state(self, hass, mock_config_entry):
         """Test is_on returns False when state is missing."""
+
         async def async_update():
-            return {} # Empty data
+            return {}  # Empty data
 
         coordinator = DataUpdateCoordinator(
             hass,
             MagicMock(),
             name="test",
             update_method=async_update,
-            config_entry=mock_config_entry
+            config_entry=mock_config_entry,
         )
         await coordinator.async_refresh()
 
@@ -140,15 +146,19 @@ class TestMysaBinarySensor:
         # In the new code, we assume runtime_data IS set by __init__.py before calling platforms.
         pass
 
-    async def test_setup_entry_attributes(self, hass, mock_coordinator, mock_config_entry):
+    async def test_setup_entry_attributes(
+        self, hass, mock_coordinator, mock_config_entry
+    ):
         """Test entity has_entity_name."""
         device_data = {"Id": "d1", "Name": "My Device"}
         entity = MysaConnectionSensor(mock_coordinator, "d1", device_data)
         assert entity.has_entity_name is True
 
+
 # ===========================================================================
 # Merged Edge Case Tests
 # ===========================================================================
+
 
 @pytest.mark.asyncio
 async def test_binary_sensor_edge_cases(hass):

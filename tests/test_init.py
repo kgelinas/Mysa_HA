@@ -1,13 +1,13 @@
 """Tests for the Mysa integration init."""
-from unittest.mock import MagicMock, patch, AsyncMock
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.helpers.update_coordinator import UpdateFailed
-from custom_components.mysa import async_setup_entry, async_unload_entry, MysaData
-from custom_components.mysa.const import DOMAIN
-from custom_components.mysa.mysa_api import MysaApi
 
+from custom_components.mysa import MysaData, async_setup_entry, async_unload_entry
+from custom_components.mysa.const import DOMAIN
 
 # ===========================================================================
 # Service Tests Removed
@@ -20,6 +20,7 @@ from custom_components.mysa.mysa_api import MysaApi
 # ===========================================================================
 # async_setup_entry Tests (Merged)
 # ===========================================================================
+
 
 class TestAsyncSetupEntry:
     """Test async_setup_entry function."""
@@ -45,7 +46,6 @@ class TestAsyncSetupEntry:
     @pytest.mark.asyncio
     async def test_setup_entry_success(self, hass, mock_entry):
         """Test successful setup entry."""
-        from custom_components.mysa import async_setup_entry
 
         with (
             patch("custom_components.mysa.MysaApi") as MockApi,
@@ -92,7 +92,6 @@ class TestAsyncSetupEntry:
     @pytest.mark.asyncio
     async def test_setup_entry_auth_failure(self, hass, mock_entry):
         """Test setup entry with authentication failure."""
-        from custom_components.mysa import async_setup_entry
         from homeassistant.exceptions import ConfigEntryAuthFailed
 
         with (
@@ -116,7 +115,6 @@ class TestAsyncSetupEntry:
     @pytest.mark.asyncio
     async def test_update_data_logging_and_recovery(self, hass, mock_entry):
         """Test logging and recovery logic in async_update_data."""
-        from custom_components.mysa import async_setup_entry
 
         with (
             patch("custom_components.mysa.MysaApi") as MockApi,
@@ -145,8 +143,8 @@ class TestAsyncSetupEntry:
             # Call args: (hass, _LOGGER, name=..., update_method=..., ...)
             # We can grab it from kwargs
             if MockCoordinator.target == "custom_components.mysa.DataUpdateCoordinator":
-                 # Verify call args
-                 pass
+                # Verify call args
+                pass
 
             # MockCoordinator is a class, so return_value is the instance.
             # We want to inspect the call to the CLASS constructor.
@@ -182,7 +180,10 @@ class TestAsyncSetupEntry:
                 pass
 
             # Should have logged ERROR (line 50)
-            mock_logger.error.assert_called_with("Error communicating with API during initial setup: %s", mock_api.get_state.side_effect)
+            mock_logger.error.assert_called_with(
+                "Error communicating with API during initial setup: %s",
+                mock_api.get_state.side_effect,
+            )
 
             # `unavailable_logged` is now True. `first_refresh` is still True (because it failed before setting to False? No, look at code).
             # Code:
@@ -225,7 +226,9 @@ class TestAsyncSetupEntry:
                 pass
 
             # check warning
-            mock_logger.warning.assert_called_with("Error communicating with API: %s", mock_api.get_state.side_effect)
+            mock_logger.warning.assert_called_with(
+                "Error communicating with API: %s", mock_api.get_state.side_effect
+            )
             # `unavailable_logged` is now True.
 
             # 3. Third call (Failure again)
@@ -249,7 +252,6 @@ class TestAsyncSetupEntry:
     @pytest.mark.asyncio
     async def test_check_device_changes(self, hass, mock_entry):
         """Test the device change detection listener."""
-        from custom_components.mysa import async_setup_entry
 
         with (
             patch("custom_components.mysa.MysaApi") as MockApi,
@@ -261,7 +263,7 @@ class TestAsyncSetupEntry:
             mock_api.authenticate = AsyncMock()
             mock_api.get_state = AsyncMock(return_value={})
             mock_api.start_mqtt_listener = AsyncMock()
-            mock_api.devices = {"dev1": "obj1"} # Initial known devices
+            mock_api.devices = {"dev1": "obj1"}  # Initial known devices
             MockApi.return_value = mock_api
 
             mock_coordinator = MagicMock()
@@ -274,7 +276,7 @@ class TestAsyncSetupEntry:
             hass.config_entries = MagicMock()
             hass.config_entries.async_reload = AsyncMock()
             hass.config_entries.async_forward_entry_setups = AsyncMock()
-            hass.async_create_task = MagicMock(side_effect=lambda x: x) # sync helper
+            hass.async_create_task = MagicMock(side_effect=lambda x: x)  # sync helper
 
             await async_setup_entry(hass, mock_entry)
 
@@ -306,7 +308,6 @@ class TestAsyncSetupEntry:
     @pytest.mark.asyncio
     async def test_stale_device_removal(self, hass, mock_entry):
         """Test that stale devices are removed from device registry."""
-        from custom_components.mysa import async_setup_entry
 
         with (
             patch("custom_components.mysa.MysaApi") as MockApi,
@@ -359,6 +360,7 @@ class TestAsyncSetupEntry:
 # async_remove_config_entry_device Tests
 # ===========================================================================
 
+
 class TestAsyncRemoveConfigEntryDevice:
     """Test async_remove_config_entry_device function."""
 
@@ -379,7 +381,9 @@ class TestAsyncRemoveConfigEntryDevice:
         mock_device_entry = MagicMock()
         mock_device_entry.identifiers = {(DOMAIN, "dev2")}  # Not in cloud
 
-        result = await async_remove_config_entry_device(hass, mock_entry, mock_device_entry)
+        result = await async_remove_config_entry_device(
+            hass, mock_entry, mock_device_entry
+        )
         assert result is True  # Allow removal
 
     @pytest.mark.asyncio
@@ -399,7 +403,9 @@ class TestAsyncRemoveConfigEntryDevice:
         mock_device_entry = MagicMock()
         mock_device_entry.identifiers = {(DOMAIN, "dev1")}  # Still in cloud
 
-        result = await async_remove_config_entry_device(hass, mock_entry, mock_device_entry)
+        result = await async_remove_config_entry_device(
+            hass, mock_entry, mock_device_entry
+        )
         assert result is False  # Don't allow removal
 
     @pytest.mark.asyncio
@@ -413,7 +419,9 @@ class TestAsyncRemoveConfigEntryDevice:
         mock_device_entry = MagicMock()
         mock_device_entry.identifiers = {(DOMAIN, "dev1")}
 
-        result = await async_remove_config_entry_device(hass, mock_entry, mock_device_entry)
+        result = await async_remove_config_entry_device(
+            hass, mock_entry, mock_device_entry
+        )
         assert result is True  # Allow removal
 
     @pytest.mark.asyncio
@@ -430,13 +438,16 @@ class TestAsyncRemoveConfigEntryDevice:
         mock_device_entry = MagicMock()
         mock_device_entry.identifiers = {(DOMAIN, "dev1")}
 
-        result = await async_remove_config_entry_device(hass, mock_entry, mock_device_entry)
+        result = await async_remove_config_entry_device(
+            hass, mock_entry, mock_device_entry
+        )
         assert result is True  # Allow removal
 
 
 # ===========================================================================
 # async_options_updated Tests
 # ===========================================================================
+
 
 class TestAsyncOptionsUpdated:
     """Test async_options_updated function."""
@@ -465,9 +476,11 @@ class TestAsyncOptionsUpdated:
         assert mock_api.upgraded_lite_devices == ["device1", "device2"]
         assert mock_api.estimated_max_current == 20.0
 
+
 # ===========================================================================
 # async_unload_entry Tests
 # ===========================================================================
+
 
 class TestAsyncUnloadEntry:
     """Test async_unload_entry function."""
@@ -482,7 +495,6 @@ class TestAsyncUnloadEntry:
     @pytest.mark.asyncio
     async def test_unload_entry_success(self, hass, mock_entry):
         """Test successful unload entry."""
-        from custom_components.mysa import async_unload_entry
 
         mock_api = MagicMock()
         mock_api.stop_mqtt_listener = AsyncMock()
@@ -508,7 +520,6 @@ class TestAsyncUnloadEntry:
     @pytest.mark.asyncio
     async def test_unload_entry_no_data(self, hass, mock_entry):
         """Test unload entry when no data exists."""
-        from custom_components.mysa import async_unload_entry
 
         # No setup done implies no runtime_data or None
         mock_entry.runtime_data = None
@@ -523,7 +534,6 @@ class TestAsyncUnloadEntry:
     @pytest.mark.asyncio
     async def test_unload_entry_no_api(self, hass, mock_entry):
         """Test unload entry when API doesn't exist."""
-        from custom_components.mysa import async_unload_entry
 
         mock_data = MagicMock(spec=MysaData)
         mock_data.api = None
@@ -539,7 +549,6 @@ class TestAsyncUnloadEntry:
     @pytest.mark.asyncio
     async def test_unload_entry_failure(self, hass, mock_entry):
         """Test unload entry when platform unload fails."""
-        from custom_components.mysa import async_unload_entry
 
         mock_api = MagicMock()
         mock_api.stop_mqtt_listener = AsyncMock()
@@ -559,9 +568,11 @@ class TestAsyncUnloadEntry:
         # runtime_data remains
         assert mock_entry.runtime_data is not None
 
+
 # ===========================================================================
 # Coordinator Update Tests
 # ===========================================================================
+
 
 class TestCoordinatorUpdate:
     """Test coordinator update function."""
@@ -569,7 +580,6 @@ class TestCoordinatorUpdate:
     @pytest.mark.asyncio
     async def test_coordinator_update_failure(self, hass):
         """Test coordinator update raises ConfigEntryNotReady on exception."""
-        from custom_components.mysa import async_setup_entry
         from homeassistant.exceptions import ConfigEntryNotReady
 
         mock_entry = MagicMock()

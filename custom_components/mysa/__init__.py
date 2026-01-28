@@ -1,21 +1,22 @@
 """The Mysa integration."""
+
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Dict
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers import issue_registry as ir, device_registry as dr
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import DOMAIN, PLATFORMS
 from .mysa_api import MysaApi
-
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -23,8 +24,10 @@ _LOGGER = logging.getLogger(__name__)
 @dataclass
 class MysaData:
     """Class to hold Mysa data."""
+
     api: MysaApi
     coordinator: DataUpdateCoordinator[Any]
+
 
 # pylint: disable=too-many-locals,too-many-statements
 
@@ -39,7 +42,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry[MysaData]) -
     first_refresh = True
     unavailable_logged = False
 
-    async def async_update_data() -> Dict[str, Any]:
+    async def async_update_data() -> dict[str, Any]:
         nonlocal first_refresh, unavailable_logged
         try:
             data = await api.get_state()
@@ -51,7 +54,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry[MysaData]) -
         except Exception as e:
             if not unavailable_logged:
                 if first_refresh:
-                    _LOGGER.error("Error communicating with API during initial setup: %s", e)
+                    _LOGGER.error(
+                        "Error communicating with API during initial setup: %s", e
+                    )
                 else:
                     _LOGGER.warning("Error communicating with API: %s", e)
                 unavailable_logged = True
@@ -87,7 +92,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry[MysaData]) -
         estimated_max_current=estimated_max_current,
         wattages=wattages,
         simulated_energy=simulated_energy,
-        websession=session
+        websession=session,
     )
 
     async def async_push_update() -> None:
@@ -133,7 +138,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry[MysaData]) -
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     # Monitor for device changes during polling and remove stale devices
-    previous_devices: set[str] = set(coordinator.data.keys()) if coordinator.data else set()
+    previous_devices: set[str] = (
+        set(coordinator.data.keys()) if coordinator.data else set()
+    )
 
     def check_device_changes() -> None:
         """Check if devices were added or removed and handle stale device removal."""
@@ -145,7 +152,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry[MysaData]) -
         # Handle new devices - reload to add them
         new_devices = current_devices - previous_devices
         if new_devices:
-            _LOGGER.info("New devices detected: %s. Reloading integration.", new_devices)
+            _LOGGER.info(
+                "New devices detected: %s. Reloading integration.", new_devices
+            )
             hass.async_create_task(hass.config_entries.async_reload(entry.entry_id))
             return
 
@@ -154,7 +163,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry[MysaData]) -
         if stale_devices:
             device_registry = dr.async_get(hass)
             for device_id in stale_devices:
-                device = device_registry.async_get_device(identifiers={(DOMAIN, device_id)})
+                device = device_registry.async_get_device(
+                    identifiers={(DOMAIN, device_id)}
+                )
                 if device:
                     _LOGGER.info("Removing stale device: %s", device_id)
                     device_registry.async_update_device(
@@ -172,16 +183,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry[MysaData]) -
     return True
 
 
-async def async_options_updated(_hass: HomeAssistant, entry: ConfigEntry[MysaData]) -> None:
+async def async_options_updated(
+    _hass: HomeAssistant, entry: ConfigEntry[MysaData]
+) -> None:
     """Handle options update."""
     api = entry.runtime_data.api
     api.upgraded_lite_devices = entry.options.get("upgraded_lite_devices", [])
     api.estimated_max_current = entry.options.get("estimated_max_current", 0)
     api.simulated_energy = entry.options.get("simulated_energy", False)
-    api.wattages = {k[8:]: v for k, v in entry.options.items() if k.startswith("wattage_")}
+    api.wattages = {
+        k[8:]: v for k, v in entry.options.items() if k.startswith("wattage_")
+    }
 
-    _LOGGER.info("Options updated: upgraded_lite_devices=%s, wattages=%s, simulated_energy=%s",
-                 api.upgraded_lite_devices, api.wattages, api.simulated_energy)
+    _LOGGER.info(
+        "Options updated: upgraded_lite_devices=%s, wattages=%s, simulated_energy=%s",
+        api.upgraded_lite_devices,
+        api.wattages,
+        api.simulated_energy,
+    )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry[MysaData]) -> bool:

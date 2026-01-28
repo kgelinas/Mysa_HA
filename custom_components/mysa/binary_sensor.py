@@ -1,17 +1,21 @@
 """Binary sensor platform for Mysa."""
+
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 from homeassistant.components.binary_sensor import (
-    BinarySensorEntity,
     BinarySensorDeviceClass,
+    BinarySensorEntity,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
+from homeassistant.helpers.update_coordinator import (
+    CoordinatorEntity,
+    DataUpdateCoordinator,
+)
 
 from . import MysaData
 from .device import MysaDeviceLogic
@@ -40,7 +44,7 @@ async def async_setup_entry(
 
 
 class MysaConnectionSensor(
-    BinarySensorEntity, CoordinatorEntity[DataUpdateCoordinator[Dict[str, Any]]]
+    BinarySensorEntity, CoordinatorEntity[DataUpdateCoordinator[dict[str, Any]]]
 ):
     """Representation of a Mysa Connection Status sensor."""
 
@@ -50,9 +54,9 @@ class MysaConnectionSensor(
 
     def __init__(
         self,
-        coordinator: DataUpdateCoordinator[Dict[str, Any]],
+        coordinator: DataUpdateCoordinator[dict[str, Any]],
         device_id: str,
-        device_data: Dict[str, Any]
+        device_data: dict[str, Any],
     ) -> None:
         """Initialize."""
         super().__init__(coordinator)
@@ -64,11 +68,17 @@ class MysaConnectionSensor(
     @property
     def device_info(self) -> DeviceInfo:
         """Return device info."""
-        state = self.coordinator.data.get(self._device_id) if self.coordinator.data else None
-        return MysaDeviceLogic.get_device_info(self._device_id, self._device_data, state)
+        state = (
+            self.coordinator.data.get(self._device_id)
+            if self.coordinator.data
+            else None
+        )
+        return MysaDeviceLogic.get_device_info(
+            self._device_id, self._device_data, state
+        )
 
     @property
-    def is_on(self) -> Optional[bool]:
+    def is_on(self) -> bool | None:
         """Return true if the device is connected."""
         if not self.coordinator.data:
             return False

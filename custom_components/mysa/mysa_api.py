@@ -1,23 +1,29 @@
+"""Mysa API Module.
+
+Handles high-level API interactions.
+"""
+
 import logging
 import time
-from typing import Any, Dict, List, Optional, cast, Callable
+from collections.abc import Callable
+from typing import Any, cast
 
 from aiohttp import ClientSession
 
-from .mysa_auth import BASE_URL
 from .client import MysaClient
-from .realtime import MysaRealtime
-from .device import MysaDeviceLogic
 from .const import (
     AC_FAN_MODES_REVERSE,
-    AC_SWING_MODES_REVERSE,
-    AC_MODE_OFF,
-    AC_MODE_COOL,
-    AC_MODE_HEAT,
     AC_MODE_AUTO,
+    AC_MODE_COOL,
     AC_MODE_DRY,
     AC_MODE_FAN_ONLY,
+    AC_MODE_HEAT,
+    AC_MODE_OFF,
+    AC_SWING_MODES_REVERSE,
 )
+from .device import MysaDeviceLogic
+from .mysa_auth import BASE_URL
+from .realtime import MysaRealtime
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,12 +39,12 @@ class MysaApi:
         username: str,
         password: str,
         hass: Any,  # Changed from HomeAssistant
-        coordinator_callback: Optional[Callable[[], Any]] = None,
-        upgraded_lite_devices: Optional[List[str]] = None,
+        coordinator_callback: Callable[[], Any] | None = None,
+        upgraded_lite_devices: list[str] | None = None,
         estimated_max_current: int = 0,
-        wattages: Optional[Dict[str, int]] = None,
+        wattages: dict[str, int] | None = None,
         simulated_energy: bool = False,
-        websession: Optional[ClientSession] = None
+        websession: ClientSession | None = None,
     ) -> None:
         """Initialize the API."""
         self.hass = hass
@@ -47,8 +53,8 @@ class MysaApi:
         self.estimated_max_current = estimated_max_current
         self.wattages = wattages or {}
         self.simulated_energy = simulated_energy
-        self._metadata_requested: Dict[str, float] = {}
-        self._latest_timestamp: Dict[str, int] = {}
+        self._metadata_requested: dict[str, float] = {}
+        self._latest_timestamp: dict[str, int] = {}
 
         # Get websession if not provided
         if websession is None:
@@ -58,8 +64,8 @@ class MysaApi:
             websession = ClientSession()
 
         # State
-        self.states: Dict[str, Any] = {}
-        self._last_command_time: Dict[str, float] = {}  # device_id: timestamp
+        self.states: dict[str, Any] = {}
+        self._last_command_time: dict[str, float] = {}  # device_id: timestamp
 
         # Components
         self.client = MysaClient(hass, username, password, websession)
@@ -69,7 +75,7 @@ class MysaApi:
         self.realtime = MysaRealtime(
             hass,
             get_signed_url_callback=self.client.get_signed_mqtt_url,
-            on_update_callback=self._on_mqtt_update
+            on_update_callback=self._on_mqtt_update,
         )
 
     # Properties delegating to components
@@ -84,16 +90,16 @@ class MysaApi:
         return self.client.password
 
     @property
-    def devices(self) -> Dict[str, Any]:
+    def devices(self) -> dict[str, Any]:
         """Return devices."""
         return self.client.devices
 
     @devices.setter
-    def devices(self, value: Dict[str, Any]) -> None:
+    def devices(self, value: dict[str, Any]) -> None:
         self.client.devices = value
 
     @property
-    def homes(self) -> List[Any]:
+    def homes(self) -> list[Any]:
         """Return homes."""
         return self.client.homes
 
@@ -112,7 +118,7 @@ class MysaApi:
         """Authenticate with Mysa."""
         return await self.client.authenticate(use_cache=use_cache)
 
-    async def get_devices(self) -> Dict[str, Any]:
+    async def get_devices(self) -> dict[str, Any]:
         """Get devices."""
         devices = await self.client.get_devices()
         # Update realtime subscription list
@@ -123,11 +129,11 @@ class MysaApi:
         """Fetch homes and zones."""
         await self.client.fetch_homes()
 
-    async def fetch_firmware_info(self, device_id: str) -> Optional[Dict[str, Any]]:
+    async def fetch_firmware_info(self, device_id: str) -> dict[str, Any] | None:
         """Fetch firmware update info."""
         return await self.client.fetch_firmware_info(device_id)
 
-    def get_electricity_rate(self, device_id: str) -> Optional[float]:
+    def get_electricity_rate(self, device_id: str) -> float | None:
         """Get electricity rate for a device.
 
         Checks for a custom_erate override in the mysa_extended integration first.
@@ -153,7 +159,7 @@ class MysaApi:
 
     # State Management
 
-    async def get_state(self) -> Dict[str, Any]:
+    async def get_state(self) -> dict[str, Any]:
         """Get full state of all devices (HTTP merge)."""
         # Fetch fresh HTTP state
         new_states = await self.client.get_state()
@@ -164,7 +170,10 @@ class MysaApi:
         return self.states
 
     async def _on_mqtt_update(
-        self, device_id: str, state_update: Dict[str, Any], resolve_safe_id: Optional[bool] = False
+        self,
+        device_id: str,
+        state_update: dict[str, Any],
+        resolve_safe_id: bool | None = False,
     ) -> None:
         """Handle MQTT update callback."""
         if resolve_safe_id:
@@ -177,10 +186,7 @@ class MysaApi:
                     found = True
                     break
             if not found:
-                _LOGGER.debug(
-                    "Unknown device (safe ID: %s), likely stale",
-                    safe_id
-                )
+                _LOGGER.debug("Unknown device (safe ID: %s), likely stale", safe_id)
                 return
 
         # Normalize
@@ -204,7 +210,7 @@ class MysaApi:
         fw_version = current_state.get("FirmwareVersion")
         ip_addr = current_state.get("ip")
 
-        missing_metadata = (not fw_version or fw_version == "None" or not ip_addr)
+        missing_metadata = not fw_version or fw_version == "None" or not ip_addr
 
         if missing_metadata:
             now = time.time()
@@ -212,7 +218,8 @@ class MysaApi:
             if now - last_req > 300:  # 5 minutes
                 _LOGGER.debug(
                     "Metadata (FW/IP) missing for %s, requesting dump (last req: %.0fs ago)...",
-                    device_id, now - last_req
+                    device_id,
+                    now - last_req,
                 )
                 self._metadata_requested[device_id] = now
                 # Use a task to not block the callback
@@ -238,8 +245,8 @@ class MysaApi:
                 "a_sp": target_val,
                 "ACTemp": target_val,
                 "3": target_val,
-                "Timestamp": int(time.time())
-            }
+                "Timestamp": int(time.time()),
+            },
         )
 
         # Trigger UI refresh NOW
@@ -248,12 +255,16 @@ class MysaApi:
 
         # 1. MQTT Command
         device = self.devices.get(device_id)
-        payload_type = MysaDeviceLogic.get_payload_type(device, self.upgraded_lite_devices)
+        payload_type = MysaDeviceLogic.get_payload_type(
+            device, self.upgraded_lite_devices
+        )
 
         body = {
-            "cmd": [{"sp": target_val, "stpt": target_val, "a_sp": target_val, "tm": -1}],
+            "cmd": [
+                {"sp": target_val, "stpt": target_val, "a_sp": target_val, "tm": -1}
+            ],
             "type": payload_type,
-            "ver": 1
+            "ver": 1,
         }
         await self.realtime.send_command(device_id, body, self.client.user_id)
 
@@ -295,8 +306,8 @@ class MysaApi:
                 "TstatMode": mode_val,
                 "ACMode": mode_val,
                 "2": mode_val,
-                "Timestamp": int(time.time())
-            }
+                "Timestamp": int(time.time()),
+            },
         )
 
         # Trigger UI refresh NOW
@@ -304,7 +315,9 @@ class MysaApi:
             await self.coordinator_callback()
 
         # 1. MQTT Command
-        payload_type = MysaDeviceLogic.get_payload_type(device, self.upgraded_lite_devices)
+        payload_type = MysaDeviceLogic.get_payload_type(
+            device, self.upgraded_lite_devices
+        )
         body = {"cmd": [{"md": mode_val, "tm": -1}], "type": payload_type, "ver": 1}
         await self.realtime.send_command(device_id, body, self.client.user_id)
 
@@ -318,7 +331,7 @@ class MysaApi:
             "Device": device_id.upper(),
             "EventType": 0,
             "MsgType": 6,
-            "Timestamp": timestamp
+            "Timestamp": timestamp,
         }
         # MsgType 6, wrap=False
         await self.realtime.send_command(
@@ -328,11 +341,7 @@ class MysaApi:
     async def update_request(self, device_id: str) -> None:
         """Request metadata dump (MsgType 7): FW version, IP, Serial, MAC."""
         timestamp = int(time.time())
-        body = {
-            "Device": device_id,
-            "Timestamp": timestamp,
-            "MsgType": 7
-        }
+        body = {"Device": device_id, "Timestamp": timestamp, "MsgType": 7}
         # MsgType 7, wrap=False
         await self.realtime.send_command(
             device_id, body, self.client.user_id, msg_type=7, wrap=False
@@ -354,8 +363,8 @@ class MysaApi:
                 "alk": lock_val,
                 "lc": lock_val,
                 "ButtonState": lock_val,
-                "Timestamp": int(time.time())
-            }
+                "Timestamp": int(time.time()),
+            },
         )
 
         # Trigger UI refresh NOW
@@ -382,8 +391,8 @@ class MysaApi:
                 "IsThermostatic": enabled,
                 "ecoMode": eco_str,
                 "eco": eco_str,
-                "Timestamp": int(time.time())
-            }
+                "Timestamp": int(time.time()),
+            },
         )
 
         # Trigger UI refresh NOW
@@ -391,7 +400,9 @@ class MysaApi:
             await self.coordinator_callback()
 
         # 1. HTTP Command
-        await self.client.set_device_setting_http(device_id, {"IsThermostatic": enabled})
+        await self.client.set_device_setting_http(
+            device_id, {"IsThermostatic": enabled}
+        )
 
         # 2. Notify Device (Cloud -> Device via MsgType 6)
         await self.notify_settings_changed(device_id)
@@ -401,7 +412,7 @@ class MysaApi:
         """Check if device is an AC unit."""
         return MysaDeviceLogic.is_ac_device(self.devices.get(device_id, {}))
 
-    def get_ac_supported_caps(self, device_id: str) -> Dict[str, Any]:
+    def get_ac_supported_caps(self, device_id: str) -> dict[str, Any]:
         """Get supported capabilities for AC."""
         device = self.devices.get(device_id, {})
         return dict(device.get("SupportedCaps", {}))
@@ -422,8 +433,8 @@ class MysaApi:
                 "px": enabled,
                 "pr": 1 if enabled else 0,
                 "Proximity": enabled,
-                "Timestamp": int(time.time())
-            }
+                "Timestamp": int(time.time()),
+            },
         )
 
         # Trigger UI refresh NOW
@@ -442,11 +453,7 @@ class MysaApi:
         self._last_command_time[device_id] = time.time()
         _LOGGER.debug("set_sensor_mode(%s, %s) - Optimistic update", device_id, mode)
         self._update_state_cache(
-            device_id,
-            {
-                "SensorMode": mode,
-                "Timestamp": int(time.time())
-            }
+            device_id, {"SensorMode": mode, "Timestamp": int(time.time())}
         )
 
         # Trigger UI refresh NOW
@@ -457,7 +464,9 @@ class MysaApi:
         # Map internal mode (1=Floor, 0=Ambient) to Mysa values (3=Floor, 5=Ambient)
         # Note: We use TrackedSensor as the key per user instruction
         payload_val = 3 if mode == 1 else 5
-        await self.client.set_device_setting_http(device_id, {"TrackedSensor": payload_val})
+        await self.client.set_device_setting_http(
+            device_id, {"TrackedSensor": payload_val}
+        )
 
         # 2. Notify Device (Cloud -> Device via MsgType 6)
         await self.notify_settings_changed(device_id)
@@ -471,8 +480,8 @@ class MysaApi:
             {
                 "AutoBrightness": enabled,
                 "ab": 1 if enabled else 0,
-                "Timestamp": int(time.time())
-            }
+                "Timestamp": int(time.time()),
+            },
         )
         self._update_brightness_cache(device_id, "a_b", 1 if enabled else 0)
 
@@ -481,7 +490,9 @@ class MysaApi:
             await self.coordinator_callback()
 
         # 1. HTTP Command
-        await self.client.set_device_setting_http(device_id, {"AutoBrightness": enabled})
+        await self.client.set_device_setting_http(
+            device_id, {"AutoBrightness": enabled}
+        )
 
         # 2. Notify Device (Cloud -> Device via MsgType 6)
         await self.notify_settings_changed(device_id)
@@ -493,7 +504,7 @@ class MysaApi:
         self._update_brightness_cache(device_id, "i_br", value)
         self._update_state_cache(
             device_id,
-            {"MinBrightness": value, "mnbr": value, "Timestamp": int(time.time())}
+            {"MinBrightness": value, "mnbr": value, "Timestamp": int(time.time())},
         )
 
         # Trigger UI refresh NOW
@@ -513,7 +524,7 @@ class MysaApi:
         self._update_brightness_cache(device_id, "a_br", value)
         self._update_state_cache(
             device_id,
-            {"MaxBrightness": value, "mxbr": value, "Timestamp": int(time.time())}
+            {"MaxBrightness": value, "mxbr": value, "Timestamp": int(time.time())},
         )
 
         # Trigger UI refresh NOW
@@ -541,8 +552,8 @@ class MysaApi:
                 "FanSpeed": {"v": fan_val},
                 "fn": fan_val,
                 "4": fan_val,
-                "Timestamp": int(time.time())
-            }
+                "Timestamp": int(time.time()),
+            },
         )
 
         # Trigger UI refresh NOW
@@ -551,7 +562,9 @@ class MysaApi:
 
         # 1. MQTT Command
         device = self.devices.get(device_id)
-        payload_type = MysaDeviceLogic.get_payload_type(device, self.upgraded_lite_devices)
+        payload_type = MysaDeviceLogic.get_payload_type(
+            device, self.upgraded_lite_devices
+        )
         body = {"cmd": [{"fn": fan_val, "tm": -1}], "type": payload_type, "ver": 1}
         await self.realtime.send_command(device_id, body, self.client.user_id)
 
@@ -571,8 +584,8 @@ class MysaApi:
                 "SwingState": {"v": swing_val},
                 "ss": swing_val,
                 "5": swing_val,
-                "Timestamp": int(time.time())
-            }
+                "Timestamp": int(time.time()),
+            },
         )
 
         # Trigger UI refresh NOW
@@ -581,7 +594,9 @@ class MysaApi:
 
         # 1. MQTT Command
         device = self.devices.get(device_id)
-        payload_type = MysaDeviceLogic.get_payload_type(device, self.upgraded_lite_devices)
+        payload_type = MysaDeviceLogic.get_payload_type(
+            device, self.upgraded_lite_devices
+        )
         body = {"cmd": [{"ss": swing_val, "tm": -1}], "type": payload_type, "ver": 1}
         await self.realtime.send_command(device_id, body, self.client.user_id)
 
@@ -596,8 +611,8 @@ class MysaApi:
             {
                 "SwingStateHorizontal": {"v": position},
                 "ssh": position,
-                "Timestamp": int(time.time())
-            }
+                "Timestamp": int(time.time()),
+            },
         )
 
         # Trigger UI refresh NOW
@@ -606,7 +621,9 @@ class MysaApi:
 
         # 1. MQTT Command
         device = self.devices.get(device_id)
-        payload_type = MysaDeviceLogic.get_payload_type(device, self.upgraded_lite_devices)
+        payload_type = MysaDeviceLogic.get_payload_type(
+            device, self.upgraded_lite_devices
+        )
         body = {"cmd": [{"ssh": position, "tm": -1}], "type": payload_type, "ver": 1}
         await self.realtime.send_command(device_id, body, self.client.user_id)
 
@@ -622,7 +639,7 @@ class MysaApi:
         _LOGGER.warning("Initiating Magic Upgrade for %s", device_id)
         url = f"{BASE_URL}/devices/{device_id}"
         try:
-            await self.client.async_request("POST", url, json={'Model': 'BB-V2-0'})
+            await self.client.async_request("POST", url, json={"Model": "BB-V2-0"})
             return True
         except Exception as e:
             _LOGGER.error("Magic Upgrade failed: %s", e)
@@ -637,7 +654,7 @@ class MysaApi:
         _LOGGER.warning("Initiating Magic Revert for %s", device_id)
         url = f"{BASE_URL}/devices/{device_id}"
         try:
-            await self.client.async_request("POST", url, json={'Model': 'BB-V2-0-L'})
+            await self.client.async_request("POST", url, json={"Model": "BB-V2-0-L"})
             return True
         except Exception as e:
             _LOGGER.error("Magic Revert failed: %s", e)
@@ -655,7 +672,7 @@ class MysaApi:
 
         _LOGGER.warning(
             "Sending Killer Ping to %s - Device will restart into pairing mode!",
-            device_id
+            device_id,
         )
 
         timestamp = int(time.time())
@@ -663,7 +680,7 @@ class MysaApi:
             "Device": device_id.upper(),
             "Timestamp": timestamp,
             "MsgType": 5,
-            "EchoID": 1
+            "EchoID": 1,
         }
 
         try:
@@ -677,9 +694,9 @@ class MysaApi:
 
     # Helpers
 
-    def _extract_timestamp(self, updates: Dict[str, Any]) -> Optional[int]:
+    def _extract_timestamp(self, updates: dict[str, Any]) -> int | None:
         """Extract and validate timestamp from updates."""
-        ts = updates.get('Timestamp') or updates.get('time')
+        ts = updates.get("Timestamp") or updates.get("time")
         if ts is not None:
             try:
                 return int(ts)
@@ -688,7 +705,7 @@ class MysaApi:
         return None
 
     def _update_state_cache(
-        self, device_id: str, updates: Dict[str, Any], filter_stale: bool = False
+        self, device_id: str, updates: dict[str, Any], filter_stale: bool = False
     ) -> None:
         if device_id not in self.states:
             self.states[device_id] = {}
@@ -711,11 +728,33 @@ class MysaApi:
         # Filtering logic
         if incoming_ts is None and filter_stale and (now - last_cmd_time < 90):
             stale_keys = {
-                'Mode', 'md', 'TstatMode', 'SetPoint', 'sp', 'stpt',
-                'Lock', 'lc', 'lk', 'ButtonState',
-                'Brightness', 'br', 'MinBrightness', 'MaxBrightness',
-                'AutoBrightness', 'ab', 'ProximityMode', 'pr', 'Proximity', 'px',
-                'ACState', 'ac', '1', '2', '3', '4', '5'
+                "Mode",
+                "md",
+                "TstatMode",
+                "SetPoint",
+                "sp",
+                "stpt",
+                "Lock",
+                "lc",
+                "lk",
+                "ButtonState",
+                "Brightness",
+                "br",
+                "MinBrightness",
+                "MaxBrightness",
+                "AutoBrightness",
+                "ab",
+                "ProximityMode",
+                "pr",
+                "Proximity",
+                "px",
+                "ACState",
+                "ac",
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
             }
             updates = {k: v for k, v in updates.items() if k not in stale_keys}
 
@@ -731,12 +770,14 @@ class MysaApi:
                     self.states[device_id]["MaxBrightness"] = br_settings["a_br"]
                 if "a_b" in br_settings:
                     self.states[device_id]["AutoBrightness"] = br_settings["a_b"] == 1
-        elif any(k in updates for k in ["MinBrightness", "MaxBrightness", "AutoBrightness"]):
+        elif any(
+            k in updates for k in ["MinBrightness", "MaxBrightness", "AutoBrightness"]
+        ):
             # If we got top-level keys but NO BrightnessSettings, ensure we don't
             # loose them if we build a BrightnessSettings object later.
             pass  # They are already updated in the state above.
 
-    def _get_brightness_object(self, device_id: str) -> Dict[str, int]:
+    def _get_brightness_object(self, device_id: str) -> dict[str, int]:
         """Build the brightness settings object for MQTT commands."""
         state = self.states.get(device_id, {})
         br = state.get("BrightnessSettings")
@@ -773,26 +814,35 @@ class MysaApi:
 
         # Always use BrightnessSettings for the config object
         if "BrightnessSettings" not in self.states[device_id]:
-            self.states[device_id]["BrightnessSettings"] = self._get_brightness_object(device_id)
+            self.states[device_id]["BrightnessSettings"] = self._get_brightness_object(
+                device_id
+            )
 
-        br_data = cast(Dict[str, Any], self.states[device_id]["BrightnessSettings"])
+        br_data = cast(dict[str, Any], self.states[device_id]["BrightnessSettings"])
         if isinstance(br_data, dict):
             br_data[key] = value
 
     # MQTT Lifecycle
     async def start_mqtt_listener(self) -> None:
-        """Start MQTT listener."""
+        """Start MQTT listener (non-blocking)."""
         # Ensure we have device list
         self.realtime.set_devices(list(self.devices.keys()))
         await self.realtime.start()
 
+        # Create background task for waiting logic to avoid blocking startup
+        self.hass.async_create_task(self._wait_and_refresh_mqtt())
+
+    async def _wait_and_refresh_mqtt(self) -> None:
+        """Wait for MQTT connection and request initial updates."""
         # Wait for connection and force refresh
         if await self.realtime.wait_until_connected(timeout=35.0):
-            _LOGGER.info("MQTT connected, requesting initial update for all devices")
+            _LOGGER.debug("MQTT connected, requesting initial update for all devices")
             for device_id in self.devices:
                 await self.update_request(device_id)
         else:
-            _LOGGER.warning("MQTT connection timed out during startup, initial update skipped")
+            _LOGGER.warning(
+                "MQTT connection timed out during startup, initial update skipped"
+            )
 
     async def stop_mqtt_listener(self) -> None:
         """Stop MQTT listener."""

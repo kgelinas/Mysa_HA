@@ -1,12 +1,11 @@
-"""
-Entity Files Coverage Tests.
+"""Entity Files Coverage Tests.
 
 Tests for number.py, switch.py, select.py, update.py:
 async_setup_entry, entity actions, and edge cases.
 """
 
-import sys
 import os
+import sys
 
 # Add project root to path for imports
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -14,15 +13,16 @@ ROOT_DIR = os.path.dirname(TEST_DIR)
 sys.path.insert(0, ROOT_DIR)
 
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-# Module-level imports after path setup
-from custom_components.mysa.const import DOMAIN
 from custom_components.mysa import MysaData
 
+# Module-level imports after path setup
+from custom_components.mysa.const import DOMAIN
 
 # ===========================================================================
 # Fixtures
@@ -52,7 +52,11 @@ def mock_coordinator(hass, mock_entry):
         }
 
     return DataUpdateCoordinator(
-        hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+        hass,
+        MagicMock(),
+        name="test",
+        update_method=async_update,
+        config_entry=mock_entry,
     )
 
 
@@ -697,7 +701,11 @@ class TestNumberEdgeCases:
             return {"device1": {"Zone": "zone123", "MinBrightness": 20}}
 
         return DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=MagicMock(entry_id="test")
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=MagicMock(entry_id="test"),
         )
 
     @pytest.mark.asyncio
@@ -741,13 +749,18 @@ class TestNumberEdgeCases:
     async def test_pending_expired(self, hass, mock_device_data, mock_api, mock_entry):
         """Test pending value expires after 60 seconds."""
         import time
+
         from custom_components.mysa.number import MysaMinBrightnessNumber
 
         async def async_update():
             return {"device1": {"MinBrightness": 15}}
 
         coordinator = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         await coordinator.async_refresh()
 
@@ -773,7 +786,11 @@ class TestNumberEdgeCases:
             return {}  # No device data
 
         coordinator = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         await coordinator.async_refresh()
 
@@ -834,7 +851,11 @@ class TestSwitchEdgeCases:
             return {}  # No device data
 
         coordinator = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         await coordinator.async_refresh()
 
@@ -897,7 +918,11 @@ class TestSelectEdgeCases:
             return {"ac_device": {"SwingStateHorizontal": {"v": 1}}}  # Dict format
 
         coordinator = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         await coordinator.async_refresh()
 
@@ -960,13 +985,18 @@ class TestFinalEdgeCases:
     ):
         """Test pending value returned when still valid (<60s)."""
         import time
+
         from custom_components.mysa.number import MysaMinBrightnessNumber
 
         async def async_update():
             return {"device1": {"MinBrightness": 15}}
 
         coordinator = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         await coordinator.async_refresh()
 
@@ -1009,7 +1039,11 @@ class TestFinalEdgeCases:
             return {}  # No device data
 
         coordinator = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         await coordinator.async_refresh()
 
@@ -1030,7 +1064,11 @@ class TestFinalEdgeCases:
             return {"ac_device": {"SomeOtherKey": 123}}  # No SwingStateHorizontal
 
         coordinator = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         await coordinator.async_refresh()
 
@@ -1067,7 +1105,11 @@ class TestFinalEdgeCases:
             return {"device1": {"SomeOtherKey": 123}}  # No Lock key
 
         coordinator = DataUpdateCoordinator(
-            hass, MagicMock(), name="test", update_method=async_update, config_entry=mock_entry
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=mock_entry,
         )
         await coordinator.async_refresh()
 
@@ -1695,8 +1737,6 @@ class TestMysaSensorEntities:
         value = entity.native_value
         assert value == 50
 
-
-
     @pytest.mark.asyncio
     async def test_simulated_current_sensor_init(
         self, hass, mock_coordinator, mock_device_data, mock_entry, mock_api
@@ -1789,13 +1829,11 @@ ROOT_DIR = os.path.dirname(TEST_DIR)
 sys.path.insert(0, ROOT_DIR)
 
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
-from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 # Module-level imports after path setup
-from custom_components.mysa.const import DOMAIN
 
 
 class TestDeviceRegistry:
@@ -2068,8 +2106,7 @@ ROOT_DIR = os.path.dirname(TEST_DIR)
 sys.path.insert(0, ROOT_DIR)
 
 import pytest
-from unittest.mock import MagicMock
-from homeassistant.components.climate import HVACMode, ClimateEntityFeature
+from homeassistant.components.climate import ClimateEntityFeature, HVACMode
 
 
 class TestDeviceInfo:
@@ -2188,7 +2225,8 @@ class TestClimateEntityAsync:
     @pytest.mark.asyncio
     async def test_set_temperature_mocked(self, hass):
         """Test MysaClimate.async_set_temperature with mocked API."""
-        from unittest.mock import patch, AsyncMock
+        from unittest.mock import AsyncMock
+
         from custom_components.mysa.climate import MysaClimate
 
         with patch("custom_components.mysa.climate.CoordinatorEntity.__init__"):
@@ -2213,7 +2251,8 @@ class TestClimateEntityAsync:
     @pytest.mark.asyncio
     async def test_set_hvac_mode_mocked(self, hass):
         """Test MysaClimate.async_set_hvac_mode with mocked API."""
-        from unittest.mock import patch, AsyncMock
+        from unittest.mock import AsyncMock
+
         from custom_components.mysa.climate import MysaClimate
 
         with patch("custom_components.mysa.climate.CoordinatorEntity.__init__"):
@@ -2235,15 +2274,20 @@ class TestClimateEntityAsync:
 
             mock_api.set_hvac_mode.assert_called_once()
 
+
 class TestSwitchExceptions:
     """Test exception handling for switches."""
 
     @pytest.mark.asyncio
-    async def test_lock_switch_exception(self, hass, mock_coordinator, mock_device_data, mock_api, mock_entry):
+    async def test_lock_switch_exception(
+        self, hass, mock_coordinator, mock_device_data, mock_api, mock_entry
+    ):
         """Test MysaLockSwitch exception handling."""
         from custom_components.mysa.switch import MysaLockSwitch
 
-        entity = MysaLockSwitch(mock_coordinator, "device1", mock_device_data, mock_api, mock_entry)
+        entity = MysaLockSwitch(
+            mock_coordinator, "device1", mock_device_data, mock_api, mock_entry
+        )
         entity.async_write_ha_state = MagicMock()
 
         # Turn On Exception
@@ -2261,11 +2305,15 @@ class TestSwitchExceptions:
         assert entity._pending_state is None
 
     @pytest.mark.asyncio
-    async def test_auto_brightness_switch_exception(self, hass, mock_coordinator, mock_device_data, mock_api, mock_entry):
+    async def test_auto_brightness_switch_exception(
+        self, hass, mock_coordinator, mock_device_data, mock_api, mock_entry
+    ):
         """Test MysaAutoBrightnessSwitch exception handling."""
         from custom_components.mysa.switch import MysaAutoBrightnessSwitch
 
-        entity = MysaAutoBrightnessSwitch(mock_coordinator, "device1", mock_device_data, mock_api, mock_entry)
+        entity = MysaAutoBrightnessSwitch(
+            mock_coordinator, "device1", mock_device_data, mock_api, mock_entry
+        )
         entity.async_write_ha_state = MagicMock()
 
         # Turn On Exception
@@ -2283,11 +2331,15 @@ class TestSwitchExceptions:
         assert entity._pending_state is None
 
     @pytest.mark.asyncio
-    async def test_proximity_switch_exception(self, hass, mock_coordinator, mock_device_data, mock_api, mock_entry):
+    async def test_proximity_switch_exception(
+        self, hass, mock_coordinator, mock_device_data, mock_api, mock_entry
+    ):
         """Test MysaProximitySwitch exception handling."""
         from custom_components.mysa.switch import MysaProximitySwitch
 
-        entity = MysaProximitySwitch(mock_coordinator, "device1", mock_device_data, mock_api, mock_entry)
+        entity = MysaProximitySwitch(
+            mock_coordinator, "device1", mock_device_data, mock_api, mock_entry
+        )
         entity.async_write_ha_state = MagicMock()
 
         # Turn On Exception
@@ -2305,11 +2357,15 @@ class TestSwitchExceptions:
         assert entity._pending_state is None
 
     @pytest.mark.asyncio
-    async def test_climate_plus_switch_exception(self, hass, mock_coordinator, mock_ac_device_data, mock_api, mock_entry):
+    async def test_climate_plus_switch_exception(
+        self, hass, mock_coordinator, mock_ac_device_data, mock_api, mock_entry
+    ):
         """Test MysaClimatePlusSwitch exception handling."""
         from custom_components.mysa.switch import MysaClimatePlusSwitch
 
-        entity = MysaClimatePlusSwitch(mock_coordinator, "ac_device", mock_ac_device_data, mock_api, mock_entry)
+        entity = MysaClimatePlusSwitch(
+            mock_coordinator, "ac_device", mock_ac_device_data, mock_api, mock_entry
+        )
         entity.async_write_ha_state = MagicMock()
 
         # Turn On Exception
@@ -2325,16 +2381,21 @@ class TestSwitchExceptions:
             await entity.async_turn_off()
         assert excinfo.value.translation_key == "set_climate_plus_failed"
         assert entity._pending_state is None
+
 
 class TestNumberExceptions:
     """Test exception handling for number entities."""
 
     @pytest.mark.asyncio
-    async def test_min_brightness_exception(self, hass, mock_coordinator, mock_device_data, mock_api, mock_entry):
+    async def test_min_brightness_exception(
+        self, hass, mock_coordinator, mock_device_data, mock_api, mock_entry
+    ):
         """Test MysaMinBrightnessNumber exception handling."""
         from custom_components.mysa.number import MysaMinBrightnessNumber
 
-        entity = MysaMinBrightnessNumber(mock_coordinator, "device1", mock_device_data, mock_api, mock_entry)
+        entity = MysaMinBrightnessNumber(
+            mock_coordinator, "device1", mock_device_data, mock_api, mock_entry
+        )
         entity.async_write_ha_state = MagicMock()
 
         # Set Value Exception
@@ -2345,11 +2406,15 @@ class TestNumberExceptions:
         assert entity._pending_value is None
 
     @pytest.mark.asyncio
-    async def test_max_brightness_exception(self, hass, mock_coordinator, mock_device_data, mock_api, mock_entry):
+    async def test_max_brightness_exception(
+        self, hass, mock_coordinator, mock_device_data, mock_api, mock_entry
+    ):
         """Test MysaMaxBrightnessNumber exception handling."""
         from custom_components.mysa.number import MysaMaxBrightnessNumber
 
-        entity = MysaMaxBrightnessNumber(mock_coordinator, "device1", mock_device_data, mock_api, mock_entry)
+        entity = MysaMaxBrightnessNumber(
+            mock_coordinator, "device1", mock_device_data, mock_api, mock_entry
+        )
         entity.async_write_ha_state = MagicMock()
 
         # Set Value Exception

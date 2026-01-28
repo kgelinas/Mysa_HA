@@ -1,15 +1,15 @@
-"""
-Config Flow Coverage Tests.
+"""Config Flow Coverage Tests.
 
 Tests for config_flow.py: ConfigFlow and MysaOptionsFlowHandler
 """
 
-import sys
 import os
-from unittest.mock import MagicMock, AsyncMock, patch, PropertyMock
+import sys
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+
 import pytest
-from homeassistant.const import CONF_USERNAME, CONF_PASSWORD
 from homeassistant import config_entries
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 
 # Add project root to path for imports
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -24,6 +24,7 @@ from tests.conftest import MockConfigEntry
 
 # --- Gap Fill Tests (Merged) ---
 
+
 class TestConfigFlowReauth:
     """Test config_flow.py reauth."""
 
@@ -33,7 +34,7 @@ class TestConfigFlowReauth:
         entry = MockConfigEntry(
             domain=DOMAIN,
             data={CONF_USERNAME: "test@example.com", CONF_PASSWORD: "old_password"},
-            unique_id="test@example.com"
+            unique_id="test@example.com",
         )
         entry.add_to_hass(hass)
 
@@ -68,13 +69,16 @@ class TestConfigFlowReauth:
         entry = MockConfigEntry(
             domain=DOMAIN,
             data={CONF_USERNAME: "test@example.com", CONF_PASSWORD: "old"},
-            unique_id="test@example.com"
+            unique_id="test@example.com",
         )
         entry.add_to_hass(hass)
 
         result = await hass.config_entries.flow.async_init(
             DOMAIN,
-            context={"source": config_entries.SOURCE_REAUTH, "entry_id": entry.entry_id},
+            context={
+                "source": config_entries.SOURCE_REAUTH,
+                "entry_id": entry.entry_id,
+            },
             data=entry.data,
         )
 
@@ -90,7 +94,6 @@ class TestConfigFlowReauth:
             assert result["type"] == "form"
             assert result["errors"]["base"] == "reauth_account_mismatch"
 
-
     @pytest.mark.asyncio
     async def test_reauth_entry_missing(self, hass):
         """Test reauth when entry is missing (line 99)."""
@@ -102,7 +105,9 @@ class TestConfigFlowReauth:
 
         # Mock validate to succeed
         with patch.object(flow, "_validate_credentials"):
-            result = await flow.async_step_reauth_confirm({CONF_USERNAME: "u", CONF_PASSWORD: "p"})
+            result = await flow.async_step_reauth_confirm(
+                {CONF_USERNAME: "u", CONF_PASSWORD: "p"}
+            )
             assert result["type"] == "form"
             assert result["errors"]["base"] == "unknown"
 
@@ -111,7 +116,9 @@ class TestConfigFlowReauth:
         """Test reauth exception handling (lines 113-114)."""
         from custom_components.mysa.config_flow import ConfigFlow
 
-        entry = MockConfigEntry(domain=DOMAIN, data={CONF_USERNAME: "u", CONF_PASSWORD: "p"})
+        entry = MockConfigEntry(
+            domain=DOMAIN, data={CONF_USERNAME: "u", CONF_PASSWORD: "p"}
+        )
         entry.add_to_hass(hass)
 
         flow = ConfigFlow()
@@ -119,10 +126,15 @@ class TestConfigFlowReauth:
         flow.entry = entry
 
         # Mock validate to raise
-        with patch.object(flow, "_validate_credentials", side_effect=Exception("Auth Fail")):
-            result = await flow.async_step_reauth_confirm({CONF_USERNAME: "u", CONF_PASSWORD: "p"})
+        with patch.object(
+            flow, "_validate_credentials", side_effect=Exception("Auth Fail")
+        ):
+            result = await flow.async_step_reauth_confirm(
+                {CONF_USERNAME: "u", CONF_PASSWORD: "p"}
+            )
             assert result["type"] == "form"
             assert result["errors"]["base"] == "invalid_auth"
+
 
 class TestConfigFlowOptionsCoverage:
     """Test options flow coverage."""
@@ -130,7 +142,10 @@ class TestConfigFlowOptionsCoverage:
     @pytest.mark.asyncio
     async def test_options_flow_init_static(self, hass):
         """Test getting options flow."""
-        from custom_components.mysa.config_flow import ConfigFlow, MysaOptionsFlowHandler
+        from custom_components.mysa.config_flow import (
+            ConfigFlow,
+            MysaOptionsFlowHandler,
+        )
 
         entry = MockConfigEntry(domain=DOMAIN, data={}, options={})
         entry.add_to_hass(hass)
@@ -145,9 +160,7 @@ class TestConfigFlowOptionsCoverage:
         from custom_components.mysa.config_flow import ConfigFlow
 
         entry = MockConfigEntry(
-            domain=DOMAIN,
-            data={},
-            options={"zone_name_z1": "Renamed Zone"}
+            domain=DOMAIN, data={}, options={"zone_name_z1": "Renamed Zone"}
         )
         entry.add_to_hass(hass)
 
@@ -158,7 +171,7 @@ class TestConfigFlowOptionsCoverage:
         # Mock API to return zones
         mock_api = MagicMock()
         mock_api.zones = {"z1": "Zone 1"}
-        mock_api.devices = {} # Empty devices to avoid attribute error
+        mock_api.devices = {}  # Empty devices to avoid attribute error
 
         # Inject API into runtime_data (new way)
         entry.runtime_data = MagicMock()
@@ -269,8 +282,12 @@ class TestConfigFlow:
         flow = ConfigFlow()
         flow.hass = hass
 
-        with patch("custom_components.mysa.config_flow.MysaApi") as MockApi, \
-             patch("custom_components.mysa.config_flow.async_get_clientsession") as mock_get_session:
+        with (
+            patch("custom_components.mysa.config_flow.MysaApi") as MockApi,
+            patch(
+                "custom_components.mysa.config_flow.async_get_clientsession"
+            ) as mock_get_session,
+        ):
             mock_api = AsyncMock()
             mock_api.authenticate = AsyncMock()
             MockApi.return_value = mock_api
@@ -340,7 +357,9 @@ class TestOptionsFlow:
         assert result["step_id"] == "init"
 
     @pytest.mark.asyncio
-    async def test_options_flow_show_form_heating_devices(self, hass, mock_config_entry):
+    async def test_options_flow_show_form_heating_devices(
+        self, hass, mock_config_entry
+    ):
         """Test options flow shows form with heating devices (wattage input)."""
         from custom_components.mysa.config_flow import MysaOptionsFlowHandler
 
@@ -420,12 +439,15 @@ class TestOptionsFlow:
         # But runtime_data is an object.
         # Let's mock a property that raises KeyError
         mock_config_entry.runtime_data = MagicMock()
-        type(mock_config_entry.runtime_data).api = PropertyMock(side_effect=KeyError("Boom"))
+        type(mock_config_entry.runtime_data).api = PropertyMock(
+            side_effect=KeyError("Boom")
+        )
 
         result = await handler.async_step_init()
 
         assert result["type"] == "form"
         assert result["step_id"] == "init"
+
 
 class TestConfigFlowReconfigure:
     """Test config_flow.py reconfigure."""
@@ -436,7 +458,7 @@ class TestConfigFlowReconfigure:
         entry = MockConfigEntry(
             domain=DOMAIN,
             data={CONF_USERNAME: "test@example.com", CONF_PASSWORD: "old_password"},
-            unique_id="test@example.com"
+            unique_id="test@example.com",
         )
         entry.add_to_hass(hass)
 
@@ -474,7 +496,7 @@ class TestConfigFlowReconfigure:
         entry = MockConfigEntry(
             domain=DOMAIN,
             data={CONF_USERNAME: "test@example.com", CONF_PASSWORD: "old_password"},
-            unique_id="test@example.com"
+            unique_id="test@example.com",
         )
         entry.add_to_hass(hass)
 
@@ -508,24 +530,28 @@ class TestConfigFlowReconfigure:
     async def test_reconfigure_flow_unexpected_exception(self, hass):
         """Test reconfigure flow with unexpected exception."""
         entry = MockConfigEntry(
-            domain=DOMAIN,
-            data={CONF_USERNAME: "u", CONF_PASSWORD: "p"},
-            unique_id="u"
+            domain=DOMAIN, data={CONF_USERNAME: "u", CONF_PASSWORD: "p"}, unique_id="u"
         )
         entry.add_to_hass(hass)
 
         result = await hass.config_entries.flow.async_init(
             DOMAIN,
-            context={"source": config_entries.SOURCE_RECONFIGURE, "entry_id": entry.entry_id},
+            context={
+                "source": config_entries.SOURCE_RECONFIGURE,
+                "entry_id": entry.entry_id,
+            },
             data=entry.data,
         )
 
         # Patch _validate_credentials to raise generic Exception
         # We need to patch it on the class because the flow object is deep inside HA
-        with patch("custom_components.mysa.config_flow.ConfigFlow._validate_credentials", side_effect=Exception("Boom")):
-             result = await hass.config_entries.flow.async_configure(
+        with patch(
+            "custom_components.mysa.config_flow.ConfigFlow._validate_credentials",
+            side_effect=Exception("Boom"),
+        ):
+            result = await hass.config_entries.flow.async_configure(
                 result["flow_id"],
                 {CONF_USERNAME: "u", CONF_PASSWORD: "p"},
             )
-             assert result["type"] == "form"
-             assert result["errors"]["base"] == "invalid_auth"
+            assert result["type"] == "form"
+            assert result["errors"]["base"] == "invalid_auth"

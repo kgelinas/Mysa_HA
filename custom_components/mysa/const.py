@@ -2,7 +2,15 @@
 
 DOMAIN = "mysa"
 
-PLATFORMS = ["climate", "sensor", "update", "switch", "number", "select", "binary_sensor"]
+PLATFORMS = [
+    "climate",
+    "sensor",
+    "update",
+    "switch",
+    "number",
+    "select",
+    "binary_sensor",
+]
 
 # =============================================================================
 # MQTT Connection Constants
@@ -14,7 +22,7 @@ MQTT_KEEPALIVE: int = 60
 MQTT_PING_INTERVAL: int = 25
 """Interval between MQTT PINGREQ packets (less than keepalive)"""
 
-MQTT_USER_AGENT: str = 'okhttp/4.11.0'
+MQTT_USER_AGENT: str = "okhttp/4.11.0"
 """User-Agent header matching Mysa Android app"""
 
 # =============================================================================
