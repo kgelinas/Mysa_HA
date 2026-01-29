@@ -3,31 +3,19 @@
 All notable changes to this project will be documented in this file.
 
 
-## [0.9.1-beta3] - 2026-01-28
+## [0.9.1] - 2026-01-28
 ### Added
-- **Build Tools**: Restored functional cross-platform standalone executables for the `mysa_debug` tool.
-- **Test Suite**: Consolidated climate coverage tests into `tests/test_climate.py` for improved maintainability.
+- **Sensor Mode Selector**: New `Sensor Mode` select entity for In-Floor devices (INF-V1). Allows manual switching between "Ambient" and "Floor" modes.
+- **Beta Channel**: Documented beta release process for HACS testing.
 
 ### Fixed
-- **Build Tools**: Resolved critical `ImportError` (aiohttp) and missing dependencies in `mysa_debug` build process.
 - **AC Dry Mode**: Prevented target temperature from resetting to 0.0 in Home Assistant when device reports zero setpoint (common in Dry mode).
-
-## [0.9.1-beta2] - 2026-01-27
-### Fixed
 - **Ghost Devices**: Stopped filtering out devices not assigned to a specific Home/Zone. These devices now appear in Home Assistant (typically as "Unassigned").
 - **MQTT Connection**: Resolved persistent reconnection loop (Error 1005) caused by the broker rejecting subscriptions to the `/batch` topic.
-- **In-Floor Temperature**: Added 0.5°C rounding to setpoint operations to prevent UI "snap-back" when setting temperatures on In-Floor models.
-- **Build Tools**: Updated `mysa_debug` build dependencies for GitHub Actions.
-
-## [0.9.1-beta1] - 2026-01-26
-### Fixed
-- **In-Floor Temperature**: Resolved issue where In-Floor units displayed Ambient (Air) temperature instead of Floor temperature.
-- **Tracked Sensor Support**: Added automatic detection of `TrackedSensor` and `trackedSnsr` keys to correctly infer the active sensor mode (Ambient vs Floor).
-- **MQTT Stability**: Fixed parsing of JSON payloads containing unescaped newlines (error 1005) by using `strict=False` in JSON decoder.
-
-### Added
-- **Sensor Mode Selector**: New `Sensor Mode` select entity for In-Floor devices (INF-V1). Allows manual switching between "Ambient" and "Floor" modes, which forces the thermostat to display the correct temperature source.
-- **Beta Channel**: Documented beta release process for HACS testing.
+- **In-Floor Temperature**: Resolved issue where units displayed Ambient (Air) temperature instead of Floor temperature. Added 0.5°C rounding to setpoint operations to prevent UI "snap-back".
+- **Tracked Sensor Support**: Added automatic detection of `TrackedSensor` and `trackedSnsr` keys to correctly infer the active sensor mode.
+- **MQTT Stability**: Fixed parsing of JSON payloads containing unescaped newlines by using `strict=False` in JSON decoder.
+- **Build Tools**: Resolved critical `ImportError` (aiohttp) and missing dependencies in `mysa_debug` build process.
 
 ## [0.9.0] - 2026-01-25
 ### Added
