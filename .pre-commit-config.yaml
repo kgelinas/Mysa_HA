@@ -47,6 +47,5 @@ repos:
         args:
           [
             "--explicit-package-bases",
-            "custom_components/mysa",
-            "custom_components/mysa_extended",
+            "custom_components",
           ]

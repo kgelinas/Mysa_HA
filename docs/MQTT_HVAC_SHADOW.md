@@ -258,9 +258,110 @@ Examples:
 
 ---
 
+## Write Operations (Commands)
+
+All commands are sent to the `.../shadow/name/{shadow}/update` topic with a `desired` state.
+
+### 1. Change Mode
+**Shadow:** `modes`
+```json
+{
+  "state": {
+    "desired": {
+      "mode": 3,
+      "source": 3
+    }
+  }
+}
+```
+*   `mode`: `0`=Off, `1`=Auto, `3`=Cool, `4`=Heat, `7`=Fan Only.
+
+### 2. Change Setpoint (Heat Mode)
+**Shadow:** `targetHeat`
+```json
+{
+  "state": {
+    "desired": {
+      "setpoint": 2111,
+      "source": 3
+    }
+  }
+}
+```
+*   `setpoint`: Temperature in Celsius decidegrees.
+
+### 3. Change Setpoint (Cool Mode)
+**Shadow:** `targetCool`
+```json
+{
+  "state": {
+    "desired": {
+      "setpoint": 2389,
+      "source": 3
+    }
+  }
+}
+```
+
+### 4. Change Setpoints (Auto Mode)
+**Shadow:** `targetAuto`
+```json
+{
+  "state": {
+    "desired": {
+      "heatSetpoint": 1556,
+      "coolSetpoint": 2222,
+      "source": 3
+    }
+  }
+}
+```
+*   Payload can include `heatSetpoint`, `coolSetpoint`, or both.
+
+---
+
 ## State Reporting Flow
 
-1. **Commands:** Sent to `.../shadow/name/{shadow}/update` with `desired` state.
-2. **Confirmations:** Received on `.../shadow/name/{shadow}/update/accepted`.
-3. **Spontaneous Updates:** Device reports on `.../shadow/name/{shadow}/update`.
-4. **Delta Messages:** Ignored by integration; wait for full state documents.
+1.  **Command Execution:** The client publishes to `.../shadow/name/{shadow}/update` with `desired` values.
+2.  **AWS IoT Acceptance:**
+    *   `.../update/accepted`: The request was valid and accepted by the shadow service.
+    *   `.../update/rejected`: The request was invalid (e.g., bad format, read-only key). Payload contains `code` and `message`.
+    *   `.../update/delta`: A difference exists between `desired` and `reported` state. This triggers the device to act.
+3.  **Device Sync:** The device receives the `delta`, applies the setting, and reports back.
+4.  **State Documentation:** The complete updated state is published to `.../shadow/name/{shadow}/update/documents`.
+    *   `current.state.reported` contains the true state of the device.
+    *   `current.state.desired` contains the last requested target.
+
+---
+
+## Telemetry & Sensors
+
+These values are typically reported in the root of the shadow or in a standard status update message (MsgType 1), often interleaved with other shadow updates.
+
+| Key | Description | Source |
+|:---|:---|:---|
+| `ambTemp` | Ambient Temperature (Raw) | Primary Sensor |
+| `CorrectedTemp` | Ambient Temperature (Calibrated) | Primary Sensor |
+| `ambient_t` | Ambient Temperature (Legacy) | Alternate Key |
+| `hum` | Humidity | Sensor |
+| `Humidity` | Humidity (Alternate) | Sensor |
+| `humidityDisplay` | Display Humidity | Sensor (UI Optimized) |
+| `externalTemperature` | External Temperature | Wired Sensor |
+| `outdoorTemperature` | Outdoor Temperature | Wired Sensor (Alternate) |
+| `filter` | Filter life remaining | Diagnostic |
+
+### ST1 (Modern) Telemetry Structure
+
+For newer models like **ST1 (HVAC Central)**, sensor data is not reported in traditional named shadows. Instead, it is delivered via a complex object structure found in `TELEMETRY_PATHS`:
+
+| Field | Path | Notes |
+|:---|:---|:---|
+| Room Temperature | `latestTelemetry.reading.roomTemperature` | Value in Celsius decidegrees |
+| Humidity | `latestTelemetry.reading.humidity` | |
+| HVAC State | `latestTelemetry.reading.hvacState` | |
+| Connected State | `latestTelemetry.isConnected` | Boolean |
+| Timestamp | `latestTelemetry.reading.timestamp` | |
+
+> **Validation Status:** This structure was identified in the decompiled application bytecode (v4.11.0). While it is named `latestTelemetry`, it has been confirmed **NOT** to be an AWS IOT Named Shadow (fetching it as a shadow returns 404). It is likely delivered via a custom MQTT topic or a GraphQL subscription.
+
+> **Note:** The integration caches these values from any incoming MQTT message that contains them.
