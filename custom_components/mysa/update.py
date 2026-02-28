@@ -1,6 +1,8 @@
 """Update platform for Mysa."""
 
 # pylint: disable=abstract-method
+# Justification: Inherits from HA UpdateEntity and RestoreEntity which have abstract methods.
+
 # Justification: HA Entity properties implement the required abstracts.
 import logging
 from datetime import timedelta
@@ -32,18 +34,20 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Mysa update entities."""
-    api = entry.runtime_data.api
-    await api.get_devices()
+    # Ensure API has populated devices (devices dict starts populated in new flow)
+    devices = entry.runtime_data.api.devices
 
     entities = []
-    for device_id, device_data in api.devices.items():
-        entities.append(MysaUpdate(api, device_id, device_data))
+    for device_id, device_data in devices.items():
+        entities.append(MysaUpdate(entry.runtime_data.api, device_id, device_data))
 
     async_add_entities(entities, update_before_add=True)
 
 
 class MysaUpdate(UpdateEntity):
     # pylint: disable=too-many-instance-attributes
+    # Justification: Handles update state, progress, and version information.
+
     # Justification: Entity requires tracking multiple version/status attributes.
     """Mysa Firmware Update Entity."""
 

@@ -1,8 +1,9 @@
 """Tests for Update entity."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from custom_components.mysa.update import MysaUpdate
 
 
 class TestMysaUpdateEntity:
@@ -190,8 +191,6 @@ class TestFirmwareErrorHandling:
 @pytest.mark.asyncio
 async def test_update_installed_version_mismatch(hass):
     """Test that device_data is updated when firmware version mismatch occurs."""
-    from custom_components.mysa.update import MysaUpdate
-
     mock_api = MagicMock()
     mock_api.fetch_firmware_info = AsyncMock()
 
@@ -217,3 +216,121 @@ async def test_update_installed_version_mismatch(hass):
     assert entity._device_data["FirmwareVersion"] == "1.1.0"
     assert entity._attr_installed_version == "1.1.0"
     assert entity._attr_latest_version == "1.2.0"
+
+@pytest.mark.asyncio
+async def test_update_async_added_to_hass(hass):
+    """Test async_added_to_hass calls async_update."""
+    mock_api = MagicMock()
+    mock_api.fetch_firmware_info = AsyncMock()
+
+    entity = MysaUpdate(mock_api, "dev1", {"FirmwareVersion": "1.0.0"})
+    entity.hass = hass
+
+    # Mock async_update
+    entity.async_update = AsyncMock()
+
+    await entity.async_added_to_hass()
+    entity.async_update.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_update_setup_entry(hass):
+    """Test update setup_entry."""
+    from custom_components.mysa.update import async_setup_entry
+    from custom_components.mysa import MysaData
+
+    mock_api = MagicMock()
+    mock_api.get_devices = AsyncMock()
+    mock_api.devices = {"dev1": {"FirmwareVersion": "1.0.0"}}
+
+    mock_entry = MagicMock()
+    mock_entry.runtime_data = MysaData(mock_api, MagicMock())
+
+    async_add_entities = MagicMock()
+    await async_setup_entry(hass, mock_entry, async_add_entities)
+
+    async_add_entities.assert_called_once()
+    entities = async_add_entities.call_args[0][0]
+    assert len(entities) == 1
+    assert entities[0]._device_id == "dev1"
+
+@pytest.mark.asyncio
+async def test_update_exception(hass):
+    """Test update generic exception (lines 115-116)."""
+    mock_api = MagicMock()
+    mock_api.fetch_firmware_info = AsyncMock(side_effect=Exception("API Error"))
+
+    entity = MysaUpdate(mock_api, "dev1", {"FirmwareVersion": "1.0.0"})
+    await entity.async_update()
+    # Should log warning but not raise
+
+
+class TestUpdateConsolidated:
+    """Consolidated update tests from UI component coverage."""
+
+    @pytest.mark.asyncio
+    async def test_update_entity_logic_consolidated(self, hass):
+        """Test MysaUpdate entity logic."""
+        api = MagicMock()
+        device_id = "d1"
+        device_data = {"FirmwareVersion": "100"}
+
+        entity = MysaUpdate(api, device_id, device_data)
+        entity.hass = hass
+
+        assert entity.installed_version == "100"
+
+        # Logic for update
+        api.fetch_firmware_info = AsyncMock(
+            return_value={
+                "installedVersion": "100",
+                "allowedVersion": "101",
+                "update": True,
+            }
+        )
+
+        await entity.async_update()
+        assert entity.latest_version == "101"
+        assert entity.supported_features == 0
+
+    @pytest.mark.asyncio
+    async def test_update_entity_startup_and_exceptions_consolidated(self, hass):
+        """Test MysaUpdate async_added_to_hass and exceptions."""
+        api = MagicMock()
+        device_id = "d1"
+        device_data = {"FirmwareVersion": "100"}
+
+        entity = MysaUpdate(api, device_id, device_data)
+        entity.hass = hass
+        entity.entity_id = "update.mysa_d1_firmware"
+
+        # Test async_added_to_hass
+        api.fetch_firmware_info = AsyncMock(
+            return_value={
+                "installedVersion": "100",
+                "allowedVersion": "102",
+                "update": True,
+            }
+        )
+
+        with patch(
+            "custom_components.mysa.update.UpdateEntity.async_added_to_hass",
+            new_callable=AsyncMock,
+        ):
+            await entity.async_added_to_hass()
+
+        assert entity.latest_version == "102"
+
+        # Test version mismatch update
+        api.fetch_firmware_info = AsyncMock(
+            return_value={
+                "installedVersion": "105",
+                "allowedVersion": "105",
+                "update": False,
+            }
+        )
+        await entity.async_update()
+        assert device_data["FirmwareVersion"] == "105"
+
+        # Test Exception handling
+        api.fetch_firmware_info = AsyncMock(side_effect=Exception("API Error"))
+        await entity.async_update()  # Should not raise

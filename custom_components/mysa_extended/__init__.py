@@ -33,6 +33,7 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     # Services registered via async_setup_services, but only once
     if not hass.services.has_service(DOMAIN, "upgrade_lite_device"):
         async_setup_services(hass)
+
     return True
 
 

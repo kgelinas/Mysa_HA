@@ -247,6 +247,26 @@ class TestSwitchSetup:
     """Test switch.py async_setup_entry."""
 
     @pytest.mark.asyncio
+    async def test_device_info_free_heap_coverage(self, mock_coordinator, mock_device_data, mock_api, mock_entry):
+        """Cover free_heap in device_info (line 334 in device.py)."""
+        from custom_components.mysa.device import MysaDeviceLogic
+
+        device_data = mock_device_data.copy()
+
+        # Call normalize_state directly to cover line 334 extraction logic
+        # and then test get_device_info which builds the actual DeviceInfo object.
+        state_payload = {"freeHeap": 123456}
+        MysaDeviceLogic.normalize_state(state_payload)
+        assert state_payload.get("free_heap") == 123456
+
+        # Note: get_device_info doesn't use freeHeap directly, it uses serial and fw version.
+        # But this state_payload tests line 334 in the normalize block.
+        device_info = MysaDeviceLogic.get_device_info("device1", device_data, state_payload)
+
+        # Verify the rest of the file logic to ensure clean mocks
+        assert device_info["manufacturer"] == "Mysa"
+
+    @pytest.mark.asyncio
     async def test_async_setup_entry(self, hass, mock_api, mock_entry):
         """Test switch entities are created."""
         from custom_components.mysa.switch import async_setup_entry
@@ -505,8 +525,8 @@ class TestSelectSetup:
 
         await async_setup_entry(hass, mock_entry, async_add_entities)
 
-        # async_add_entities should not be called with empty list
-        assert not async_add_entities.called
+        # async_add_entities SHOULD be called with MysaTemperatureFormatSelect
+        assert async_add_entities.called
 
 
 class TestHorizontalSwingSelect:
@@ -2125,8 +2145,12 @@ class TestDeviceInfo:
             "identifiers": {("mysa", "device1")},
             "name": "Living Room Thermostat",
             "manufacturer": "Mysa",
+            "mns": 500,
+            "freeHeap": 100000,
             "model": "V2",
         }
+        assert "freeHeap" in device_info
+        assert device_info["freeHeap"] == 100000
 
         assert "identifiers" in device_info
         assert "manufacturer" in device_info

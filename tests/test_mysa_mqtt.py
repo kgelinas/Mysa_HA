@@ -156,7 +156,7 @@ async def test_mqtt_connection_success_flow(mock_ws):
     ):
         mock_parse.side_effect = [
             mqtt.ConnackPacket(0, 0),
-            mqtt.SubackPacket(1, [0]),
+            mqtt.SubackPacket(1, [0, 0, 0]),
             mqtt.PublishPacket(0, 0, 0, "topic", 0, b"payload"),
         ]
 
@@ -205,3 +205,134 @@ def test_legacy_parse_alias():
     from custom_components.mysa.mqtt import ConnackPacket
 
     assert isinstance(pkt, ConnackPacket)
+
+
+@pytest.mark.asyncio
+async def test_mqtt_connection_broker_rejection():
+    """Test broker rejection of standard topics (lines 258-259 in mysa_mqtt.py)."""
+    conn = mysa_mqtt.MqttConnection(
+        signed_url="wss://test",
+        device_ids=["dev1"],
+        include_batch=False,
+    )
+
+    mock_ws = AsyncMock()
+    # Ensure close is awaitable
+    mock_ws.close = AsyncMock()
+
+    with patch("custom_components.mysa.mysa_mqtt.connect_websocket", return_value=mock_ws):
+        # Mock CONNACK
+        connack = mqtt.ConnackPacket(0, 0)
+
+        # Mock SUBACK with rejection (0x80 = failure)
+        # Topics are [Out, In] because include_batch=False
+        suback = mqtt.SubackPacket(1, [0x80, 0x80])
+
+        # side_effect for recv()
+        mock_ws.recv.side_effect = [b"connack_bytes", b"suback_bytes"]
+
+        with patch(
+            "custom_components.mysa.mysa_mqtt.parse_mqtt_packet",
+            side_effect=[connack, suback]
+        ):
+            # Using context manager should raise RuntimeError
+            with pytest.raises(RuntimeError, match="Broker rejected standard topics"):
+                async with conn:
+                    pass
+
+            # Verify close was called
+            assert mock_ws.close.called
+
+
+@pytest.mark.asyncio
+async def test_mqtt_connection_batch_rejection_warning():
+    """Test broker rejection of batch topic logs warning (line 265 in mysa_mqtt.py)."""
+    conn = mysa_mqtt.MqttConnection(
+        signed_url="wss://test",
+        device_ids=["dev1"],
+        include_batch=True,
+    )
+
+    mock_ws = AsyncMock()
+    mock_ws.close = AsyncMock()
+
+    with patch("custom_components.mysa.mysa_mqtt.connect_websocket", return_value=mock_ws):
+        connack = mqtt.ConnackPacket(0, 0)
+
+        # Mock SUBACK: Standard topics OK (0x01), Batch topic REJECTED (0x80)
+        # Topics are [Out, In, Batch] because include_batch=True
+        suback = mqtt.SubackPacket(1, [0x01, 0x01, 0x80])
+
+        mock_ws.recv.side_effect = [b"connack_bytes", b"suback_bytes"]
+
+        with patch(
+            "custom_components.mysa.mysa_mqtt.parse_mqtt_packet",
+            side_effect=[connack, suback]
+        ):
+            with patch("custom_components.mysa.mysa_mqtt._LOGGER.warning") as mock_warning:
+                # This time it should NOT raise, but log a warning
+                async with conn:
+                    assert conn.connected
+
+                mock_warning.assert_called_once()
+                args = mock_warning.call_args[0]
+                assert "rejected batch topic" in args[0]
+                assert "dev1" in args
+
+
+@pytest.mark.asyncio
+async def test_mqtt_connection_suback_incorrect_packet():
+    """Test receiving unexpected packet instead of SUBACK (lines 244-246 in mysa_mqtt.py)."""
+    conn = mysa_mqtt.MqttConnection(
+        signed_url="wss://test",
+        device_ids=["dev1"],
+        include_batch=False,
+    )
+
+    mock_ws = AsyncMock()
+    mock_ws.close = AsyncMock()
+
+    with patch("custom_components.mysa.mysa_mqtt.connect_websocket", return_value=mock_ws):
+        connack = mqtt.ConnackPacket(0, 0)
+        # Return something unexpected, e.g. another ConnackPacket instead of SUBACK
+        unexpected = mqtt.ConnackPacket(0, 0)
+
+        mock_ws.recv.side_effect = [b"connack", b"unexpected"]
+
+        with patch(
+            "custom_components.mysa.mysa_mqtt.parse_mqtt_packet",
+            side_effect=[connack, unexpected]
+        ):
+            with pytest.raises(RuntimeError, match="Expected SUBACK"):
+                async with conn:
+                    pass
+
+            assert mock_ws.close.called
+
+
+@pytest.mark.asyncio
+async def test_mqtt_connection_disconnect_exception():
+    """Test swallowing exception during disconnect (lines 289-293 in mysa_mqtt.py)."""
+    conn = mysa_mqtt.MqttConnection(
+        signed_url="wss://test",
+        device_ids=[], # No subscriptions needed
+    )
+
+    mock_ws = AsyncMock()
+    mock_ws.close = AsyncMock()
+    # First send (CONNECT) succeeds, second send (DISCONNECT) fails
+    mock_ws.send.side_effect = [None, Exception("Disconnect Error")]
+
+    with patch("custom_components.mysa.mysa_mqtt.connect_websocket", return_value=mock_ws):
+        connack = mqtt.ConnackPacket(0, 0)
+        mock_ws.recv.return_value = b"connack"
+
+        with patch("custom_components.mysa.mysa_mqtt.parse_mqtt_packet", return_value=connack):
+            # Connect successfully
+            async with conn:
+                assert conn.connected
+
+            # Context manager exit should have swallowed the exception
+            # and verify close was still called (finally block)
+            assert mock_ws.close.called
+            assert not conn.connected

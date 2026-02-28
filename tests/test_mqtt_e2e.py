@@ -157,6 +157,8 @@ async def test_mqtt_state_update_injection(
     aioclient_mock.get(f"{BASE_URL}/devices/state", json={"DeviceStates": [MOCK_STATE]})
     aioclient_mock.get(f"{BASE_URL}/users", json={"User": {"Id": "test-user"}})
     aioclient_mock.get(f"{BASE_URL}/homes", json={"Homes": []})
+    # Mock for /devices/state which is used during setup (get_state Round 1)
+    aioclient_mock.get("https://app-prod.mysa.cloud/devices/state", json={"DeviceStates": [MOCK_STATE]})
 
     # Setup integration
     config_entry = await hass.config_entries.flow.async_init(
@@ -172,7 +174,13 @@ async def test_mqtt_state_update_injection(
     await hass.async_block_till_done()
 
     # Verify initial state
-    print(f"All entities: {hass.states.async_entity_ids()}")
+    # Home Assistant usually creates slugs from Room name if available, else device Name
+    # Room is Living Room, so slug is likely test_thermostat_living_room or similar
+    # But integration uses room as area, and name as entity name.
+    # Name is 'Test Thermostat', so entity ID is climate.test_thermostat
+    # Verify initial state
+    # Wait for integration to finish setup
+    await hass.async_block_till_done()
     state = hass.states.get("climate.test_thermostat")
     assert state is not None
     initial_temp = state.attributes.get("temperature")
@@ -229,6 +237,7 @@ async def test_mqtt_command_sent(
     aioclient_mock.get(f"{BASE_URL}/devices/state", json={"DeviceStates": [MOCK_STATE]})
     aioclient_mock.get(f"{BASE_URL}/users", json={"User": {"Id": "test-user"}})
     aioclient_mock.get(f"{BASE_URL}/homes", json={"Homes": []})
+    aioclient_mock.get("https://app-prod.mysa.cloud/devices/state", json={"DeviceStates": [MOCK_STATE]})
 
     # Setup integration
     config_entry = await hass.config_entries.flow.async_init(
@@ -239,7 +248,11 @@ async def test_mqtt_command_sent(
         {CONF_USERNAME: "test@example.com", CONF_PASSWORD: "password"},
     )
     await hass.async_block_till_done()
+    # Wait for integration
     await hass.async_block_till_done()
+
+    # Ensure entity exists before calling service
+    assert hass.states.get("climate.test_thermostat") is not None
 
     # Call set_temperature service
     await hass.services.async_call(

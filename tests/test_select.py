@@ -2,11 +2,17 @@
 
 import time
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
 import pytest
 
+from homeassistant.exceptions import HomeAssistantError
 from custom_components.mysa import MysaData
+from custom_components.mysa.select import (
+    MysaTemperatureFormatSelect,
+    MysaSensorModeSelect,
+    MysaHorizontalSwingSelect,
+)
 
 
 class TestHorizontalSwingSelect:
@@ -268,8 +274,9 @@ class TestSelectEntitySetup:
         assert async_add_entities.called
         # Verify call args
         args = async_add_entities.call_args[0][0]
-        assert len(args) == 1
-        assert args[0]._device_id == "infloor_id"
+        # Should create SensorModeSelect and TemperatureFormatSelect
+        assert len(args) == 2
+        assert any(e._device_id == "infloor_id" for e in args)
 
 
 class TestSensorModeSelect:
@@ -419,3 +426,246 @@ class TestSelectCoverageGaps:
         mock_coordinator.data = {"dev1": {"ssh": AC_SWING_POSITION_3}}  # 6 -> 'center'
         assert entity.current_option == "center"
         assert entity._pending_option is None
+
+
+class TestMysaTemperatureFormatSelect:
+    """Test MysaTemperatureFormatSelect entity logic."""
+
+    @pytest.mark.asyncio
+    async def test_display_format_select(self, hass, mock_coordinator, mock_config_entry):
+        """Test MysaTemperatureFormatSelect entity."""
+        from custom_components.mysa.select import MysaTemperatureFormatSelect
+
+        # Mock API
+        mock_api = MagicMock()
+        mock_api.set_stv10_temperature_format = AsyncMock()
+
+        # Create the select entity
+        entity = MysaTemperatureFormatSelect(
+            mock_coordinator,
+            "stv1_device",
+            {"Id": "stv1_device", "Name": "Living Room", "Model": "ST-V1-0"},
+            mock_api,
+            mock_config_entry,
+        )
+        entity.async_write_ha_state = MagicMock()
+        entity.hass = hass
+
+        # Test options
+        assert "Celsius" in entity.options
+        assert "Fahrenheit" in entity.options
+
+        # Test initial state (Celsius default)
+        mock_coordinator.data = {"stv1_device": {}}
+        assert entity.current_option == "Celsius"
+
+        # Test with format="F"
+        mock_coordinator.data = {"stv1_device": {"temperature_format": "F"}}
+        assert entity.current_option == "Fahrenheit"
+
+        # Test selecting Fahrenheit
+        await entity.async_select_option("Fahrenheit")
+        # Check model to decide setter - ST-V1-0 uses set_stv10_temperature_format
+        mock_api.set_stv10_temperature_format.assert_called_with("stv1_device", True)
+
+        # Test selecting Celsius
+        await entity.async_select_option("Celsius")
+        mock_api.set_stv10_temperature_format.assert_called_with("stv1_device", False)
+
+
+class TestSelectConsolidated:
+    """Consolidated select tests from extra and final coverage files."""
+
+    @pytest.mark.asyncio
+    async def test_select_temperature_format_coverage_consolidated(self, hass):
+        """Cover missing lines in select.py (388, 401-413, 430-434)."""
+        coordinator = MagicMock()
+        api = MagicMock()
+        api.set_temperature_format = AsyncMock()
+        entry = MagicMock()
+
+        sel = MysaTemperatureFormatSelect(coordinator, "d1", {"Model": "V1"}, api, entry)
+        sel.hass = hass
+        sel.async_write_ha_state = MagicMock()
+
+        # 388: "C" in _get_start_value
+        assert sel._get_start_value({"Format": "C"}) == "C"
+
+        # 401-413: Sticky logic
+        sel._pending_option = "Fahrenheit"
+        sel._pending_timestamp = time.time()
+        # If currently Celsius on cloud, should return pending
+        coordinator.data = {"d1": {"Format": "C"}}
+        assert sel.current_option == "Fahrenheit"
+
+        # Expiration (402-404)
+        sel._pending_timestamp = time.time() - 40  # > 30s
+        assert sel.current_option == "Celsius"
+        assert sel._pending_option is None
+
+        # Clears when convergent
+        sel._pending_option = "Fahrenheit"
+        sel._pending_timestamp = time.time()
+        coordinator.data = {"d1": {"Format": "F"}}
+        assert sel.current_option == "Fahrenheit"
+        assert sel._pending_option is None
+
+        # 430-434: Error path
+        api.set_stv10_temperature_format = AsyncMock(side_effect=Exception("Fail"))
+        api.set_temperature_format = AsyncMock(side_effect=Exception("Fail"))
+        with pytest.raises(HomeAssistantError):
+            await sel.async_select_option("Fahrenheit")
+
+    @pytest.mark.asyncio
+    async def test_select_entity_logic_consolidated(self, hass):
+        """Test MysaSelect entity logic."""
+        coordinator = MagicMock()
+        api = MagicMock()
+        entry = MagicMock()
+        device_id = "d1"
+        device_data = {
+            "SupportedCaps": {
+                "modes": {"1": {"horizontalSwing": [3, 4]}}  # 3=auto, 4=left
+            }
+        }
+
+        # 1. MysaHorizontalSwingSelect
+        entity = MysaHorizontalSwingSelect(
+            coordinator, device_id, device_data, api, entry
+        )
+        entity.hass = hass
+
+        # Test options property
+        assert "auto" in entity.options
+        assert "left" in entity.options
+
+        # Test current_option (from coordinator data)
+        coordinator.data = {"d1": {"ssh": 3}}  # 3 = auto
+        assert entity.current_option == "auto"
+
+        # Test current_option fallback (SwingStateHorizontal uses dict {"v": ...})
+        coordinator.data = {"d1": {"SwingStateHorizontal": {"v": 4}}}  # 4 = left
+        assert entity.current_option == "left"
+
+        # Test async_select_option
+        api.set_ac_horizontal_swing = AsyncMock()
+        with patch.object(entity, "async_write_ha_state"):
+            await entity.async_select_option("auto")
+
+        assert api.set_ac_horizontal_swing.call_count == 1
+        assert api.set_ac_horizontal_swing.call_args == (("d1", 3),)
+
+        # 2. MysaSensorModeSelect (In-Floor)
+        entity_sensor = MysaSensorModeSelect(
+            coordinator, device_id, device_data, api, entry
+        )
+        entity_sensor.hass = hass
+
+        # Test options
+        assert "ambient" in entity_sensor.options
+
+        # Test current_option
+        coordinator.data = {"d1": {"SensorMode": 0}}  # 0 = ambient
+        assert entity_sensor.current_option == "ambient"
+
+        # Test async_select_option
+        api.set_sensor_mode = AsyncMock()
+        with patch.object(entity_sensor, "async_write_ha_state"):
+            await entity_sensor.async_select_option("ambient")
+        api.set_sensor_mode.assert_called_with("d1", 0)  # 0 = ambient
+
+    @pytest.mark.asyncio
+    async def test_select_pending_logic_consolidated(self, hass):
+        """Test MysaSelect pending and error logic."""
+        coordinator = MagicMock()
+        api = MagicMock()
+        entry = MagicMock()
+        device_id = "d1"
+        device_data = {"SupportedCaps": {"modes": {"1": {"horizontalSwing": [3]}}}}
+
+        entity = MysaHorizontalSwingSelect(
+            coordinator, device_id, device_data, api, entry
+        )
+        entity.hass = hass
+
+        # Error handling for unknown option
+        await entity.async_select_option("invalid_option")
+        # Should log error and return, no api call
+        assert api.set_ac_horizontal_swing.call_count == 0
+
+        # Exception in async_select_option
+        api.set_ac_horizontal_swing = AsyncMock(side_effect=Exception("Fail"))
+        with pytest.raises(HomeAssistantError):
+            with patch.object(entity, "async_write_ha_state"):
+                await entity.async_select_option("auto")
+
+        # Pending Expiration
+        entity._pending_option = "left"
+        entity._pending_timestamp = time.time() - 31
+        coordinator.data = {"d1": {"ssh": 3}}  # auto
+        assert entity.current_option == "auto"
+        assert entity._pending_option is None
+
+        # Pending Convergence
+        entity._pending_option = "auto"
+        entity._pending_timestamp = time.time()
+        coordinator.data = {"d1": {"ssh": 3}}  # auto matches
+        assert entity.current_option == "auto"
+        assert entity._pending_option is None
+
+    @pytest.mark.asyncio
+    async def test_select_device_info_none_data_consolidated(self, hass):
+        """Test device_info with None coordinator data."""
+        coordinator = MagicMock()
+        api = MagicMock()
+        entry = MagicMock()
+        coordinator.data = None
+
+        sel1 = MysaTemperatureFormatSelect(coordinator, "d1", {"Model": "V1"}, api, entry)
+        assert sel1.device_info is not None
+
+        sel2 = MysaHorizontalSwingSelect(coordinator, "d1", {"Model": "AC1"}, api, entry)
+        assert sel2.device_info is not None
+
+        sel3 = MysaSensorModeSelect(coordinator, "d1", {"Model": "INF1"}, api, entry)
+        assert sel3.device_info is not None
+
+    @pytest.mark.asyncio
+    async def test_select_get_start_value_none_consolidated(self, hass):
+        """Test _get_start_value with missing format keys (line 387)."""
+        coordinator = MagicMock()
+        api = MagicMock()
+        entry = MagicMock()
+        sel = MysaTemperatureFormatSelect(coordinator, "d1", {"Model": "V1"}, api, entry)
+        assert sel._get_start_value({"Other": "Key"}) is None
+
+    @pytest.mark.asyncio
+    async def test_horizontal_swing_sticky_consolidated(self, hass):
+        """Test sticky return in current_option (line 190)."""
+        coordinator = MagicMock()
+        api = MagicMock()
+        entry = MagicMock()
+        device_data = {"SupportedCaps": {"modes": {"1": {"horizontalSwing": [3]}}}}
+        entity = MysaHorizontalSwingSelect(coordinator, "d1", device_data, api, entry)
+
+        entity._pending_option = "center"
+        entity._pending_timestamp = time.time()
+        coordinator.data = {"d1": {"ssh": 4}} # Different from pending
+        assert entity.current_option == "center" # Hits line 190
+
+    @pytest.mark.asyncio
+    async def test_select_setup_entry_ac_consolidated(self, hass):
+        """Test setup_entry with AC device (line 53)."""
+        from custom_components.mysa.select import async_setup_entry
+        from custom_components.mysa import MysaData
+
+        mock_api = MagicMock()
+        mock_api.get_devices = AsyncMock(return_value={"ac1": {"Model": "AC-V1"}})
+        mock_api.is_ac_device = MagicMock(return_value=True)
+
+        mock_entry = MagicMock()
+        mock_entry.runtime_data = MysaData(api=mock_api, coordinator=MagicMock())
+
+        mock_add_entities = MagicMock()
+        await async_setup_entry(hass, mock_entry, mock_add_entities)
+        assert mock_add_entities.called

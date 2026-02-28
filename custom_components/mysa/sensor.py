@@ -1,6 +1,8 @@
 """Sensor platform for Mysa."""
 
-# pylint: disable=too-many-branches
+# pylint: disable=too-many-branches,too-many-lines
+# Justification: Handles setup for many different sensor types and platforms in a single file.
+
 # Justification: Sensor mapping requires handling many device types and attributes in a single pass.
 import logging
 import time
@@ -31,6 +33,7 @@ from homeassistant.helpers.update_coordinator import (
 )
 
 from . import MysaData
+from .capabilities import DeviceCapabilities
 from .device import MysaDeviceLogic
 from .mysa_api import MysaApi
 
@@ -44,16 +47,28 @@ async def async_setup_entry(
     entry: ConfigEntry[MysaData],
     async_add_entities: AddEntitiesCallback,
 ) -> None:
+    # pylint: disable=too-many-locals
+    # Justification: Entity factory function needs locals for each sensor type.
     """Set up Mysa sensors."""
     coordinator = entry.runtime_data.coordinator
     api = entry.runtime_data.api
-    devices = await api.get_devices()
+    # Get devices to create entities
+    devices = api.devices
 
     entities: list[SensorEntity] = []
     for device_id, device_data in devices.items():
-        is_ac = api.is_ac_device(device_id)
+        # Get cached capabilities (defensive lookup for tests)
+        if hasattr(api, "device_caps") and device_id in api.device_caps:
+            caps = api.device_caps[device_id]
+        else:
+            # Fallback for tests or unexpected missing cache
 
-        # Ambient Temperature (all devices)
+            state = coordinator.data.get(device_id, {}) if coordinator.data else {}
+            caps = DeviceCapabilities.from_device(device_id, device_data, state, api)
+
+        is_stv10 = caps.is_stv10
+
+        # Ambient Temperature (all devices - inlined is_ac check)
         entities.append(
             MysaTemperatureSensor(coordinator, device_id, device_data, api, entry)
         )
@@ -67,52 +82,68 @@ async def async_setup_entry(
             MysaHumiditySensor(coordinator, device_id, device_data, api, entry)
         )
 
-        # RSSI (all devices)
+        # Free Heap (All devices)
         entities.append(
             MysaDiagnosticSensor(
                 coordinator,
                 device_id,
                 device_data,
-                "Rssi",
-                "rssi",
-                SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
-                SensorStateClass.MEASUREMENT,
-                SensorDeviceClass.SIGNAL_STRENGTH,
-                entry,
-            )
-        )
-
-        # Brightness (all devices - current display brightness)
-        entities.append(
-            MysaDiagnosticSensor(
-                coordinator,
-                device_id,
-                device_data,
-                "Brightness",
-                "brightness",
-                PERCENTAGE,
+                "free_heap",
+                "free_heap",
+                "B",
                 SensorStateClass.MEASUREMENT,
                 None,
                 entry,
             )
         )
 
-        # TimeZone (all devices)
-        entities.append(
-            MysaDiagnosticSensor(
-                coordinator,
-                device_id,
-                device_data,
-                "TimeZone",
-                "timezone",
-                None,
-                None,
-                None,
-                entry,
+        # RSSI (baseboard only - not available for ST-V1-0 HVAC)
+        if not is_stv10:
+            entities.append(
+                MysaDiagnosticSensor(
+                    coordinator,
+                    device_id,
+                    device_data,
+                    "Rssi",
+                    "rssi",
+                    SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+                    SensorStateClass.MEASUREMENT,
+                    SensorDeviceClass.SIGNAL_STRENGTH,
+                    entry,
+                )
             )
-        )
 
-        # Min/Max Setpoint (all devices)
+        # Brightness (baseboard only - not available for ST-V1-0)
+        if not is_stv10:
+            entities.append(
+                MysaDiagnosticSensor(
+                    coordinator,
+                    device_id,
+                    device_data,
+                    "Brightness",
+                    "brightness",
+                    PERCENTAGE,
+                    SensorStateClass.MEASUREMENT,
+                    None,
+                    entry,
+                )
+            )
+
+            # TimeZone (baseboard only)
+            entities.append(
+                MysaDiagnosticSensor(
+                    coordinator,
+                    device_id,
+                    device_data,
+                    "TimeZone",
+                    "timezone",
+                    None,
+                    None,
+                    None,
+                    entry,
+                )
+            )
+
         entities.append(
             MysaDiagnosticSensor(
                 coordinator,
@@ -121,7 +152,7 @@ async def async_setup_entry(
                 "MinSetpoint",
                 "min_setpoint",
                 UnitOfTemperature.CELSIUS,
-                None,
+                SensorStateClass.MEASUREMENT,
                 SensorDeviceClass.TEMPERATURE,
                 entry,
             )
@@ -134,13 +165,13 @@ async def async_setup_entry(
                 "MaxSetpoint",
                 "max_setpoint",
                 UnitOfTemperature.CELSIUS,
-                None,
+                SensorStateClass.MEASUREMENT,
                 SensorDeviceClass.TEMPERATURE,
                 entry,
             )
         )
-        # === Heating thermostat only sensors (skip for AC) ===
-        if not is_ac:
+        # === Baseboard heater only sensors (skip for AC and ST-V1-0 HVAC) ===
+        if not api.is_ac_device(device_id) and not is_stv10:
             state = coordinator.data.get(device_id, {}) if coordinator.data else {}
 
             # Duty Cycle (heating only)
@@ -167,7 +198,7 @@ async def async_setup_entry(
                     "MaxCurrent",
                     "max_current",
                     UnitOfElectricCurrent.AMPERE,
-                    None,
+                    SensorStateClass.MEASUREMENT,
                     SensorDeviceClass.CURRENT,
                     entry,
                 )
@@ -235,8 +266,8 @@ async def async_setup_entry(
                     )
                 )
 
-        # Power and Current sensors (simulated or real)
-        if not is_ac:
+        # Power and Current sensors (simulated or real) - supported for Baseboard and HVAC (ST-V1)
+        if not api.is_ac_device(device_id):
             state = coordinator.data.get(device_id, {}) if coordinator.data else {}
 
             power_sensor = MysaPowerSensor(
@@ -264,15 +295,165 @@ async def async_setup_entry(
                 )
             )
 
-        # === Network Diagnostic Sensors (all devices) ===
-        # IP Address
-        entities.append(MysaIpSensor(coordinator, device_id, device_data, entry))
+        # === Network Diagnostic Sensors (all devices except ST-V1) ===
+        # IP Address (Not available for ST-V1 cloud API)
+        if not is_stv10:
+            entities.append(MysaIpSensor(coordinator, device_id, device_data, entry))
+
+        # === ST-V1-0 HVAC Specific Sensors ===
+        if is_stv10:
+            st_sensors = _get_stv10_diagnostic_sensors(
+                coordinator.data.get(device_id, {}) if coordinator.data else {}
+            )
+            for _, key, unit, state_class in st_sensors:
+                entities.append(
+                    MysaDiagnosticSensor(
+                        coordinator,
+                        device_id,
+                        device_data,
+                        key,  # sensor_key
+                        key,  # translation_key
+                        unit,
+                        state_class,
+                        None,  # device_class
+                        entry,
+                    )
+                )
 
     async_add_entities(entities)
 
 
+def _get_stv10_diagnostic_sensors(
+    current_state: dict[str, Any],
+) -> list[tuple[Any, ...]]:
+    """Get list of diagnostic sensors for ST-V1-0 based on config."""
+    # 1. Common ST-V1-0 Sensors (Always create)
+    sensors = [
+        ("HVAC Config Index", "hvac_config_index", None, None),
+        ("Heat Uses Fan", "adv_heat_uses_fan", None, None),
+        ("Cool Uses Fan", "adv_cool_uses_fan", None, None),
+        ("Aux Uses Fan", "adv_aux_uses_fan", None, None),
+        (
+            "Fan Runtime",
+            "adv_fan_runtime",
+            "s",
+            SensorStateClass.MEASUREMENT,
+        ),
+        (
+            "Fan Period",
+            "adv_fan_period",
+            "s",
+            SensorStateClass.MEASUREMENT,
+        ),
+        ("Fan Ramp", "adv_fan_ramp", "min", SensorStateClass.MEASUREMENT),
+        ("Cool Fan Delay", "adv_cool_fan_delay", "min", SensorStateClass.MEASUREMENT),
+        ("Heat Fan Delay", "adv_heat_fan_delay", "min", SensorStateClass.MEASUREMENT),
+        ("Cool Fan Run-on", "adv_cool_fan_run_on", "min", SensorStateClass.MEASUREMENT),
+        ("Heat Fan Run-on", "adv_heat_fan_run_on", "min", SensorStateClass.MEASUREMENT),
+        ("Multiple Fan Speeds", "multiple_fan_speeds", None, None),
+        ("Fan Sequence", "fan_sequence", None, None),
+        ("Runtime Total", "on_time", "s", SensorStateClass.TOTAL_INCREASING),
+        ("Runtime Fan", "fan_on_time", "s", SensorStateClass.TOTAL_INCREASING),
+        (
+            "Runtime Stage 2",
+            "stage_two_on_time",
+            "s",
+            SensorStateClass.TOTAL_INCREASING,
+        ),
+        (
+            "Runtime Cool Stage 1",
+            "stage_one_cool_on_time",
+            "s",
+            SensorStateClass.TOTAL_INCREASING,
+        ),
+        (
+            "Runtime Cool Stage 2",
+            "stage_two_cool_on_time",
+            "s",
+            SensorStateClass.TOTAL_INCREASING,
+        ),
+        (
+            "Runtime Emergency Heat",
+            "emergency_heat_on_time",
+            "s",
+            SensorStateClass.TOTAL_INCREASING,
+        ),
+        ("Secure Boot", "secure_boot", None, None),
+        ("Encryption Enabled", "encryption_enabled", None, None),
+        ("Private Key Status", "priv_key_ok", None, None),
+        ("Public Key Hash", "pub_key_hash", None, None),
+        ("Fault Test", "fault_test", None, None),
+    ]
+
+    # 2. Config-Specific Sensors (Feature Flag Based)
+    # Check flags for Stage 2 Heating
+    if current_state.get("heating_stage_two_exists") == 1:
+        sensors.extend(
+            [
+                (
+                    "Stage 2 Heat Delta",
+                    "adv_heat_stage_two_delta",
+                    UnitOfTemperature.CELSIUS,
+                    SensorStateClass.MEASUREMENT,
+                ),
+                (
+                    "Stage 2 Heat Delay",
+                    "adv_heat_stage_two_delay",
+                    "min",
+                    SensorStateClass.MEASUREMENT,
+                ),
+            ]
+        )
+
+    # Check flags for Stage 2 Cooling
+    if current_state.get("cooling_stage_two_exists") == 1:
+        sensors.extend(
+            [
+                (
+                    "Stage 2 Cool Delta",
+                    "adv_cool_stage_two_delta",
+                    UnitOfTemperature.CELSIUS,
+                    SensorStateClass.MEASUREMENT,
+                ),
+                (
+                    "Stage 2 Cool Delay",
+                    "adv_cool_stage_two_delay",
+                    "min",
+                    SensorStateClass.MEASUREMENT,
+                ),
+            ]
+        )
+
+    # Check flags for Heat Pump (Reversing Valve)
+    if current_state.get("is_reversible_heat_pump") == 1:
+        sensors.append(
+            (
+                "Cool When Reversed",
+                "adv_cool_when_reversed",
+                None,
+                None,
+            )
+        )
+
+    # Filter sensors based on availability in current_state
+    available_sensors = []
+    for name, key, unit, state_class in sensors:
+        # Check if key exists in state (handling direct value or nested dict)
+        if key in current_state:
+            available_sensors.append((name, key, unit, state_class))
+            continue
+
+        # Specific handling for mapped keys (fallback logic)
+        # e.g. some keys might be mapped differently, but for ST-V1 most match directly
+        # If any special handling is needed, add it here.
+        # For now, strict key matching cleans up the "Unknown" entities.
+
+    return available_sensors
+
+
 class MysaDiagnosticSensor(
-    SensorEntity, CoordinatorEntity[DataUpdateCoordinator[dict[str, Any]]]
+    SensorEntity,
+    CoordinatorEntity[DataUpdateCoordinator[dict[str, Any]]],
 ):
     """Representation of a Mysa Diagnostic Sensor."""
 
@@ -297,11 +478,32 @@ class MysaDiagnosticSensor(
         self._entry = entry
         self._device_data = device_data
         self._attr_translation_key = translation_key
+        self._attr_translation_key = translation_key
+
         self._attr_unique_id = f"{device_id}_{sensor_key.lower()}"
         self._attr_native_unit_of_measurement = unit
         self._attr_state_class = state_class
         self._attr_device_class: Any = device_class
         self._attr_extra_state_attributes: dict[str, Any] = {}
+        self._attr_should_poll = False
+
+        # Set suggested display precision
+        precision_map = {
+            "Duty": 1,
+            "Rssi": 0,
+            "Voltage": 1,
+            "Current": 2,
+            "Brightness": 0,
+            "HeatSink": 1,
+            "Infloor": 1,
+            "MaxSetpoint": 1,
+            "MinSetpoint": 1,
+            "MaxCurrent": 2,
+            "adv_heat_stage_two_delta": 1,
+            "free_heap": 0,
+        }
+        if sensor_key in precision_map:
+            self._attr_suggested_display_precision = precision_map[sensor_key]
 
         # Mapping variants
         self._keys = [sensor_key]
@@ -331,19 +533,40 @@ class MysaDiagnosticSensor(
             self._keys = ["mxbr", "MaxBrightness"]
         elif sensor_key == "TimeZone":
             self._keys = ["tz", "TimeZone"]
+        elif sensor_key == "free_heap":
+            self._keys = ["free_heap", "freeHeap", "FreeHeap"]
 
         # Categorize as Diagnostic AND Disable by default
-        if sensor_key in [
-            "Current",
-            "Duty",
-            "HeatSink",
-            "MaxCurrent",
-            "MinSetpoint",
-            "MaxSetpoint",
-            "Rssi",
-            "TimeZone",
-            "Voltage",
-        ]:
+        if (
+            sensor_key
+            in [
+                "Current",
+                "Duty",
+                "HeatSink",
+                "MaxCurrent",
+                "MinSetpoint",
+                "MaxSetpoint",
+                "Rssi",
+                "TimeZone",
+                "Voltage",
+            ]
+            or sensor_key.startswith("adv_")
+            or sensor_key
+            in [
+                "hvac_config_index",
+                "multiple_fan_speeds",
+                "fan_sequence",
+                "heating_stage_two_exists",
+                "cooling_stage_two_exists",
+                "is_reversible_heat_pump",
+                "free_heap",
+                "secure_boot",
+                "encryption_enabled",
+                "priv_key_ok",
+                "pub_key_hash",
+                "fault_test",
+            ]
+        ):
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
             self._attr_entity_registry_enabled_default = False
 
@@ -362,9 +585,8 @@ class MysaDiagnosticSensor(
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra state attributes."""
-        return {
-            "device_id": self._device_id,
-        }
+        data = {"device_id": self._device_id}
+        return data
 
     @property
     def native_value(self) -> StateType:
@@ -374,20 +596,24 @@ class MysaDiagnosticSensor(
             if self.coordinator.data
             else None
         )
-        if not state:
+        if not state or (val := self._extract_value(state, self._keys)) is None:
             return None
 
-        val = self._extract_value(state, self._keys)
-        if val is None:
-            return None
+        # Allow booleans to pass through (e.g. for HVAC fan settings)
+        if isinstance(val, bool):
+            return val
 
         # Handle percentage conversion if 0-1 range
         if self._sensor_key == "Duty":
             try:
                 fval = float(val)
-                if 0 <= fval <= 1.0:
-                    return fval * 100.0
-                return fval
+                return fval * 100.0 if 0 <= fval <= 1.0 else fval
+            except (ValueError, TypeError):
+                pass
+
+        if self._sensor_key == "hvac_config_index":
+            try:
+                return int(float(val))
             except (ValueError, TypeError):
                 pass
 
@@ -434,10 +660,12 @@ class MysaPowerSensor(
         self._entry = entry
         self._device_data = device_data
         self._attr_translation_key = "power"
+        self._attr_translation_key = "power"
         self._attr_unique_id = f"{device_id}_power"
         self._attr_native_unit_of_measurement = "W"
         self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_device_class: Any = SensorDeviceClass.POWER
+        self._attr_suggested_display_precision = 1
         # Use simple numeric types for native_value if possible,
         # but the base class SensorEntity expects StateType.
 
@@ -481,7 +709,7 @@ class MysaPowerSensor(
         force_simulated = getattr(self._api, "simulated_energy", False)
 
         # Get duty cycle (used in both real and simulated calculations)
-        duty = self._extract_value(state, ["dc", "Duty", "DutyCycle"]) or 0
+        duty = self._extract_value(state, ["dc", "Duty", "dtyCycle", "DutyCycle"]) or 0
         try:
             duty_float = float(duty)
             if duty_float > 1:
@@ -575,6 +803,7 @@ class MysaCurrentSensor(
         self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_device_class: Any = SensorDeviceClass.CURRENT
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        self._attr_suggested_display_precision = 2
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -716,6 +945,7 @@ class MysaEnergySensor(
         self._attr_device_class: Any = SensorDeviceClass.ENERGY
         self._attr_native_value: Any = 0.0
         self._last_update: float | None = None
+        self._attr_suggested_display_precision = 4
 
     async def async_added_to_hass(self) -> None:
         """Handle entity which will be added."""
@@ -810,6 +1040,7 @@ class MysaElectricityRateSensor(
         self._attr_native_unit_of_measurement = "$/kWh"  # Generic symbol per protocol
         self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        self._attr_suggested_display_precision = 4
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -896,7 +1127,8 @@ class MysaIpSensor(
 
 
 class MysaTemperatureSensor(
-    SensorEntity, CoordinatorEntity[DataUpdateCoordinator[dict[str, Any]]]
+    SensorEntity,
+    CoordinatorEntity[DataUpdateCoordinator[dict[str, Any]]],
 ):
     """Representation of a Mysa ambient temperature sensor."""
 
@@ -921,6 +1153,16 @@ class MysaTemperatureSensor(
         self._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
         self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_device_class: Any = SensorDeviceClass.TEMPERATURE
+        self._attr_suggested_display_precision = 1
+        self._keys = [
+            "current_temp",
+            "roomTemperature",
+            "currentTemperature",
+            "CorrectedTemp",
+            "ambTemp",
+            "ambient_t",
+            "SensorTemp",
+        ]
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -944,7 +1186,15 @@ class MysaTemperatureSensor(
             return None
 
         # Priority: CorrectedTemp, ambTemp, SensorTemp
-        keys = ["CorrectedTemp", "ambTemp", "ambient_t", "SensorTemp"]
+        keys = [
+            "current_temp",
+            "roomTemperature",
+            "currentTemperature",
+            "CorrectedTemp",
+            "ambTemp",
+            "ambient_t",
+            "SensorTemp",
+        ]
 
         for key in keys:
             val = state.get(key)
@@ -969,7 +1219,8 @@ class MysaTemperatureSensor(
 
 
 class MysaHumiditySensor(
-    SensorEntity, CoordinatorEntity[DataUpdateCoordinator[dict[str, Any]]]
+    SensorEntity,
+    CoordinatorEntity[DataUpdateCoordinator[dict[str, Any]]],
 ):
     """Representation of a Mysa humidity sensor."""
 
@@ -994,6 +1245,8 @@ class MysaHumiditySensor(
         self._attr_native_unit_of_measurement = PERCENTAGE
         self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_device_class: Any = SensorDeviceClass.HUMIDITY
+        self._attr_suggested_display_precision = 1
+        self._keys = ["current_humidity", "humidity", "hum", "Humidity"]
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -1016,7 +1269,7 @@ class MysaHumiditySensor(
         if not state:
             return None
 
-        keys = ["hum", "Humidity"]
+        keys = ["current_humidity", "humidity", "hum", "Humidity"]
         for key in keys:
             val = state.get(key)
             if val is not None:

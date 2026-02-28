@@ -1,3 +1,12 @@
+import os
+import sys
+import time
+
+# Add project root to path for imports
+TEST_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.dirname(TEST_DIR)
+sys.path.insert(0, ROOT_DIR)
+
 """Tests for the Mysa integration init."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -88,6 +97,47 @@ class TestAsyncSetupEntry:
 
             # 3. Verify it pushed data to coordinator
             mock_coordinator.async_set_updated_data.assert_called_with(mock_api.states)
+
+    @pytest.mark.asyncio
+    async def test_setup_entry_push_callback_debounce(self, hass, mock_entry):
+        """Test debouncing in push callback."""
+        import asyncio
+
+        with (
+            patch("custom_components.mysa.MysaApi") as MockApi,
+            patch("custom_components.mysa.DataUpdateCoordinator") as MockCoordinator,
+            patch("custom_components.mysa.ir.async_delete_issue"),
+        ):
+            mock_api = AsyncMock()
+            MockApi.return_value = mock_api
+            mock_coordinator = MagicMock()
+            mock_coordinator.async_config_entry_first_refresh = AsyncMock()
+            # async_set_updated_data is a sync method in DataUpdateCoordinator
+            mock_coordinator.async_set_updated_data = MagicMock()
+            MockCoordinator.return_value = mock_coordinator
+
+            mock_entry.domain = DOMAIN
+            hass.config_entries = MagicMock()
+            hass.config_entries.async_forward_entry_setups = AsyncMock()
+            await async_setup_entry(hass, mock_entry)
+            push_callback = mock_api.coordinator_callback
+
+            # 1. Trigger first push
+            await push_callback()
+            assert mock_coordinator.async_set_updated_data.called
+
+            # 2. Trigger second push immediately (should debounce)
+            mock_coordinator.async_set_updated_data.reset_mock()
+            await push_callback()
+            assert not mock_coordinator.async_set_updated_data.called
+
+            # 3. Trigger third push immediately (should cancel previous debounce and schedule new one)
+            await push_callback()
+            assert not mock_coordinator.async_set_updated_data.called
+
+            # 4. Wait for debounce
+            await asyncio.sleep(0.6)
+            assert mock_coordinator.async_set_updated_data.called
 
     @pytest.mark.asyncio
     async def test_setup_entry_auth_failure(self, hass, mock_entry):
@@ -603,3 +653,73 @@ class TestCoordinatorUpdate:
             # This should raise because first refresh will fail
             with pytest.raises(ConfigEntryNotReady):
                 await async_setup_entry(hass, mock_entry)
+
+# ===========================================================================
+# Consolidated Tests
+# ===========================================================================
+
+
+class TestInitConsolidated:
+    """Consolidated tests for __init__.py coverage."""
+
+    @pytest.mark.asyncio
+    async def test_init_debounce_coverage_consolidated(self, hass, monkeypatch):
+        """Cover debounce logic in __init__.py via api.coordinator_callback."""
+        import custom_components.mysa
+        import asyncio
+        from custom_components.mysa import async_setup_entry
+
+        # Use monkeypatch for all external dependencies in the module
+        mock_api_cls = MagicMock()
+        mock_api = mock_api_cls.return_value
+        mock_api.authenticate = AsyncMock()
+        mock_api.get_devices = AsyncMock(return_value={})
+        mock_api.start_mqtt_listener = AsyncMock()
+        mock_api.states = {"d1": {"v": 1}}
+
+        mock_coord_cls = MagicMock()
+        mock_coordinator = mock_coord_cls.return_value
+        mock_coordinator.async_config_entry_first_refresh = AsyncMock()
+        mock_coordinator.async_set_updated_data = MagicMock()
+
+        monkeypatch.setattr(custom_components.mysa, "MysaApi", mock_api_cls)
+        monkeypatch.setattr(
+            custom_components.mysa, "DataUpdateCoordinator", mock_coord_cls
+        )
+        monkeypatch.setattr(custom_components.mysa, "ir", MagicMock())
+        monkeypatch.setattr(custom_components.mysa, "dr", MagicMock())
+
+        entry = MagicMock()
+        entry.data = {"username": "u", "password": "p"}
+        entry.options = {}
+        entry.entry_id = "test_entry"
+        entry.domain = "mysa"
+        entry.add_update_listener = MagicMock()
+        entry.async_on_unload = MagicMock()
+
+        # Mock hass.config_entries to avoid platform setup side effects
+        hass.config_entries = MagicMock()
+        hass.config_entries.async_forward_entry_setups = AsyncMock()
+
+        # Mock class implementations to return AsyncMocks for awaited methods
+        await async_setup_entry(hass, entry)
+
+        callback = mock_api.coordinator_callback
+        assert callback is not None
+
+        # 1. First call (immediate push)
+        with patch("time.time", return_value=100.0):
+            await callback()
+            assert mock_coordinator.async_set_updated_data.call_count == 1
+
+        # 2. Rapid call (debounce) - within 0.5s of 100.0
+        with patch("time.time", return_value=100.1):
+            await callback()
+            # Call again to trigger cancel existing task (still within 0.5s of first call)
+            await callback()
+
+        # 3. Call after some time (covers line 125-126) - more than 0.5s elapsed from 100.0
+        with patch("time.time", return_value=110.0):
+             await callback()
+             # Line 125-126 should execute: if _debounce_task: _debounce_task.cancel(); _debounce_task = None
+             assert mock_coordinator.async_set_updated_data.call_count == 2

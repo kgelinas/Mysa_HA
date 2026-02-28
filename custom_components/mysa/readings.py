@@ -8,6 +8,7 @@ from typing import Any
 @dataclass
 class MysaReading:
     # pylint: disable=too-many-instance-attributes
+    # Justification: Dataclass representing all possible sensor readings.
     """Binary structure representing one raw reading from a Mysa thermostat."""
 
     ts: int  # Unix time (seconds)
@@ -23,7 +24,7 @@ class MysaReading:
     rssi: int  # Unit = 1 dBm
     onoroff: int  # Probably boolean
     ver: int  # Version byte
-    unknown2: int = 0  # Common trailer byte in all versions (V0/V1/V3)
+    checksum: int = 0  # XOR checksum byte (CRC)
     rest: bytes | None = None  # Trailing bytes
 
     def to_dict(self) -> dict[str, Any]:
@@ -45,12 +46,12 @@ class MysaReading:
 class MysaReadingV0(MysaReading):
     """Version 0 reading."""
 
-    unknown2: int = 0
+    checksum: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         """Convert reading to a dictionary compatible with integration state mapping."""
         d = super().to_dict()
-        d["unknown2"] = self.unknown2
+        d["checksum"] = self.checksum
         return d
 
 
@@ -59,13 +60,13 @@ class MysaReadingV1(MysaReading):
     """Version 1 reading (adds Voltage)."""
 
     voltage: int = 0
-    unknown2: int = 0
+    checksum: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         """Convert reading to a dictionary compatible with integration state mapping."""
         d = super().to_dict()
         d["Voltage"] = self.voltage
-        d["unknown2"] = self.unknown2
+        d["checksum"] = self.checksum
         return d
 
 
@@ -75,8 +76,8 @@ class MysaReadingV3(MysaReading):
 
     voltage: int = 0
     current: int = 0
-    always0: bytes = b""
-    unknown2: int = 0
+    reserved: bytes = b""
+    checksum: int = 0
     valid: bool = False
 
     def to_dict(self) -> dict[str, Any]:
@@ -84,7 +85,7 @@ class MysaReadingV3(MysaReading):
         d = super().to_dict()
         d["Voltage"] = self.voltage
         d["Current"] = self.current / 1000.0  # Convert mA to A
-        d["unknown2"] = self.unknown2
+        d["checksum"] = self.checksum
         d["Valid"] = self.valid
         return d
 
@@ -95,21 +96,21 @@ def _unpack_vspec(
     """Helper to unpack version-specific fields."""
     try:
         if ver == 0:
-            (unknown2,) = struct.unpack_from("<B", data, offset)
-            return MysaReadingV0(**kwargs, unknown2=unknown2)
+            (checksum,) = struct.unpack_from("<B", data, offset)
+            return MysaReadingV0(**kwargs, checksum=checksum)
         if ver == 1:
-            voltage, unknown2 = struct.unpack_from("<hB", data, offset)
-            return MysaReadingV1(**kwargs, voltage=voltage, unknown2=unknown2)
+            voltage, checksum = struct.unpack_from("<hB", data, offset)
+            return MysaReadingV1(**kwargs, voltage=voltage, checksum=checksum)
         if ver == 3:
-            voltage, current, always0, unknown2 = struct.unpack_from(
+            voltage, current, reserved, checksum = struct.unpack_from(
                 "<hh3sB", data, offset
             )
             return MysaReadingV3(
                 **kwargs,
                 voltage=voltage,
                 current=current,
-                always0=always0,
-                unknown2=unknown2,
+                reserved=reserved,
+                checksum=checksum,
             )
         return MysaReading(**kwargs)
     except struct.error:
@@ -176,8 +177,9 @@ def parse_batch_readings(readings: bytes) -> list[dict[str, Any]]:
             for b in data_slice:
                 calc_sum ^= b
 
-            if calc_sum == reading.unknown2:
+            if calc_sum == reading.checksum:
                 # pylint: disable=attribute-defined-outside-init
+                # Justification: Dynamic attribute assignment based on payload keys.
                 reading.valid = True
 
         output.append(reading.to_dict())

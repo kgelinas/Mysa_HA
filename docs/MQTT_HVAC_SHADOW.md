@@ -2,6 +2,9 @@
 
 This document details the MQTT shadow protocol used by Mysa ST-V1-0 (HVAC) devices. These devices use AWS IoT Device Shadows for state management and control.
 
+> [!TIP]
+> See also: [Backend API Reference](BACKEND_API.md) for HTTP endpoints including `/iot-token` for MQTT credentials and `/state/batch` for device telemetry.
+
 ## Topic Structure
 
 *   **Update Topic:** `$aws/things/{safe_device_id}/shadow/name/{shadow_name}/update`

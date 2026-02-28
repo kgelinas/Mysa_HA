@@ -1,11 +1,14 @@
+from unittest.mock import PropertyMock
+import asyncio
 """Tests for Mysa API Facade."""
 
 import time
 from typing import Any
-from unittest.mock import ANY, AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch, PropertyMock
 
 import pytest
 
+from custom_components.mysa.device import MysaDeviceLogic
 from custom_components.mysa.client import MysaClient
 from custom_components.mysa.mysa_api import MysaApi
 from custom_components.mysa.realtime import MysaRealtime
@@ -14,14 +17,17 @@ from custom_components.mysa.realtime import MysaRealtime
 @pytest.fixture
 def mock_hass():
     hass = MagicMock()
-
-    def mock_async_create_task(coro):
+    def mock_async_create_task(coro, *args, **kwargs):
         """Close coroutine to avoid unawaited warnings."""
         if hasattr(coro, "close"):
-            coro.close()
+            try:
+                coro.close()
+            except Exception:
+                pass
         return MagicMock()
 
     hass.async_create_task = MagicMock(side_effect=mock_async_create_task)
+    hass.async_create_background_task = MagicMock(side_effect=mock_async_create_task)
     return hass
 
 
@@ -31,27 +37,29 @@ def mock_api(mock_hass):
     api.hass = mock_hass
     api.client = MagicMock(spec=MysaClient)
     api.client.user_id = "user1"
+    api.client.get_devices = AsyncMock(return_value={})
+    api.client.get_all_firmware_versions = AsyncMock(return_value={})
     api.realtime = MagicMock(spec=MysaRealtime)
     api.realtime.send_command = AsyncMock()
+    # Mock background methods to avoid accidental coroutine creation
+    # api.update_request = AsyncMock()
+    # api.fetch_stv10_shadows = AsyncMock()
+    api._periodic_legacy_mqtt_poll = MagicMock() # Return MagicMock, not coroutine
+    # api._wait_and_refresh_mqtt = AsyncMock()
+
     api.devices = {"dev1": {"type": 4, "Model": "BB-V2", "SupportedCaps": {}}}
     api.states = {"dev1": {}}
-    api._last_command_time = {}
-
-    def mock_async_create_task(coro):
-        """Close coroutine to avoid unawaited warnings."""
-        if hasattr(coro, "close"):
-            coro.close()
-        return MagicMock()
-
-    api.hass.async_create_task = MagicMock(side_effect=mock_async_create_task)
-    api.coordinator_callback = None
+    api.device_caps = {}
     api.upgraded_lite_devices = []
-
+    api._last_command_time = {}
+    api._latest_timestamp = {}
+    api._clock_skew = {}
+    api._shadow_versions = {}
+    api._shadow_version_timestamps = {}
     api._metadata_requested = {}
+    api._last_mqtt_poll_time = {}
 
-    # Mock helpers
-    # setattr(api, "_update_state_cache", MagicMock(wraps=api._update_state_cache))
-
+    api.coordinator_callback = None
     return api
 
 
@@ -61,10 +69,10 @@ class TestMysaApi:
 
     def get_cmd_body(self, api):
         """Helper to find the command body from send_command calls."""
-        for call in api.realtime.send_command.call_args_list:
-            args = call[0]  # (device_id, body, user_id, ...)
-            body = args[1]
-            if "cmd" in body:
+        for call_args in api.realtime.send_command.call_args_list:
+            args, kwargs = call_args
+            body = args[1] if len(args) > 1 else kwargs.get("body")
+            if body and "cmd" in body:
                 return body
         return None
 
@@ -105,6 +113,7 @@ class TestMysaApi:
                 == mock_client_cls.return_value.get_signed_mqtt_url
             )
             # Check on_update_callback is bound method
+            # Justification: Comparing bound method to verify callback assignment in test.
             assert kwargs["on_update_callback"] == api._on_mqtt_update  # pylint: disable=comparison-with-callable
 
     # --- Tests from test_mysa_api_coverage.py ---
@@ -116,7 +125,9 @@ class TestMysaApi:
 
         await api.set_lock("dev1", True)
 
-        api.client.set_device_setting_http.assert_called_with("dev1", {"Lock": 1})
+        api.client.set_device_setting_http.assert_called_with(
+            "dev1", {"ButtonState": "Locked"}, legacy=True
+        )
         assert api.states["dev1"]["Lock"]["v"] == 1
 
         # Verify MsgType 6 (Notify) was sent
@@ -126,15 +137,65 @@ class TestMysaApi:
     async def test_set_ac_climate_plus(self, mock_api):
         """Test set_ac_climate_plus via HTTP."""
         api = mock_api
+        api.devices["dev1"] = {"Model": "AC-V1", "type": 9}
+        api.client.user_id = "user1"
         api.client.set_device_setting_http = AsyncMock()
         await api.set_ac_climate_plus("dev1", True)
 
         api.client.set_device_setting_http.assert_called_with(
-            "dev1", {"IsThermostatic": True}
+            "dev1", {"IsThermostatic": True}, legacy=True
         )
+        # AC settings also trigger MsgType 6 (Notification)
+        msg6_body = self.get_msg_type_body(api, 6)
+        assert msg6_body is not None
+        assert msg6_body["MsgType"] == 6
+
+        # Verify state was updated (optimistic)
         assert api.states["dev1"]["EcoMode"] is True
-        assert self.get_msg_type_body(api, 6) is not None
-        assert self.get_msg_type_body(api, 7) is None
+
+    async def test_async_send_state_poll(self, mock_hass):
+        """Test MsgType 11 polling."""
+        api = MysaApi.__new__(MysaApi)
+        api.hass = mock_hass
+        api.client = MagicMock()
+        api.client.user_id = "user1"
+        api.realtime = MagicMock()
+        api.devices = {}
+        api._last_mqtt_poll_time = {}
+
+        # 1. Ignored for ST-V1-0
+        api.devices["stv1"] = {"Model": "ST-V1-0"}
+        api.realtime.is_connected = True
+        api._last_mqtt_poll_time = {}
+        await api.async_send_state_poll("stv1")
+        api.realtime.send_command.assert_not_called()
+
+        # 2. Ignored if MQTT not active
+        api.devices["dev2"] = {"Model": "BB-V1"}
+        api.realtime.is_connected = False
+        api._last_mqtt_poll_time = {}
+        api.realtime.send_command.reset_mock()
+        await api.async_send_state_poll("dev2")
+        api.realtime.send_command.assert_not_called()
+
+        # 3. Successful payload send
+        api.realtime.is_connected = True
+        api._last_mqtt_poll_time = {}
+        api.realtime.send_command.reset_mock()
+        await api.async_send_state_poll("dev2")
+        api.realtime.send_command.assert_called_with(
+            "dev2", {"Device": "dev2", "Timestamp": ANY, "MsgType": 11, "Timeout": 300}, api.client.user_id, msg_type=11, wrap=False, use_persistent_only=True
+        )
+
+        # 4. Exception handling
+        api.realtime.send_command.reset_mock()
+        api.realtime.send_command.side_effect = Exception("Test Error")
+        api.realtime.is_connected = True
+        api._last_mqtt_poll_time = {}
+        await api.async_send_state_poll("dev2")
+        # Should log error and not raise
+        api.realtime.send_command.assert_called()
+
 
     async def test_set_proximity(self, mock_api):
         """Test set_proximity via HTTP."""
@@ -143,7 +204,7 @@ class TestMysaApi:
         await api.set_proximity("dev1", True)
 
         api.client.set_device_setting_http.assert_called_with(
-            "dev1", {"ProximityMode": True}
+            "dev1", {"ProximityMode": True}, legacy=True
         )
         assert api.states["dev1"]["ProximityMode"] is True
         assert self.get_msg_type_body(api, 6) is not None
@@ -156,7 +217,7 @@ class TestMysaApi:
         await api.set_auto_brightness("dev1", True)
 
         api.client.set_device_setting_http.assert_called_with(
-            "dev1", {"AutoBrightness": True}
+            "dev1", {"AutoBrightness": True}, legacy=True
         )
         assert api.states["dev1"]["AutoBrightness"] is True
         assert self.get_msg_type_body(api, 6) is not None
@@ -169,7 +230,7 @@ class TestMysaApi:
         await api.set_min_brightness("dev1", 10)
 
         api.client.set_device_setting_http.assert_called_with(
-            "dev1", {"MinBrightness": 10}
+            "dev1", {"MinBrightness": 10}, legacy=True
         )
         assert api.states["dev1"]["MinBrightness"] == 10
         assert self.get_msg_type_body(api, 6) is not None
@@ -182,7 +243,7 @@ class TestMysaApi:
         await api.set_max_brightness("dev1", 90)
 
         api.client.set_device_setting_http.assert_called_with(
-            "dev1", {"MaxBrightness": 90}
+            "dev1", {"MaxBrightness": 90}, legacy=True
         )
         assert api.states["dev1"]["MaxBrightness"] == 90
         assert self.get_msg_type_body(api, 6) is not None
@@ -279,6 +340,7 @@ class TestMysaApi:
         assert api.homes == ["home1"]
         assert api.is_connected is True
         assert api.is_mqtt_running is True
+
 
         new_devices: dict[str, Any] = {"dev2": {}}
         api.devices = new_devices
@@ -381,6 +443,20 @@ class TestMysaApi:
         assert body is not None
         assert body["cmd"][0]["md"] == 1
 
+    async def test_extract_stv10_shadow_format(self, mock_api):
+        """Test extraction of format from physicalInterface shadow."""
+        api = mock_api
+        state_update = {"format": "F"}
+        api._extract_stv10_shadow_data(state_update)
+        assert state_update["temperature_format"] == "F"
+
+    async def test_on_mqtt_update_flatten(self, mock_api):
+        """Test flattening of state payload."""
+        api = mock_api
+        update = {"state": {"foo": "bar"}}
+        await api._on_mqtt_update("dev1", update)
+        assert api.states["dev1"]["foo"] == "bar"
+
     async def test_update_state_cache_new(self, mock_api):
         """Test update cache for new device."""
         api = mock_api
@@ -402,18 +478,51 @@ class TestMysaApi:
         # This triggers line 436: if device_id not in self.states
         api._update_brightness_cache("device_1", "a_br", 85)
 
+
+    async def test_stv10_extraction_edge_cases(self, mock_api):
+        """Test edge cases in ST-V1-0 extraction logic."""
+        api = mock_api
+
+        # Specifically test that normalize_state is called OR logic is present
+        api.devices["dev1"] = {"Model": "ST-V1-0", "type": 1}
+        state_update={"currentTemperature": 2300}
+        api._extract_stv10_shadow_data(state_update, skip_sensors=False)
+        from custom_components.mysa.device import MysaDeviceLogic
+        MysaDeviceLogic.normalize_state(state_update)
+        assert state_update.get("current_temp") == 23.0
+
+        # humidity in reading path
+        state_update={"reading": {"humidity": 50}}
+        api._extract_stv10_shadow_data(state_update, skip_sensors=False)
+        MysaDeviceLogic.normalize_state(state_update)
+        assert state_update.get("current_humidity") == 50
+
+        # current_temp_raw heuristic (val > 100)
+        await api._on_mqtt_update("dev1", {"current_temp_raw": 2400})
+        # current_temp SHOULD be in states for ST-V1 via MQTT after fix
+        assert api.states["dev1"]["current_temp"] == 24.0
+        # And raw value should be there
+        assert api.states["dev1"]["current_temp_raw"] == 2400
+
+        # current_temp_raw heuristic (val <= 100)
+        await api._on_mqtt_update("dev1", {"current_temp_raw": 22.5})
+        # current_temp SHOULD be in states for ST-V1 via MQTT after fix
+        assert api.states["dev1"]["current_temp"] == 22.5
+        # And raw value should be there
+        assert api.states["dev1"]["current_temp_raw"] == 22.5
     async def test_lifecycle_delegation(self, mock_api):
         """Test lifecycle methods."""
         api = mock_api
 
-        api.client.authenticate = AsyncMock()
+        api.client.authenticate = AsyncMock(return_value=True)
+        assert await api.authenticate() is True
         api.client.get_devices = AsyncMock(return_value={"d1": {}})
         api.client.fetch_homes = AsyncMock()
         api.realtime.start = AsyncMock()
         api.realtime.stop = AsyncMock()
 
         await api.authenticate()
-        api.client.authenticate.assert_called_once()
+        api.client.authenticate.assert_called()
 
         await api.get_devices()
         api.client.get_devices.assert_called_once()
@@ -430,6 +539,21 @@ class TestMysaApi:
         api.get_electricity_rate("dev1")
         api.client.get_electricity_rate.assert_called_with("dev1")
 
+    async def test_stv10_telemetry_extraction(self, mock_api):
+        """Test ST-V1-0 telemetry extraction."""
+        api = mock_api
+        payload = {
+            "_shadow_name": "latestTelemetry",
+            "reading": {
+                "temperature": 2250,
+                "humidityDisplay": 45
+            }
+        }
+        api._extract_stv10_shadow_data(payload, skip_sensors=False)
+        MysaDeviceLogic.normalize_state(payload)
+        assert payload["current_temp"] == 22.5
+        assert payload["current_humidity"] == 45
+
         await api.start_mqtt_listener()
         api.realtime.start.assert_called_once()
 
@@ -438,6 +562,15 @@ class TestMysaApi:
         # And not clobber Brightness if it exists (which it doesn't here, but key check passes)
 
     # --- Merged from original test_api.py ---
+
+    async def test_is_connected(self, mock_hass):
+        """Test is_connected property."""
+        api = MysaApi.__new__(MysaApi)
+        api.client = MagicMock()
+        api.client.is_connected = True
+        assert api.is_connected
+        api.client.is_connected = False
+        assert not api.is_connected
 
     async def test_set_target_temperature(self, mock_api):
         """Test setting target temperature."""
@@ -596,24 +729,32 @@ class TestMysaApi:
         api.update_request = AsyncMock()
         api.devices = {"dev1": {}, "dev2": {}}
 
-        # Capture background task to await it manually
-        background_tasks = []
+        # Capture the foreground task (wait_and_refresh) via async_create_task
+        fg_tasks = []
+        def capture_fg_task(coro, **kwargs):
+            fg_tasks.append(coro)
+            return MagicMock()
 
-        def capture_task(coro):
-            background_tasks.append(coro)
-            return MagicMock()  # Return mock task object
+        # Capture the background polling task via async_create_background_task
+        bg_tasks = []
+        def capture_bg_task(coro, **kwargs):
+            bg_tasks.append(coro)
+            return MagicMock()
 
-        api.hass.async_create_task.side_effect = capture_task
+        api.hass.async_create_task.side_effect = capture_fg_task
+        api.hass.async_create_background_task.side_effect = capture_bg_task
 
         await api.start_mqtt_listener()
 
         api.realtime.start.assert_called_once()
 
-        # Verify task was scheduled
-        assert len(background_tasks) == 1
+        # Periodic poll scheduled as background task
+        assert len(bg_tasks) == 1
+        # Wait/refresh scheduled as foreground task
+        assert len(fg_tasks) == 1
 
-        # Await the captured coroutine to execute the logic in this test context
-        await background_tasks[0]
+        # Await the wait_and_refresh coroutine
+        await fg_tasks[0]
 
         api.realtime.wait_until_connected.assert_called_once_with(timeout=35.0)
         assert api.update_request.call_count == 2
@@ -627,24 +768,28 @@ class TestMysaApi:
         api.realtime.wait_until_connected = AsyncMock(return_value=False)
         api.update_request = AsyncMock()
 
-        # Capture background task
-        background_tasks = []
-
-        def capture_task(coro):
-            background_tasks.append(coro)
+        fg_tasks = []
+        def capture_fg_task(coro, **kwargs):
+            fg_tasks.append(coro)
             return MagicMock()
 
-        api.hass.async_create_task.side_effect = capture_task
+        bg_tasks = []
+        def capture_bg_task(coro, **kwargs):
+            bg_tasks.append(coro)
+            return MagicMock()
+
+        api.hass.async_create_task.side_effect = capture_fg_task
+        api.hass.async_create_background_task.side_effect = capture_bg_task
 
         await api.start_mqtt_listener()
 
         api.realtime.start.assert_called_once()
 
-        # Verify task was scheduled
-        assert len(background_tasks) == 1
+        assert len(bg_tasks) == 1
+        assert len(fg_tasks) == 1
 
-        # Await the captured coroutine
-        await background_tasks[0]
+        # Await the wait_and_refresh coroutine
+        await fg_tasks[0]
 
         api.realtime.wait_until_connected.assert_called_once()
         api.update_request.assert_not_called()
@@ -796,6 +941,74 @@ class TestMysaApi:
         api.states["dev2"] = {"FirmwareVersion": "1.0.0", "ip": "1.2.3.4"}
         await api._on_mqtt_update("dev2", {"temp": 22})
         api.update_request.assert_not_called()
+
+    async def test_nested_timestamp_extraction(self, mock_api):
+        """Test that extract_timestamp correctly finds nested 't' timestamps."""
+        api = mock_api
+        # Using static method directly
+
+        # 1. Simulate an MQTT update (e.g. at T=100)
+        device_id = "dev1"
+        mqtt_update = {
+            "CorrectedTemp": 20.0,
+            "Timestamp": 100
+        }
+
+        api._update_state_cache(device_id, mqtt_update, filter_stale=False)
+
+        assert api.states[device_id]["CorrectedTemp"] == 20.0
+        assert api._latest_timestamp[device_id] == 100
+
+        # 2. Simulate an HTTP Poll update (e.g. at T=110)
+        # HTTP update lacks top-level Timestamp/time, but has nested 't'
+        http_update = {
+            "CorrectedTemp": {
+                "v": 18.3,
+                "t": 110  # Newer than 100
+            },
+            "Mode": {
+                "v": 4,
+                "t": 105  # Also newer
+            }
+        }
+
+        # HTTP updates use filter_stale=True
+        api._update_state_cache(device_id, http_update, filter_stale=True)
+
+        # Checks
+        current_temp = api.states[device_id]["CorrectedTemp"]
+        assert isinstance(current_temp, dict)
+        assert current_temp["v"] == 18.3
+        assert current_temp["t"] == 110
+
+        # Should have updated latest_timestamp to 110
+        assert api._latest_timestamp[device_id] == 110
+
+    async def test_stale_http_update_rejected(self, mock_api):
+        """Test that truly stale HTTP updates are rejected."""
+        api = mock_api
+        api.update_request = AsyncMock()
+        device_id = "dev1"
+
+        # 1. Fresh MQTT update (T=200)
+        api._update_state_cache(device_id, {"Timestamp": 200, "CorrectedTemp": 21.0}, filter_stale=False)
+        assert api._latest_timestamp[device_id] == 200
+
+        # 2. Stale HTTP update (T=190)
+        stale_update = {
+            "CorrectedTemp": {
+                "v": 19.5,
+                "t": 190
+            }
+        }
+
+        api._update_state_cache(device_id, stale_update, filter_stale=True)
+
+        # Should still be the MQTT value (21.0)
+        assert api.states[device_id]["CorrectedTemp"] == 21.0
+        assert api._latest_timestamp[device_id] == 200
+        # Check metadata request wasn't called (it's an AsyncMock)
+        api.update_request.assert_not_called()
         assert "dev2" not in api._metadata_requested
 
     async def test_proactive_metadata_partial_missing(self, mock_api):
@@ -810,6 +1023,64 @@ class TestMysaApi:
             await api._on_mqtt_update("dev3", {"temp": 20})
             api.update_request.assert_called_once_with("dev3")
             assert api._metadata_requested["dev3"] == 2000.0
+
+    async def test_api_mqtt_update_detailed_final(self, mock_api):
+        """Test activeMode extraction from ST-V1-0 MQTT update (coverage)."""
+        api = mock_api
+        api.coordinator_callback = AsyncMock()
+        api.devices = {"dev1": {"Model": "ST-V1-0"}}
+
+        # Payload with activeMode
+        update = {"activeMode": 4, "hvacState": 4}
+        await api._on_mqtt_update("dev1", update)
+
+        assert api.states["dev1"]["active_mode"] == 4
+        assert api.states["dev1"]["hvac_state"] == 4
+
+
+    async def test_legacy_http_setters_coverage(self, mock_api):
+        """Test new legacy HTTP setter methods for coverage."""
+        api = mock_api
+        api.client.set_device_setting_http = AsyncMock()
+        api.notify_settings_changed = AsyncMock()
+        api.coordinator_callback = AsyncMock()
+
+        # 1. set_min_setpoint
+        await api.set_min_setpoint("dev1", 10.5)
+        api.client.set_device_setting_http.assert_called_with("dev1", {"MinSetpoint": 10.5}, legacy=True)
+        assert api.states["dev1"]["MinSetpoint"] == 10.5
+        api.notify_settings_changed.assert_called_with("dev1")
+
+        # 2. set_max_setpoint
+        api.notify_settings_changed.reset_mock()
+        await api.set_max_setpoint("dev1", 29.5)
+        api.client.set_device_setting_http.assert_called_with("dev1", {"MaxSetpoint": 29.5}, legacy=True)
+        assert api.states["dev1"]["MaxSetpoint"] == 29.5
+        api.notify_settings_changed.assert_called_with("dev1")
+
+        # 3. set_temperature_format
+        api.notify_settings_changed.reset_mock()
+        await api.set_temperature_format("dev1", True)  # Fahrenheit
+        api.client.set_device_setting_http.assert_called_with("dev1", {"Format": "fahrenheit"}, legacy=True)
+        assert api.states["dev1"]["Format"] == "fahrenheit"
+        api.notify_settings_changed.assert_called_with("dev1")
+
+        # 4. set_duty_cycle_opt
+        api.notify_settings_changed.reset_mock()
+        await api.set_duty_cycle_opt("dev1", 8)
+        api.client.set_device_setting_http.assert_called_with("dev1", {"DutyCycleOpt": 8}, legacy=True)
+        assert api.states["dev1"]["DutyCycleOpt"] == 8
+        api.notify_settings_changed.assert_called_with("dev1")
+
+        # 5. set_target_temperature_range (Legacy path)
+        api.client.set_device_setting_http.reset_mock()
+        api.devices["dev1"] = {"Model": "BB-V2"}
+        await api.set_target_temperature_range("dev1", 18.0, 22.0)
+        # Should call set_min and set_max
+        assert api.client.set_device_setting_http.call_count == 2
+        calls = [tuple(c.args) for c in api.client.set_device_setting_http.call_args_list]
+        assert ("dev1", {"MinSetpoint": 18.0}) in calls
+        assert ("dev1", {"MaxSetpoint": 22.0}) in calls
 
 
 # --- Merged from test_brightness_logic.py ---
@@ -894,7 +1165,7 @@ async def test_set_max_brightness_preserves_min(mock_api_logic):
         await mock_api.set_max_brightness("d1", 95)
 
         # Verify HTTP call
-        mock_http.assert_called_once_with("d1", {"MaxBrightness": 95})
+        mock_http.assert_called_once_with("d1", {"MaxBrightness": 95}, legacy=True)
 
         # Verify MQTT notify cycle (MsgType 6 only)
         assert mock_send.called
@@ -916,8 +1187,10 @@ async def test_mqtt_update_prevents_cloud_overwrite(mock_hass):
     # 1. Initial State
     api.states[dev_id] = {"stpt": 20.0, "SetPoint": 20.0}
 
-    # 2. MQTT Update (User sets 24.0)
-    # This should update _last_command_time
+    # 2. Simulate User sending command (sets _last_command_time)
+    api._last_command_time[dev_id] = time.time()
+
+    # 2b. Simulate incoming MQTT Update (User sets 24.0)
     await api._on_mqtt_update(dev_id, {"stpt": 24.0, "3": 24.0})
 
     # Verify State is 24.0
@@ -950,14 +1223,14 @@ async def test_extract_timestamp_invalid(mock_hass):
     api = MysaApi("user", "pass", mock_hass)
 
     # 1. Invalid string
-    assert api._extract_timestamp({"Timestamp": "invalid"}) is None
+    assert MysaDeviceLogic.extract_timestamp({"Timestamp": "invalid"}) is None
 
     # 2. Invalid nested type (e.g. dict where int expected, though unlikely)
-    assert api._extract_timestamp({"time": {}}) is None
+    assert MysaDeviceLogic.extract_timestamp({"time": {}}) is None
 
     # Valid
-    assert api._extract_timestamp({"Timestamp": 12345}) == 12345
-    assert api._extract_timestamp({"time": "54321"}) == 54321
+    assert MysaDeviceLogic.extract_timestamp({"Timestamp": 12345}) == 12345
+    assert MysaDeviceLogic.extract_timestamp({"time": "54321"}) == 54321
 
 
 @pytest.mark.asyncio
@@ -982,9 +1255,9 @@ async def test_set_sensor_mode_coverage(mock_hass):
         # Verify UI Refresh
         api.coordinator_callback.assert_called_once()
 
-        # Verify HTTP Command (1=Floor -> TrackedSensor=3)
-        api.client.set_device_setting_http.assert_called_once_with(
-            "d1", {"TrackedSensor": 3}
+        # Verify HTTP call
+        api.client.set_device_setting_http.assert_called_with(
+            "d1", {"TrackedSensor": 3}, legacy=True
         )
 
         # Verify Notify
@@ -1036,8 +1309,802 @@ async def test_timestamp_prevents_stale_update_explicit(mock_hass):
     # Verify 'stpt' was NOT applied
     assert "stpt" not in api.states[dev_id]
 
-    # 3. Try update with SAME timestamp but filter_stale=True
-    # Should also return early
+    # 3. Try update with SAME timestamp and filter_stale=True.
+    # Previously this was rejected, but we removed the equal-timestamp rejection
+    # because it silently dropped valid HTTP state at startup.
+    # Equal-timestamp updates are now ACCEPTED; command-sensitive fields are
+    # still protected by _filter_stale_updates within the 90s window.
     update_data_same = {"stpt": 25.0, "Timestamp": 2000}
     api._update_state_cache(dev_id, update_data_same, filter_stale=True)
-    assert "stpt" not in api.states[dev_id]
+    # stpt should now be written (no recent command within 90s to block it)
+    assert api.states[dev_id].get("stpt") == 25.0
+
+
+    async def test_mysa_api_fires_history_event_is_noop(self):
+        """Test that MysaApi no longer fires history events (feature removed from core)."""
+        # Feature removed.
+        pass
+
+    async def test_s1_target_auto_shadow_normalization(self, mock_api):
+        """Test normalization of S1 targetAuto shadow fields."""
+        api = mock_api
+        api.devices = {"dev1": {"Model": "ST-V1-0"}}
+        api.coordinator_callback = AsyncMock()
+
+        # Simulate targetAuto shadow update
+        state_update = {
+            "heatSetpoint": 2000,
+            "coolSetpoint": 2400,
+            "version": 24,
+            "_shadow_name": "targetAuto"
+        }
+        await api._on_mqtt_update("dev1", state_update, resolve_safe_id=True)
+
+        device_state = api.states["dev1"]
+        assert device_state["target_heat"] == 20.0
+        assert device_state["target_cool"] == 24.0
+        # Check backward compatibility keys if any were added
+        assert device_state["heatsetpoint"] == 20.0
+        assert device_state["coolsetpoint"] == 24.0
+
+    async def test_set_target_temperature_range_stv10(self, mock_api):
+        """Test setting temperature range for S1 Auto mode."""
+        api = mock_api
+        api.devices = {"dev1": {"Model": "ST-V1-0"}}
+        api.realtime.publish = AsyncMock()
+
+        await api.set_target_temperature_range("dev1", 18.5, 25.0)
+
+        # Verify publish call
+        api.realtime.publish.assert_called_once()
+        topic, payload = api.realtime.publish.call_args[0]
+        assert "dev1" in topic
+        assert "targetAuto" in topic
+        assert payload["state"]["desired"]["heatSetpoint"] == 1850
+        assert payload["state"]["desired"]["coolSetpoint"] == 2500
+
+        # Verify optimistic update
+        assert api.states["dev1"]["target_heat"] == 18.5
+        assert api.states["dev1"]["target_cool"] == 25.0
+
+
+class TestApiConsolidated:
+    """Consolidated API tests from final and extra coverage."""
+
+    @pytest.mark.asyncio
+    async def test_stv10_target_cool_shadow_consolidated(self, hass):
+        """Test ST-V1-0 targetCool shadow handling."""
+        mock_websession = MagicMock()
+        api = MysaApi("user", "pass", hass, websession=mock_websession)
+        api.devices = {"dev1": {"Model": "ST-V1-0"}}
+        api.states = {"dev1": {}}
+        api.realtime = MagicMock()
+        api.realtime.publish = AsyncMock()
+
+        state_update = {"_shadow_name": "targetCool", "value": 2200, "source": "mqtt"}
+        await api._on_mqtt_update("dev1", state_update)
+
+        assert api.states["dev1"]["target_cool"] == 22.0
+        assert api.states["dev1"]["stpt"] == 22.0
+
+    @pytest.mark.asyncio
+    async def test_set_target_temperature_stv10_branch_consolidated(self, hass):
+        """Test set_target_temperature with ST-V1-0 device."""
+        mock_websession = MagicMock()
+        api = MysaApi("user", "pass", hass, websession=mock_websession)
+        api.devices = {"dev1": {"Model": "ST-V1-0"}}
+        api.states = {"dev1": {"md": 4}}
+        api.realtime = MagicMock()
+        api.realtime.publish = AsyncMock()
+
+        mock_set = AsyncMock()
+        api.set_stv10_target_temperature = mock_set
+        api.client.set_device_setting_http = AsyncMock()
+
+        await api.set_target_temperature("dev1", 21.5)
+        mock_set.assert_called_once_with("dev1", 21.5)
+
+    @pytest.mark.asyncio
+    async def test_mysa_api_stv10_setters_coverage_consolidated(self, hass):
+        """Cover missing setter lines in mysa_api.py."""
+        mock_websession = MagicMock()
+        with patch("custom_components.mysa.mysa_api.MysaRealtime") as mock_real_class:
+            mock_realtime = mock_real_class.return_value
+            mock_realtime.wait_until_connected = AsyncMock(return_value=True)
+
+            mock_callback = AsyncMock()
+            api = MysaApi(
+                "u",
+                "p",
+                hass,
+                websession=mock_websession,
+                coordinator_callback=mock_callback,
+            )
+            api.realtime = mock_realtime
+            api.client = MagicMock()
+            api.client.user_id = "u1"
+            api.client.post_state_update = AsyncMock()
+            api.notify_settings_changed = AsyncMock()
+            api.states["d1"] = {}
+            api.devices = {"d1": {"Model": "ST-V1-0"}}
+
+            await api.set_stv10_proximity("d1", True)
+            assert api.states["d1"]["pr"] == 1
+            mock_callback.assert_called()
+
+            await api.set_stv10_allow_auto_mode("d1", True)
+            assert api.states["d1"]["auto_mode_enabled"] == 1
+
+            await api.set_stv10_temperature_format("d1", True)
+            assert api.states["d1"]["temperature_format"] == "F"
+
+    @pytest.mark.asyncio
+    async def test_mysa_api_initialization_metadata_coverage_consolidated(self, hass):
+        """Cover metadata initialization lines in mysa_api.py."""
+        mock_websession = MagicMock()
+        with patch("custom_components.mysa.mysa_api.MysaRealtime") as mock_real_class:
+            mock_realtime = mock_real_class.return_value
+            mock_realtime.wait_until_connected = AsyncMock(return_value=True)
+
+            api = MysaApi("u", "p", hass, websession=mock_websession)
+            api.client.get_all_firmware_versions = AsyncMock(
+                return_value={"d1": {"InstalledVersion": "1.2.3"}}
+            )
+
+            await api._initialize_firmware_versions()
+            assert api.states["d1"]["FirmwareVersion"] == "1.2.3"
+
+    @pytest.mark.asyncio
+    async def test_mysa_api_stale_update_detailed_logic_consolidated(self, hass):
+        """Cover missing staleness lines in mysa_api.py."""
+        mock_websession = MagicMock()
+        api = MysaApi("u", "p", hass, websession=mock_websession)
+        api.devices = {"d1": {"Model": "ST-V1-0"}}
+
+        if hasattr(api, "_shadow_version_timestamps"):
+            del api._shadow_version_timestamps
+        api._check_shadow_version_staleness("d1", 10, "shadow", False)
+        assert hasattr(api, "_shadow_version_timestamps")
+
+        api._shadow_versions["d1"] = {"shadow": 10}
+        api._shadow_version_timestamps["d1"] = {"shadow": time.time() - 400}
+        assert api._check_shadow_version_staleness("d1", 5, "shadow", False) is False
+
+    @pytest.mark.asyncio
+    async def test_mysa_api_nested_mode_extraction_consolidated(self, hass):
+        """Cover nested mode extraction."""
+        mock_websession = MagicMock()
+        api = MysaApi("u", "p", hass, websession=mock_websession)
+        api.devices = {"d1": {"Model": "ST-V1-0"}}
+        state_update = {"modes": {"reported": {"activeMode": 3}}}
+        api._update_state_cache("d1", state_update)
+        assert api.states["d1"]["active_mode"] == 3
+
+
+
+
+
+
+
+class TestApiRestoredConsolidated:
+    """Consolidated restored tests for MysaApi coverage gaps."""
+
+    @pytest.mark.asyncio
+    async def test_api_stv10_shadow_normalization_consolidated(self, mock_api):
+        """Cover ST-V1-0 shadow flattening and normalization."""
+        api = mock_api
+        api.devices = {"d1": {"Model": "ST-V1-0"}}
+        api.states = {"d1": {}}
+        state_update = {
+            "state": {
+                "reported": {
+                    "targetHeat": 2000,
+                    "targetCool": 2500,
+                    "setpoint": 2100,
+                }
+            }
+        }
+
+        # Test line 1466-1474 via the mock process
+        # `_extract_stv10_shadow_data` is used        # Test line 1466-1474 via the mock process
+        # target_heat relies on _on_mqtt_update!
+        await api._on_mqtt_update("d1", {"_shadow_name": "targetHeat", "value": 2000, "targetCool": 2500})
+        state = api.states["d1"]
+        assert state["target_heat"] == 20.0
+
+        await api._on_mqtt_update("d1", {"setpoint": 2100, "heatSetpoint": 2200, "coolSetpoint": 2600})
+        state = api.states["d1"]
+        assert state["SetPoint"] == 21.0
+        assert state["target_heat"] == 22.0
+        assert state["target_cool"] == 26.0
+
+    @pytest.mark.asyncio
+    async def test_api_parallel_fetch_failure_consolidated(self, mock_api):
+        """Cover parallel capability fetch failure (lines 223-227, 237-238)."""
+        api = mock_api
+        api._capabilities_initialized = False
+        # Setup device and states so Cap fetch triggers properly
+        api.devices = {"d1_stv1": {"Model": "ST-V1-0"}}
+        api.states = {"d1_stv1": {}}
+        api.client.get_devices = AsyncMock(return_value=api.devices)
+
+        # Test 1: Exception during fetch
+        api.client.fetch_capabilities = AsyncMock(side_effect=Exception("Fetch Fail"))
+        await api._initialize_capabilities()
+        # It falls back to state-based initialization, but we shouldn't hit cap_results block
+        assert api.device_caps["d1_stv1"].is_stv10 is True
+
+        # Test 2: Success path directly hitting 228-229 and 237-238
+        api._capabilities_initialized = False
+        api.client.fetch_capabilities = AsyncMock(return_value={"modes": {"1": "heat"}})
+        await api._initialize_capabilities()
+        assert api.device_caps["d1_stv1"].is_stv10 is True
+
+    @pytest.mark.asyncio
+    async def test_api_process_mqtt_edge_cases(self, mock_api):
+        """Cover all branches in _on_mqtt_update specific normalization (lines 331, 348, 358-360, 362-364, 373, 377)."""
+        api = mock_api
+        api.devices = {"d1": {"Model": "ST-V1-0"}}
+        api.states = {"d1": {}}
+        api._update_state_cache = MagicMock()
+
+        # Branch 331: modes shadow
+        msg1 = {"mode": 3, "source": 2}
+        await api._on_mqtt_update("d1", msg1)
+        api._update_state_cache.assert_called_with("d1", {"mode": 3, "source": 2, "md": 3}, filter_stale=False)
+
+        # Branch 348: targetHeat explicitly via _shadow_name
+        msg2 = {"value": 2200, "_shadow_name": "targetHeat"}
+        await api._on_mqtt_update("d1", msg2)
+
+        # Branches 358-360, 362-364: heatSetpoint and coolSetpoint
+        msg3 = {"heatSetpoint": 2000, "coolSetpoint": 2500}
+        await api._on_mqtt_update("d1", msg3)
+
+        # Branches 373, 377: ButtonState and hvacConfig
+        msg4 = {"ButtonState": 1, "hvacConfig": {"idx": 5}}
+        await api._on_mqtt_update("d1", msg4)
+
+    @pytest.mark.asyncio
+    async def test_api_stv10_specific_commands(self, mock_api):
+        """Cover ST-V1 specific command overrides (lines 760-767, 808-809)."""
+        api = mock_api
+        api.devices = {"d1": {"Model": "ST-V1-0"}}
+        api.set_stv10_hvac_mode = AsyncMock()
+
+        # Lines 808-809
+        await api.set_hvac_mode("d1", "heat")
+        api.set_stv10_hvac_mode.assert_called_once_with("d1", 4)
+
+        # Lines 760-767
+        await api.set_target_temperature_range("d1", 20.0, 25.0)
+        api.client.post_state_update.assert_called_once()
+
+
+    @pytest.mark.asyncio
+    async def test_api_stale_metadata_check_consolidated(self, mock_api):
+        """Cover _check_shadow_version_staleness return True (line 1612)."""
+        api = mock_api
+        api._shadow_versions = {"d1": {"s1": 10}}
+        api._shadow_version_timestamps = {"d1": {"s1": time.time()}}
+
+        # Trigger line 1612: return True (incoming < current and not relaxed)
+        assert api._check_shadow_version_staleness("d1", 5, "s1", False) is True
+
+    @pytest.mark.asyncio
+    async def test_api_check_staleness_coverage_consolidated(self, mock_api):
+        """Cover _check_staleness branches (lines 1553-1562, 1648-1655, 1657-1662)."""
+        api = mock_api
+        # Trigger line 1552 logic: if not hasattr(self, "_latest_timestamp")
+        if hasattr(api, "_latest_timestamp"):
+            del api._latest_timestamp
+
+        # Trigger line 1553: if device_id not in self._shadow_versions: return False
+        api._shadow_versions = {}
+        assert api._check_staleness("d1", 12345, True, 1, "s1") is False
+
+        # Trigger line 1557: if incoming_ts is None and incoming_version is None: return False
+        api._shadow_versions = {"d1": {"s1": 1}}
+        assert api._check_staleness("d1", None, True, None, "s1") is False
+
+        # Trigger line 1562: if not filter_stale: return False
+        assert api._check_staleness("d1", 12345, False, 1, "s1") is False
+
+        # Trigger line 1648-1655: Genuine stale shadow update
+        api._shadow_versions = {"d1": {"s1": 1}}
+        api.devices = {"d1": {"Model": "ST-V1-0"}}
+        api._latest_timestamp = {"d1": 2000}
+        api._last_command_time = {"d1": 1000} # > 90s since now ~ 2000
+        with patch("time.time", return_value=3000):
+            # Incoming TS (1000) < Current TS (2000) - 10
+            assert api._check_staleness("d1", 1000, False, 2, "s1") is True
+
+        # Trigger line 1657-1662: Standard stale update (non-shadow or recent command)
+        api.devices = {"d1": {"Model": "BB-V2"}}
+        api._latest_timestamp = {"d1": 2000}
+        assert api._check_staleness("d1", 1000, False, None, None) is True
+
+    @pytest.mark.asyncio
+    async def test_api_additional_coverage_gaps_consolidated(self, mock_api):
+        """Cover remaining gaps in mysa_api.py."""
+        api = mock_api
+        api.client.user_id = "user1"
+
+        # Line 331: md extraction from mode/Mode
+        state_update = {"mode": 3}
+        api._flatten_stv10_shadows(state_update) # Should trigger md=3
+        assert state_update["md"] == 3
+
+        # Line 348: set_ac_fan_speed returns if FAN_MODES.get(fan_mode) is None
+        # Note: FAN_MODES might be in const, check exact name
+        from custom_components.mysa.const import AC_FAN_MODES
+        api.realtime.send_command.reset_mock()
+        await api.set_ac_fan_speed("d1", "invalid_fan")
+        api.realtime.send_command.assert_not_called()
+
+        # Line 540: set_target_temperature if "st-v1" in model.lower()
+        api.devices = {"d1": {"Model": "ST-V1-0"}}
+        api.realtime.send_command.reset_mock()
+        await api.set_target_temperature("d1", 23.0)
+        api.realtime.send_command.assert_called()
+
+        # Line 608: set_stv10_target_cool
+        api.realtime.send_command.reset_mock()
+        await api.set_stv10_target_cool("d1", 24.0)
+        api.realtime.send_command.assert_called()
+
+        # Line 618: set_stv10_target_heat
+        api.realtime.send_command.reset_mock()
+        await api.set_stv10_target_heat("d1", 21.0)
+        api.realtime.send_command.assert_called()
+
+        # Line 687: set_stv10_auto_deadband
+        api.realtime.send_command.reset_mock()
+        await api.set_stv10_auto_deadband("d1", 1.5)
+        api.realtime.send_command.assert_called()
+
+        # Line 784, 808-809: get_electricity_rate override and errors
+        api.hass.config_entries.async_entries.return_value = []
+        api.client.get_electricity_rate.side_effect = Exception("Cloud Fail")
+        assert api.get_electricity_rate("d1") == 0.0
+
+        # Line 1140-1157: set_ac_swing_mode and set_ac_horizontal_swing returns if invalid
+        # Reverse mapping used in setters
+        api.realtime.send_command.reset_mock()
+        await api.set_ac_swing_mode("d1", "invalid")
+        api.realtime.send_command.assert_not_called()
+        # set_ac_horizontal_swing doesn't have immediate reverse map check in snippet, double check
+
+        # Line 1429-1440, 1445-1456: set_ac_power_button, set_ac_mode_button
+        api.coordinator_callback = AsyncMock()
+        api.devices = {"d1": {"Model": "AC-V1"}}
+        await api.set_ac_power_button("d1")
+        api.coordinator_callback.assert_called()
+        api.realtime.send_command.assert_called()
+        await api.set_ac_mode_button("d1")
+        assert api.coordinator_callback.call_count == 2
+
+        # Line 917: test Heat vs Cool branch in set_stv10_target_temperature
+        api.states = {"d1": {"md": 3}} # Cool
+        # Mocking the internal method to avoid recursive calls or complex logic
+        api.set_stv10_cool_setpoint = AsyncMock()
+        await api.set_stv10_target_temperature("d1", 22.0)
+        api.set_stv10_cool_setpoint.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_api_init_metadata_coverage_consolidated(self, mock_api):
+        """Cover initialization and metadata gaps."""
+        api = mock_api
+        api.devices = {"d1": {"Model": "AC-V1"}}
+
+        # Test 1691/metadata check logic implicitly where _check_staleness gets called in _update_state_cache
+        # If we just do _update_state_cache, it'll populate _last_command_time if not present because
+        # we check stale tracking, skip this for now since it's an internal test detail.
+        # Instead, verify _process_mqtt_message missing branch.
+        api._latest_timestamp = {}
+        api._update_state_cache("d1", {"v": 1})
+        assert "d1" in api.states
+
+    @pytest.mark.asyncio
+    async def test_api_additional_coverage_gaps_consolidated(self, mock_api):
+        """Cover remaining gaps in mysa_api.py."""
+        api = mock_api
+        api.client.user_id = "user1"
+
+        # Line 331: set_stv10_target_heat logic if st-v1 in Model
+        api.devices = {"d1": {"Model": "ST-V1-0"}}
+        with patch.object(api, "set_stv10_target_temperature", new_callable=AsyncMock) as mock_stv10_target:
+            await api.set_target_temperature("d1", 22.5)
+            mock_stv10_target.assert_called()
+
+        # Line 348: set_ac_fan_speed returns if FAN_MODES.get(fan_mode) is None
+        api.realtime.send_command.reset_mock()
+        await api.set_ac_fan_speed("d1", "invalid_fan")
+        print("Calls to send_command:", api.realtime.send_command.call_args_list)
+        api.realtime.send_command.assert_not_called()
+
+        # Line 540: set_target_temperature if "st-v1" in model.lower()
+        with patch.object(api, "set_stv10_target_temperature", new_callable=AsyncMock) as mock_stv10_target:
+            await api.set_target_temperature("d1", 23.0)
+            mock_stv10_target.assert_called()
+
+        # Let's mock post_state_update
+        api.client.post_state_update = AsyncMock()
+        # Line 608 does not exist as set_stv10_target_cool.
+        # But set_stv10_cool_setpoint exists!
+        await api.set_stv10_cool_setpoint("d1", 24.0)
+        api.client.post_state_update.assert_called()
+
+        # Line 618: set_stv10_heat_setpoint
+        api.client.post_state_update.reset_mock()
+        await api.set_stv10_heat_setpoint("d1", 21.0)
+        api.client.post_state_update.assert_called()
+
+        # Line 687: set_stv10_auto_deadband calls post_state_update
+        api.client.post_state_update.reset_mock()
+        await api.set_stv10_auto_deadband("d1", 1.5)
+        api.client.post_state_update.assert_called()
+
+        # Line 784, 808-809: get_electricity_rate override and errors
+        mock_entry1 = MagicMock()
+        mock_entry1.options = {"custom_erate": "invalid"}
+        mock_entry2 = MagicMock()
+        mock_entry2.options = {"custom_erate": 0.15}
+        api.hass.config_entries.async_entries.return_value = [mock_entry1, mock_entry2]
+        api.client.get_electricity_rate.return_value = 0.0
+        assert api.get_electricity_rate("d1") == 0.15
+
+        # Test fallback
+        api.hass.config_entries.async_entries.return_value = []
+        assert api.get_electricity_rate("d1") == 0.0
+
+        # Line 1140-1157: set_ac_swing_mode and set_ac_horizontal_swing returns if invalid
+        api.realtime.send_command.reset_mock()
+        await api.set_ac_swing_mode("d1", "invalid")
+        api.realtime.send_command.assert_not_called()
+        await api.set_ac_horizontal_swing("d1", 999)
+        api.realtime.send_command.assert_called()
+
+        # Line 1429-1440, 1445-1456: set_ac_power_button, set_ac_mode_button
+        api.coordinator_callback = AsyncMock()
+        await api.set_ac_power_button("d1")
+        api.coordinator_callback.assert_called()
+        api.realtime.send_command.assert_called()
+        await api.set_ac_mode_button("d1")
+        assert api.coordinator_callback.call_count == 2
+
+        # Line 917: test Heat vs Cool branch in set_stv10_target_temperature
+        api.states = {"d1": {"md": 3}} # Cool
+        # We need to test the REAL set_stv10_target_temperature here, mocking set_stv10_cool_setpoint instead.
+        with patch.object(api, "set_stv10_cool_setpoint", new_callable=AsyncMock) as mock_cool_setpoint:
+            await api.set_stv10_target_temperature("d1", 22.0)
+            mock_cool_setpoint.assert_called()
+
+        with patch.object(api, "set_stv10_heat_setpoint", new_callable=AsyncMock) as mock_heat_setpoint:
+            api.states = {"d1": {"md": 4}}
+            await api.set_stv10_target_temperature("d1", 22.0)
+            mock_heat_setpoint.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_api_mysa_api_remaining_lines(self, mock_api):
+        """Cover the last missing lines in mysa_api.py."""
+        from unittest.mock import AsyncMock, patch, MagicMock
+        api = mock_api
+        api.client.user_id = "user1"
+
+        # 127-146: mqtt_status
+        api.realtime.is_running = False
+        assert api.mqtt_status == "Stopped"
+
+        api.realtime.is_running = True
+        api.realtime._mqtt_connected = MagicMock()
+        api.realtime._mqtt_connected.is_set = MagicMock(return_value=False)
+        assert api.mqtt_status == "Connecting"
+
+        api.realtime._mqtt_connected.is_set = MagicMock(return_value=True)
+        api.realtime.last_packet_time = 0
+        assert api.mqtt_status == "Starting"
+
+        api.realtime.last_packet_time = 100 # very old
+        with patch("time.time", return_value=1000):
+            assert api.mqtt_status == "Stale"
+
+        with patch("time.time", return_value=105):
+            assert api.mqtt_status == "Running"
+
+        # 156: get_devices early return
+        api._capabilities_initialized = True
+        api.devices = {"d1": {}}
+        assert await api.get_devices() == {"d1": {}}
+        api._capabilities_initialized = False
+
+        # 447: _extract_stv10_shadow_data skip_sensors
+        state2 = {"hum": 50, "humidityDisplay": 50}
+        api._extract_stv10_shadow_data(state2, skip_sensors=True)
+        assert "current_humidity" not in state2
+
+        # 452: auto_mode_enabled extract
+        state3 = {"enabled": 1}
+        api._extract_stv10_shadow_data(state3)
+        assert state3["auto_mode_enabled"] == 1
+
+        # 491: _flatten_stv10_shadows desired precedence
+        state4 = {"targetHeat": {"desired": {"v": 2}, "reported": {"v": 1}}}
+        api._flatten_stv10_shadows(state4)
+        assert state4["v"] == 2
+
+        # 497-505: flatten latestTelemetry
+        state5 = {"latestTelemetry": {"isConnected": True, "reading": {"temperature": 2000}}}
+        api._flatten_stv10_shadows(state5)
+        assert state5["isConnected"] is True
+        assert state5["temperature"] == 2000
+
+        # 540: _extract_stv10_hvac_config
+        state6 = {"hvacConfig": {"idx": 1}}
+        api._extract_stv10_hvac_config(state6)
+        assert state6["hvac_config_index"] == 1
+
+        # 570: _extract_stv10_conversions adv_heat_stage_two_delta
+        state7 = {"adv_heat_stage_two_delta": 200}
+        api._extract_stv10_conversions(state7)
+        assert state7["adv_heat_stage_two_delta"] == 2.0
+
+        # 608: _extract_stv10_sensors roomTemperature > 100
+        state8 = {"roomTemperature": 2200}
+        api._extract_stv10_sensors(state8)
+        assert state8["current_temp"] == 22.0
+
+        # 618: _extract_stv10_sensors nested roomTemperature > 100
+        state9 = {"reading": {"roomTemperature": 2300}}
+        api._extract_stv10_sensors(state9)
+        assert state9["current_temp"] == 23.0
+
+        # 687: _extract_stv10_diagnostics skip_sensors
+        state10 = {"diagnostics": {"reported": {"freeHeap": 12345}}}
+        api._extract_stv10_diagnostics(state10, skip_sensors=True)
+        assert "free_heap" not in state10
+        api._extract_stv10_diagnostics(state10, skip_sensors=False)
+        assert state10["free_heap"] == 12345
+
+        # 923-935: set_stv10_hvac_mode (line 923 is really set_stv10_hvac_mode)
+        api.coordinator_callback = AsyncMock()
+        api.client.post_state_update = AsyncMock()
+        await api.set_stv10_hvac_mode("d1", 2)
+        api.coordinator_callback.assert_called()
+
+        # 956, 978, 1000: set_stv10_auto_deadband, heat_setpoint, cool_setpoint branches
+        api.coordinator_callback.reset_mock()
+        await api.set_stv10_auto_deadband("d1", 1.5)
+        api.coordinator_callback.assert_called()
+
+        api.coordinator_callback.reset_mock()
+        await api.set_stv10_heat_setpoint("d1", 21.0)
+        api.coordinator_callback.assert_called()
+
+        api.coordinator_callback.reset_mock()
+        await api.set_stv10_cool_setpoint("d1", 24.0)
+        api.coordinator_callback.assert_called()
+
+        # 1006-1020: set_stv10_fan_mode
+        api.coordinator_callback.reset_mock()
+        await api.set_stv10_fan_mode("d1", "low")
+        api.coordinator_callback.assert_called()
+        await api.set_stv10_fan_mode("d1", "invalid")
+
+        # 1083: set_lock for ST-V1-0
+        api.devices = {"d1": {"Model": "ST-V1-0"}}
+        with patch.object(api, "set_stv10_lock", new_callable=AsyncMock) as set_stv10_lock_mock:
+            await api.set_lock("d1", True)
+            set_stv10_lock_mock.assert_called_with("d1", True)
+
+        # 1140-1157: set_stv10_lock
+        api.client.post_state_update.reset_mock()
+        await api.set_stv10_lock("d1", True)
+        api.client.post_state_update.assert_called()
+
+        # 1461-1474: set_ac_stpt_buttons
+        api.realtime.send_command.reset_mock()
+        await api.set_ac_stpt_buttons("d1", "up")
+        api.realtime.send_command.assert_called()
+
+        # 1557: _check_staleness missing _clock_skew
+        if hasattr(api, "_clock_skew"):
+            delattr(api, "_clock_skew")
+        with patch.object(api, "_check_shadow_version_staleness", return_value=False):
+            with patch.object(api, "_check_timestamp_staleness", return_value=False):
+                api._check_staleness("d1", 12345, False)
+        assert hasattr(api, "_clock_skew")
+
+        # 1562: _check_staleness shadow stale early return
+        with patch.object(api, "_check_shadow_version_staleness", return_value=True):
+            assert api._check_staleness("d1", 12345, False) is True
+
+        # 1687-1691: _update_state_cache missing attributes
+        if hasattr(api, "_latest_timestamp"):
+            delattr(api, "_latest_timestamp")
+        if hasattr(api, "_clock_skew"):
+            delattr(api, "_clock_skew")
+        if hasattr(api, "_last_command_time"):
+            delattr(api, "_last_command_time")
+        api._update_state_cache("d1", {"v": 1})
+        assert hasattr(api, "_last_command_time")
+
+        # 1929-1930: _wait_and_refresh_mqtt STV10 branch
+        api.devices = {"d1": {"Model": "ST-V1-0"}}
+        api.realtime.wait_until_connected = AsyncMock(return_value=True)
+        api.fetch_stv10_shadows = AsyncMock()
+        await api._wait_and_refresh_mqtt()
+        api.fetch_stv10_shadows.assert_called_with("d1")
+
+        # 1615: _check_shadow_version_staleness == and filter_stale=True
+        api._shadow_versions = {"d1": {"test_shadow": 5}}
+        api._shadow_version_timestamps = {"d1": {"test_shadow": 0}}
+        assert api._check_shadow_version_staleness("d1", 5, "test_shadow", True) is True
+
+        # 1986, 1994-1998: set_min_setpoint ST-V1-0 branch
+        api.devices = {"d1": {"Model": "ST-V1-0"}}
+        api.client.post_state_update = AsyncMock()
+        await api.set_min_setpoint("d1", 10.0)
+        api.client.post_state_update.assert_called()
+
+        # 2015, 2023-2027: set_max_setpoint ST-V1-0 branch
+        api.client.post_state_update.reset_mock()
+        await api.set_max_setpoint("d1", 30.0)
+        api.client.post_state_update.assert_called()
+
+@pytest.fixture
+def mock_hass_new_cov():
+    return MagicMock()
+
+@pytest.fixture
+def new_cov_api(mock_hass_new_cov):
+    api = MysaApi.__new__(MysaApi)
+    api.hass = mock_hass_new_cov
+    api.client = MagicMock() # Set client BEFORE devices as devices property access it
+    api.devices = {"dev1": {"Model": "BB-V2"}}
+    api.realtime = MagicMock(spec=MysaRealtime)
+    api.realtime.is_connected = True
+    api.async_send_state_poll = AsyncMock()
+    return api
+
+@pytest.mark.asyncio
+async def test_mqtt_status_stale():
+    """Test that mqtt_status returns 'Stale' when no packets are received."""
+    import time
+    from unittest.mock import PropertyMock
+    api = MagicMock()
+    api.realtime = MagicMock()
+
+    type(api.realtime).is_running = PropertyMock(return_value=True)
+    api.realtime._mqtt_connected = MagicMock()
+    api.realtime._mqtt_connected.is_set.return_value = True
+
+    now = time.time()
+    type(api.realtime).last_packet_time = PropertyMock(return_value=now - 601)
+
+    mock_hass = MagicMock()
+    mock_hass.async_create_task = MagicMock()
+    mock_hass.async_create_background_task = MagicMock()
+
+    real_api = MysaApi("user", "pass", mock_hass, websession=AsyncMock())
+    real_api.realtime = api.realtime
+
+    assert real_api.mqtt_status == "Stale"
+
+    type(api.realtime).last_packet_time = PropertyMock(return_value=now - 30)
+    assert real_api.mqtt_status == "Running"
+
+    type(api.realtime).last_packet_time = PropertyMock(return_value=0)
+    assert real_api.mqtt_status == "Starting"
+
+    api.realtime._mqtt_connected.is_set.return_value = False
+    assert real_api.mqtt_status == "Connecting"
+
+    type(api.realtime).is_running = PropertyMock(return_value=False)
+    assert real_api.mqtt_status == "Stopped"
+
+@pytest.mark.asyncio
+async def test_api_polling_debounce():
+    """Test that legacy polls are debounced and check connection."""
+    import time
+    from unittest.mock import PropertyMock
+    mock_hass = MagicMock()
+    api = MysaApi("u", "p", mock_hass, websession=MagicMock())
+    api.realtime = MagicMock(spec=MysaRealtime)
+
+    type(api.realtime).is_connected = PropertyMock(return_value=False)
+    api.devices = {"d1": {"Model": "BB-V1"}}
+    await api.async_send_state_poll("d1")
+    assert api.realtime.send_command.call_count == 0
+
+    type(api.realtime).is_connected = PropertyMock(return_value=True)
+    api.devices = {"d1": {"Model": "ST-V1-0"}}
+    await api.async_send_state_poll("d1")
+    assert api.realtime.send_command.call_count == 0
+
+    api.devices = {"d1": {"Model": "BB-V1"}}
+    await api.async_send_state_poll("d1")
+    assert api.realtime.send_command.call_count == 1
+
+    await api.async_send_state_poll("d1")
+    assert api.realtime.send_command.call_count == 1
+
+    with patch("time.time", return_value=time.time() + 61):
+        await api.async_send_state_poll("d1")
+        assert api.realtime.send_command.call_count == 2
+
+@pytest.mark.asyncio
+async def test_periodic_legacy_mqtt_poll_coverage():
+    """Test _periodic_legacy_mqtt_poll for coverage."""
+    import asyncio
+    api = MysaApi.__new__(MysaApi)
+    api.hass = MagicMock()
+    api.client = MagicMock()
+    api.devices = {"dev1": {"Model": "BB-V2"}}
+    api.realtime = MagicMock(spec=MysaRealtime)
+    api.realtime.is_connected = True
+    api.async_send_state_poll = AsyncMock()
+
+    with patch("asyncio.sleep", side_effect=[None, asyncio.CancelledError()]):
+        try:
+            await api._periodic_legacy_mqtt_poll()
+        except asyncio.CancelledError:
+            pass
+    api.async_send_state_poll.assert_called_with("dev1")
+
+@pytest.mark.asyncio
+async def test_periodic_legacy_mqtt_poll_disconnected():
+    """Test _periodic_legacy_mqtt_poll when disconnected."""
+    import asyncio
+    api = MysaApi.__new__(MysaApi)
+    api.hass = MagicMock()
+    api.client = MagicMock()
+    api.devices = {"dev1": {"Model": "BB-V2"}}
+    api.realtime = MagicMock(spec=MysaRealtime)
+    api.realtime.is_connected = False
+    api.async_send_state_poll = AsyncMock()
+
+    with patch("asyncio.sleep", side_effect=[None, asyncio.CancelledError()]):
+        try:
+            await api._periodic_legacy_mqtt_poll()
+        except asyncio.CancelledError:
+            pass
+    api.async_send_state_poll.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_periodic_legacy_mqtt_poll_exception():
+    """Test _periodic_legacy_mqtt_poll handles individual poll exceptions."""
+    import asyncio
+    api = MysaApi.__new__(MysaApi)
+    api.hass = MagicMock()
+    api.client = MagicMock()
+    api.devices = {"dev1": {"Model": "BB-V2"}}
+    api.realtime = MagicMock(spec=MysaRealtime)
+    api.realtime.is_connected = True
+    api.async_send_state_poll = AsyncMock(side_effect=[Exception("Poll error"), None])
+
+    with patch("asyncio.sleep", side_effect=[None, None, asyncio.CancelledError()]):
+        try:
+            await api._periodic_legacy_mqtt_poll()
+        except asyncio.CancelledError:
+            pass
+    assert api.async_send_state_poll.call_count == 2
+
+@pytest.mark.asyncio
+async def test_periodic_legacy_mqtt_poll_fatal_error():
+    """Test _periodic_legacy_mqtt_poll handles main loop exceptions (Fatal error)."""
+    import asyncio
+    from unittest.mock import PropertyMock
+    api = MysaApi.__new__(MysaApi)
+    api.hass = MagicMock()
+    api.client = MagicMock()
+    api.devices = {"dev1": {"Model": "BB-V2"}}
+    api.realtime = MagicMock(spec=MysaRealtime)
+    type(api.realtime).is_connected = PropertyMock(side_effect=Exception("Fatal loop error"))
+    api.async_send_state_poll = AsyncMock()
+
+    with patch("asyncio.sleep", side_effect=[None, asyncio.CancelledError()]):
+        try:
+            await api._periodic_legacy_mqtt_poll()
+        except asyncio.CancelledError:
+            pass

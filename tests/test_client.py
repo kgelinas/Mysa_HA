@@ -1,8 +1,10 @@
-"""Tests for MysaClient."""
-
+import asyncio
+import json
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
 
 from custom_components.mysa.client import MysaClient
 
@@ -33,6 +35,7 @@ def create_mock_response(json_data=None, status=200):
     response.status = status
     response.raise_for_status = MagicMock(return_value=None)
     response.json = AsyncMock(return_value=json_data or {})
+    response.text = AsyncMock(return_value=json.dumps(json_data) if json_data else "")
     return response
 
 
@@ -96,6 +99,7 @@ class TestMysaClient:
 
         # We also need to mock _store.async_load to avoid auth
         mock_store.async_load.return_value = {
+            "credentials_version": "2",
             "id_token": "token",
             "access_token": "access",
             "refresh_token": "ref",
@@ -124,6 +128,7 @@ class TestMysaClient:
         client = MysaClient(mock_hass, "u", "p")
 
         mock_store.async_load.return_value = {
+            "credentials_version": "2",
             "id_token": mock_token,
             "access_token": "access",
             "refresh_token": "ref",
@@ -149,10 +154,12 @@ class TestMysaClient:
             mock_cog_inst.access_token = "access"
             mock_cog_inst.refresh_token = "ref"
             mock_cog_inst.verify_token.return_value = None
+            mock_cog_inst.authenticate = AsyncMock() # Ensure authenticate is mocked
 
             await client.authenticate()
             assert client.is_connected is True
             assert client.user_id == "uid"
+            # verify_token is called via executor, so it should be called once
             mock_cog_inst.verify_token.assert_called_once()
 
     async def test_authenticate_no_cache(self, mock_hass, mock_store):
@@ -162,6 +169,7 @@ class TestMysaClient:
 
         # Store has data
         mock_store.async_load.return_value = {
+            "credentials_version": "2",
             "id_token": mock_token,
             "access_token": "access",
             "refresh_token": "ref",
@@ -171,6 +179,12 @@ class TestMysaClient:
         mock_session = MagicMock()
         mock_session.get = MagicMock(
             return_value=create_async_context_manager(mock_response)
+        )
+        mock_session.post = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
+        )
+        mock_session.request = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
         )
 
         with (
@@ -209,6 +223,7 @@ class TestMysaClient:
 
         client = MysaClient(mock_hass, "u", "p")
         mock_store.async_load.return_value = {
+            "credentials_version": "2",
             "id_token": mock_token_old,
             "access_token": "old_access",
             "refresh_token": "ref",
@@ -242,6 +257,12 @@ class TestMysaClient:
         mock_session.get = MagicMock(
             return_value=create_async_context_manager(mock_response)
         )
+        mock_session.post = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
+        )
+        mock_session.request = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
+        )
 
         mock_cognito_instance = MagicMock()
         mock_cognito_instance.id_token = mock_token_new
@@ -251,7 +272,9 @@ class TestMysaClient:
         # Mock verify_token to raise error to trigger renewal
         mock_cognito_instance.verify_token.side_effect = Exception("Expired")
         # Mock authenticate to be a no-op (successful)
-        mock_cognito_instance.authenticate = MagicMock()
+        mock_cognito_instance.authenticate = AsyncMock()
+        mock_cognito_instance.renew_access_token = MagicMock() # Regular Mock for executor
+
 
         with (
             patch(
@@ -264,7 +287,7 @@ class TestMysaClient:
             ),
         ):
             await client.authenticate()
-            mock_cognito_instance.renew_access_token.assert_called()
+            mock_cognito_instance.renew_access_token.assert_called_once()
             # Check token was saved
             assert mock_store.async_save.called
 
@@ -279,6 +302,12 @@ class TestMysaClient:
         mock_session = MagicMock()
         mock_session.get = MagicMock(
             return_value=create_async_context_manager(mock_response)
+        )
+        mock_session.post = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
+        )
+        mock_session.request = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
         )
 
         with (
@@ -330,6 +359,12 @@ class TestMysaClient:
 
         mock_session = MagicMock()
         mock_session.get = MagicMock(side_effect=Exception("API Error"))
+        mock_session.post = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
+        )
+        mock_session.request = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
+        )
 
         with (
             patch("custom_components.mysa.client.login", return_value=mock_user),
@@ -356,6 +391,12 @@ class TestMysaClient:
         mock_session = MagicMock()
         mock_session.get = MagicMock(
             return_value=create_async_context_manager(mock_response)
+        )
+        mock_session.post = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
+        )
+        mock_session.request = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
         )
 
         with (
@@ -405,6 +446,12 @@ class TestMysaClient:
         mock_session.get = MagicMock(
             return_value=create_async_context_manager(mock_response)
         )
+        mock_session.post = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
+        )
+        mock_session.request = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
+        )
 
         # Mock fetch_homes to only map d1 to a home
         async def mock_fetch_homes_side_effect():
@@ -447,6 +494,12 @@ class TestMysaClient:
         mock_session.get = MagicMock(
             return_value=create_async_context_manager(mock_response)
         )
+        mock_session.post = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
+        )
+        mock_session.request = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
+        )
 
         with patch(
             "custom_components.mysa.client.async_get_clientsession",
@@ -477,6 +530,12 @@ class TestMysaClient:
         mock_session = MagicMock()
         mock_session.get = MagicMock(
             return_value=create_async_context_manager(mock_response)
+        )
+        mock_session.post = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
+        )
+        mock_session.request = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
         )
 
         # Pre-seed devices so fallback check works
@@ -518,6 +577,12 @@ class TestMysaClient:
         mock_session = MagicMock()
         mock_session.get = MagicMock(
             return_value=create_async_context_manager(mock_response)
+        )
+        mock_session.post = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
+        )
+        mock_session.request = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
         )
 
         with patch(
@@ -564,6 +629,10 @@ class TestMysaClient:
 
         mock_session = MagicMock()
         mock_session.get = mock_get
+        mock_session.post = MagicMock(return_value=create_async_context_manager(create_mock_response({})))
+        mock_session.request = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
+        )
 
         client.devices = {}
 
@@ -574,6 +643,7 @@ class TestMysaClient:
             states = await client.get_state()
             assert "d1" in states
             assert states["d1"]["t"] == 20
+            # Attributes: {'n': 'Name'} was merged
             assert states["d1"]["n"] == "Name"
 
     async def test_get_state_format_variants(self, mock_hass):
@@ -601,6 +671,12 @@ class TestMysaClient:
 
         mock_session = MagicMock()
         mock_session.get = mock_get
+        mock_session.post = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
+        )
+        mock_session.request = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
+        )
 
         with patch(
             "custom_components.mysa.client.async_get_clientsession",
@@ -629,6 +705,12 @@ class TestMysaClient:
 
         mock_session = MagicMock()
         mock_session.get = mock_get
+        mock_session.post = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
+        )
+        mock_session.request = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
+        )
 
         # 1. Verify fetch_homes is called
         with (
@@ -686,6 +768,12 @@ class TestMysaClient:
         mock_session = MagicMock()
         mock_session.post = MagicMock(
             return_value=create_async_context_manager(mock_response)
+        )
+        mock_session.get = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
+        )
+        mock_session.request = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
         )
 
         with patch(
@@ -749,6 +837,12 @@ class TestMysaClient:
         mock_session.request = MagicMock(
             return_value=create_async_context_manager(mock_response)
         )
+        mock_session.get = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
+        )
+        mock_session.post = MagicMock(
+            return_value=create_async_context_manager(create_mock_response({}))
+        )
 
         with patch(
             "custom_components.mysa.client.async_get_clientsession",
@@ -772,6 +866,7 @@ class TestMysaClient:
 
         client = MysaClient(mock_hass, "u", "p")
         mock_store.async_load.return_value = {
+            "credentials_version": "2",
             "id_token": mock_token,
             "access_token": "old_access",
             "refresh_token": "ref",
@@ -868,6 +963,7 @@ class TestMysaClient:
             # Should be included but without merged attributes
             assert "d99" in states
             assert states["d99"]["t"] == 20
+
 
     async def test_get_auth_headers_no_user(self, mock_hass):
         """Test _get_auth_headers returns empty dict when no user object."""
@@ -1109,5 +1205,439 @@ class TestClientCoverage:
             assert client.device_to_home.get("d3") == "h3"
             assert client.get_electricity_rate("d3") == 0.3
 
-            # d4 not mapped
+    # d4 not mapped
             assert "d4" not in client.device_to_home
+
+
+    async def test_client_get_devices_coverage_gaps(self, mock_hass):
+        """Cover client.py edge cases in get_devices."""
+        client = MysaClient(mock_hass, "u", "p")
+        client.websession = MagicMock()
+        mock_user = MagicMock()
+        mock_user.id_claims = {"exp": 9999999999.0}
+        client._user_obj = mock_user
+        client.fetch_homes = AsyncMock(return_value=[])
+
+        # Explicitly configure websession to avoid AsyncMock leakage into resp.raise_for_status
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json = AsyncMock(return_value={})
+        mock_ctx = MagicMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_ctx.__aexit__ = AsyncMock()
+        client.websession.get.return_value = mock_ctx
+
+        # 1. get_devices: invalid response type
+        with patch(
+            "custom_components.mysa.client.asyncio.gather", new_callable=AsyncMock
+        ) as mock_gather:
+            # Return valid dict structure but invalid Devices content
+            mock_gather.return_value = [{"Devices": "invalid"}, []]
+
+            await client.get_devices()
+            assert client.devices == {}
+
+            # Cleanup coroutines
+            for arg in mock_gather.call_args[0]:
+                if asyncio.iscoroutine(arg):
+                    arg.close()
+
+    async def test_client_get_state_coverage_gaps(self, mock_hass):
+        """Cover client.py edge cases in get_state."""
+        client = MysaClient(mock_hass, "u", "p")
+        client._user_obj = MagicMock()
+        client._user_obj.id_claims = {"exp": 9999999999.0}
+
+        # 1. get_state: devices_json exception
+        with patch(
+            "custom_components.mysa.client.asyncio.gather", new_callable=AsyncMock
+        ) as mock_gather:
+            # state_json success, devices_json exception
+            mock_gather.return_value = [
+                {"DeviceStates": []},
+                ValueError("Devices fail"),
+                [],
+            ]
+
+            with pytest.raises(ValueError, match="Devices fail"):
+                await client.get_state()
+
+            # Cleanup coroutines
+            for arg in mock_gather.call_args[0]:
+                if asyncio.iscoroutine(arg):
+                    arg.close()
+
+        # 2. get_state: fallbacks
+        with patch(
+            "custom_components.mysa.client.asyncio.gather", new_callable=AsyncMock
+        ) as mock_gather:
+            # state_json invalid (dict but bad keys), devices_json invalid (dict but bad keys)
+            mock_gather.return_value = [
+                {"DeviceStates": "invalid"},
+                {"Devices": "invalid"},
+                [],
+            ]
+
+            await client.get_state()
+            # Should execute without error and default to empty dicts
+
+            # Cleanup coroutines
+            for arg in mock_gather.call_args[0]:
+                if asyncio.iscoroutine(arg):
+                    arg.close()
+
+    async def test_client_deep_dive_sequential(self, mock_hass):
+        """Test sequential calls in client using side_effect on websession."""
+        client = MysaClient(mock_hass, "u", "p")
+        client.websession = MagicMock()
+
+        # Separate mock response objects
+        r_homes = MagicMock()
+        r_homes.json = AsyncMock(
+            return_value={
+                "Homes": [
+                    {
+                        "Id": "h1",
+                        "ERate": 0.15,
+                        "Zones": [{"Id": "z1", "DeviceIds": ["d1"]}],
+                    }
+                ]
+            }
+        )
+        r_homes.raise_for_status = MagicMock()
+
+        r_post = MagicMock()
+        r_post.json = AsyncMock(return_value={"Success": True})
+        r_post.text = AsyncMock(return_value='{"Success": true}')
+        r_post.raise_for_status = MagicMock()
+
+        # Configure mock_ctx to yield these in sequence
+        # We need more items because set_device_setting_silent calls get_auth_headers which might trigger check_token_expiration
+        client.websession.request.return_value.__aenter__.side_effect = [
+            r_homes,  # fetch_homes
+            r_post,  # set_device_setting_silent success
+            r_post,  # set_device_setting_http
+        ]
+        client.websession.get = client.websession.request
+        client.websession.post = client.websession.request
+
+        client._user_obj = MagicMock()
+        client._user_obj.id_claims = {"exp": 9999999999.0}
+        client._user_obj.id_token = "token"
+
+        await client.fetch_homes()
+        assert client.homes[0]["Id"] == "h1"
+
+        await client.set_device_setting_silent("d1", {"x": 1})
+        await client.set_device_setting_http("d1", {"x": 1})
+
+        # Error path for silent
+        with patch.object(
+            client, "set_device_setting_http", side_effect=Exception("Fail")
+        ):
+            await client.set_device_setting_silent("d1", {"x": 1})
+
+    async def test_get_devices_gather_exception(self, mock_hass):
+        """Test get_devices when gather returns an exception (lines 188-189)."""
+        mock_session = MagicMock()
+        client = MysaClient(mock_hass, "u", "p", websession=mock_session)
+        client._user_obj = MagicMock()
+        client._user_obj.id_claims = {"exp": 9999999999}
+        client._user_obj.id_token = "token"
+
+        # Mock session.get to raise exception
+        test_exception = Exception("Device fetch failed")
+        mock_session.get.side_effect = test_exception
+
+        with pytest.raises(Exception, match="Device fetch failed"):
+            await client.get_devices()
+
+    async def test_get_state_gather_exceptions(self, mock_hass):
+        """Test get_state when gather returns exceptions (lines 332-333, 337-338)."""
+        client = MysaClient(mock_hass, "u", "p")
+        client._user_obj = MagicMock()
+        client._user_obj.id_claims = {"exp": 9999999999}
+        client._user_obj.id_token = "token"
+        client.devices = {"dev1": {"Id": "dev1", "Name": "Device1"}}
+        client.homes = [{"Id": "h1", "Devices": ["dev1"]}]
+
+        # Test: gather results containing exceptions
+        gather_exception = Exception("Gather failed")
+
+        # We need to mock asyncio.gather because get_state calls it with local functions
+        with patch("custom_components.mysa.client.asyncio.gather", new_callable=AsyncMock) as mock_gather:
+            try:
+                # Case 1: First item is Exception
+                mock_gather.return_value = [gather_exception, {}, []]
+                with pytest.raises(Exception, match="Gather failed"):
+                    await client.get_state()
+
+                # Case 2: Second item is Exception
+                mock_gather.return_value = [{}, gather_exception, []]
+                with pytest.raises(Exception, match="Gather failed"):
+                    await client.get_state()
+            finally:
+                for call in mock_gather.call_args_list:
+                    for arg in call.args:
+                        if asyncio.iscoroutine(arg):
+                            arg.close()
+
+@pytest.mark.asyncio
+async def test_post_state_update_error_final(mock_hass):
+    """Test post_state_update error handling."""
+    mock_session = MagicMock()
+    client = MysaClient(mock_hass, "u", "p", websession=mock_session)
+    client._user_obj = MagicMock()
+    client._user_obj.id_claims = {"exp": time.time() + 3600}
+    mock_session.post.side_effect = Exception("HTTP Error")
+
+    with pytest.raises(Exception, match="HTTP Error"):
+        await client.post_state_update("dev1", {"source": 3})
+
+@pytest.mark.asyncio
+async def test_set_device_setting_http_error_final(mock_hass):
+    """Test set_device_setting_http error handling."""
+    mock_session = MagicMock()
+    client = MysaClient(mock_hass, "u", "p", websession=mock_session)
+    client._user_obj = MagicMock()
+    client._user_obj.id_claims = {"exp": time.time() + 3600}
+    mock_session.post.side_effect = Exception("HTTP Error")
+
+    with pytest.raises(Exception, match="HTTP Error"):
+        await client.set_device_setting_http("dev1", {"Lock": 1})
+
+@pytest.mark.asyncio
+async def test_set_device_setting_http_legacy(mock_hass):
+    """Test set_device_setting_http with legacy=True."""
+    from custom_components.mysa.mysa_auth import LEGACY_BASE_URL
+    mock_session = MagicMock()
+    client = MysaClient(mock_hass, "u", "p", websession=mock_session)
+    client._user_obj = MagicMock()
+    client._user_obj.id_claims = {"exp": time.time() + 3600}
+
+    # Mock response
+    mock_resp = MagicMock()
+    mock_resp.status = 200
+    mock_resp.text = AsyncMock(return_value="{}")
+    mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+    mock_resp.__aexit__ = AsyncMock()
+    mock_session.post.return_value = mock_resp
+
+    await client.set_device_setting_http("dev1", {"ButtonState": "Locked"}, legacy=True)
+
+    # Verify legacy URL was used
+    expected_url = f"{LEGACY_BASE_URL}/devices/dev1/"
+    mock_session.post.assert_called_once()
+    actual_url = mock_session.post.call_args[0][0]
+    assert actual_url == expected_url
+
+@pytest.mark.asyncio
+async def test_get_auth_headers_no_user_final(hass):
+    """Test _get_auth_headers returns empty dict when no user object."""
+    client = MysaClient(hass, "u", "p")
+    headers = await client._get_auth_headers()
+    assert headers == {}
+
+@pytest.mark.asyncio
+async def test_get_auth_headers_token_refresh_final(hass):
+    """Test _get_auth_headers refreshes token."""
+    client = MysaClient(hass, "u", "p")
+    mock_user = MagicMock()
+    mock_user.id_claims = {"exp": time.time() + 10} # Expiring soon
+    mock_user.id_token = "new_token"
+    mock_user.renew_access_token = AsyncMock()
+    client._user_obj = mock_user
+    headers = await client._get_auth_headers()
+    mock_user.renew_access_token.assert_called_once()
+    assert headers["authorization"] == "new_token"
+
+@pytest.mark.asyncio
+async def test_client_missing_coverage_final(hass):
+    """Test remaining client.py methods."""
+    client = MysaClient(hass, "u", "p")
+
+    # 231: Session not initialized in post_state_update
+    with pytest.raises(RuntimeError, match="Session not initialized"):
+        await client.post_state_update("dev1", {})
+
+    # 583: Session not initialized in get_st1_state
+    assert await client.get_st1_state(["dev1"]) == {}
+
+    client._user_obj = MagicMock()
+    client._user_obj.id_claims = {"exp": time.time() + 3600}
+    mock_session = MagicMock()
+    client.websession = mock_session
+
+    # 240-241: post_state_update success
+    mock_resp = MagicMock()
+    mock_resp.status = 200
+    mock_resp.json = AsyncMock(return_value={})
+    mock_resp.text = AsyncMock(return_value="{}")
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+    mock_resp.__aexit__ = AsyncMock()
+    mock_session.post.return_value = mock_resp
+    await client.post_state_update("dev1", {"v": 1})
+
+    # 243-256: fetch_capabilities
+    mock_session.get.return_value = mock_resp
+    mock_resp.json = AsyncMock(return_value={"Capabilities": {}})
+    await client.fetch_capabilities("dev1")
+
+    # 595-597: get_st1_state error path
+    mock_session.post.side_effect = Exception("HTTP Error")
+    assert await client.get_st1_state(["dev1"]) == {}
+    mock_session.post.side_effect = None
+
+    # 437: _merge_st1_states with missing device in result_states
+    client.devices = {"new_dev": {"Id": "new_dev", "Model": "ST-V1-0"}}
+    # Mock return for get_st1_state
+    mock_resp.json = AsyncMock(return_value={
+        "new_dev": {
+            "data": {
+                "latestTelemetry": {"reading": {"temp": 22}},
+                "modes": {"reported": {"hvacStates": ["cooling"]}}
+            }
+        }
+    })
+    mock_session.post.return_value = mock_resp
+
+    # get_state calls fetch_live_metrics and fetch_device_settings (Round 1)
+    # and then get_st1_state (Round 2) calls session.post
+    client.fetch_homes = AsyncMock(return_value=[])
+
+    mock_resp_r1 = MagicMock()
+    mock_resp_r1.__aenter__ = AsyncMock(return_value=mock_resp_r1)
+    mock_resp_r1.__aexit__ = AsyncMock()
+    mock_resp_r1.json = AsyncMock(side_effect=[
+        {"DeviceStates": []}, # live metrics
+        {"Devices": [{"Id": "new_dev"}]} # device settings
+    ])
+    mock_session.get.return_value = mock_resp_r1
+
+    # Round 2: get_st1_state
+    mock_resp_r2 = MagicMock()
+    mock_resp_r2.__aenter__ = AsyncMock(return_value=mock_resp_r2)
+    mock_resp_r2.__aexit__ = AsyncMock()
+    mock_resp_r2.json = AsyncMock(return_value={
+        "new_dev": {
+            "data": {
+                "latestTelemetry": {"reading": {"temp": 22}},
+                "modes": {"reported": {"hvacStates": ["cooling"]}}
+            }
+        }
+    })
+    mock_session.post.return_value = mock_resp_r2
+
+    result = await client.get_state()
+    assert "new_dev" in result
+    assert result["new_dev"]["hvacStates"] == ["cooling"]
+
+    # 246: Session not initialized in fetch_capabilities
+    client._user_obj = None
+    with pytest.raises(RuntimeError, match="Session not initialized"):
+        await client.fetch_capabilities("dev1")
+    client._user_obj = MagicMock()
+    client._user_obj.id_claims = {"exp": time.time() + 3600}
+
+    # 254-256: fetch_capabilities exception
+    mock_session.get.side_effect = Exception("Fetch Fail")
+    assert await client.fetch_capabilities("dev1") is None
+    mock_session.get.side_effect = None
+
+    # 418-419: get_st1_state exception in get_state
+    # Reset side effects for second get_state call
+    mock_resp_r1.json.side_effect = [
+        {"DeviceStates": []}, # live metrics
+        {"Devices": [{"Id": "new_dev"}]} # device settings
+    ]
+    # Mock get_st1_state to RAISE (hitting 418-419 in get_state)
+    client.get_st1_state = AsyncMock(side_effect=Exception("Hard Fail"))
+    # This should be caught and logged in get_state Round 2
+    await client.get_state()
+
+    client._user_obj = MagicMock()
+    client._user_obj.id_claims = None
+    assert "authorization" in await client._get_auth_headers()
+
+    client._user_obj.id_claims = {"exp": time.time() + 3600}
+    assert "authorization" in await client._get_auth_headers()
+
+
+class TestClientConsolidated:
+    """Consolidated client tests from final and extra coverage."""
+
+    @pytest.mark.asyncio
+    async def test_client_get_all_firmware_versions_edge_cases_consolidated(
+        self, hass
+    ):
+        """Cover missing lines in client.py get_all_firmware_versions."""
+        mock_websession = MagicMock()
+        client = MysaClient(hass, "u", "p", websession=mock_websession)
+        client._get_auth_headers = AsyncMock(
+            return_value={"Authorization": "Bearer token"}
+        )
+
+        # Case: no user object
+        client._user_obj = None
+        assert await client.get_all_firmware_versions() == {}
+
+        # Case: successful retrieval
+        client._user_obj = MagicMock()
+        mock_resp = AsyncMock()
+        mock_resp.json = AsyncMock(
+            return_value={"Firmware": {"d1": {"InstalledVersion": "1.0.0"}}}
+        )
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch.object(mock_websession, "get") as mock_get:
+            mock_get.return_value.__aenter__.return_value = mock_resp
+            res = await client.get_all_firmware_versions()
+            assert res == {"d1": {"InstalledVersion": "1.0.0"}}
+
+        # Case: failure path
+        with patch.object(mock_websession, "get", side_effect=Exception("API Fail")):
+            res = await client.get_all_firmware_versions()
+            assert res == {}
+
+from aiohttp.client_exceptions import ContentTypeError
+
+@pytest.mark.asyncio
+async def test_set_device_setting_http_empty_json_response(hass):
+    """Test set_device_setting_http with 200 OK but empty/invalid JSON response."""
+    # Mock session and response
+    mock_session = MagicMock()
+    mock_response = AsyncMock()
+    mock_response.status = 200
+    mock_response.raise_for_status = MagicMock()
+
+    # Simulating the error seen in logs
+    # usage: ContentTypeError(request_info, history, message=..., headers=...)
+    request_info = MagicMock()
+    request_info.real_url = "http://example.com"
+    request_info.headers = {}
+
+    error = ContentTypeError(
+        request_info,
+        (),
+        message="Attempt to decode JSON with unexpected mimetype: ",
+        headers=None
+    )
+
+    mock_response.json = AsyncMock(side_effect=error)
+    # Also mock text() to return empty string, mimicking what likely happens
+    mock_response.text = AsyncMock(return_value="")
+
+    # Context manager mock
+    mock_session.post.return_value.__aenter__.return_value = mock_response
+
+    client = MysaClient(hass, "user", "pass", websession=mock_session)
+    # fake auth
+    client._user_obj = MagicMock()
+    client._user_obj.id_token = "token"
+    client._user_obj.id_claims = {"exp": 9999999999}
+
+    # This should now succeed and return empty dict (or whatever json text was if not empty)
+    result = await client.set_device_setting_http("dev1", {"test": 1})
+
+    assert result == {}

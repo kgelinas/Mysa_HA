@@ -1,10 +1,10 @@
 # Mysa for Home Assistant
 
-[![Version](https://img.shields.io/badge/version-0.9.1-blue.svg)](https://github.com/kgelinas/Mysa_HA)
+[![Version](https://img.shields.io/badge/version-0.9.2-beta2-blue.svg)](https://github.com/kgelinas/Mysa_HA)
 
 ...
 
-The integration includes a comprehensive test suite with **100% code coverage** for core modules.
+The integration includes a comprehensive test suite with **100% code coverage** (939 tests).
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz/)
 
 A native cloud integration for Mysa devices in Home Assistant. Uses the official Mysa Cloud architecture (MQTT + HTTP) for real-time updates and instant command execution.
@@ -47,7 +47,8 @@ A native cloud integration for Mysa devices in Home Assistant. Uses the official
 
 ## Known Limitations
 - **Cloud Dependent**: Requires an active internet connection to authenticate and connect to Mysa's backend. This is **not a local-only integration** (local API was removed by Mysa).
-- **Polling Fallback**: Uses a slower polling interval (120s) as a fail-safe, relying primarily on push updates.
+- **Polling Fallback**: Uses a slower polling interval (120s) as a fail-safe, relying primarily on push updates via MQTT.
+- **Batch Data**: Batch history is currently used strictly for debugging purposes and is disabled in the main integration to avoid database collisions with standard real-time updates.
 
 ## Troubleshooting
 
@@ -275,7 +276,7 @@ A Dev Container configuration is included for VS Code. Open the project in VS Co
 ## Requirements
 
 - Mysa account (email/password)
-- Home Assistant 2024.1.0 or later
+- Home Assistant 2025.10.0 or later
 
 ## Advanced Configuration (Automation)
 

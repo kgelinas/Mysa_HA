@@ -9,12 +9,13 @@
   "integration_type": "hub",
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/kgelinas/Mysa_HA/issues",
+  "homeassistant": "2024.1.0",
   "requirements": [
     "python-jose>=3.3.0",
-    "websockets>=12.0",
+    "websockets>=13.1",
     "pycognito>=2024.5.1",
     "boto3>=1.34.0",
     "botocore>=1.34.0"
   ],
-  "version": "0.9.1"
+  "version": "0.9.2-beta2"
 }

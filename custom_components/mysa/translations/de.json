@@ -1,71 +1,82 @@
 {
     "config": {
-        "step": {
-            "user": {
-                "title": "Mysa Authentifizierung",
-                "description": "Geben Sie Ihre Mysa-Kontoanmeldedaten ein.",
-                "data": {
-                    "username": "Benutzername (E-Mail)",
-                    "password": "Passwort"
-                },
-                "data_description": {
-                    "username": "Die mit Ihrem Mysa-Konto verkn\u00fcpfte E-Mail-Adresse.",
-                    "password": "Ihr Mysa-Passwort."
-                }
-            },
-            "reauth_confirm": {
-                "title": "Mysa erneut authentifizieren",
-                "description": "Das Passwort f\u00fcr {username} ist ung\u00fcltig. Bitte geben Sie das neue Passwort ein.",
-                "data": {
-                    "username": "Benutzername (E-Mail)",
-                    "password": "Passwort"
-                },
-                "data_description": {
-                    "username": "Die mit Ihrem Mysa-Konto verkn\u00fcpfte E-Mail-Adresse.",
-                    "password": "Ihr neues Mysa-Passwort."
-                }
-            }
+        "abort": {
+            "reauth_successful": "Die erneute Authentifizierung war erfolgreich.",
+            "single_instance_allowed": "Nur eine einzige Mysa-Konfiguration ist erlaubt."
         },
         "error": {
             "invalid_auth": "Ung\u00fcltige Authentifizierung",
-            "unknown": "Unerwarteter Fehler",
-            "reauth_account_mismatch": "Die angegebene E-Mail-Adresse stimmt nicht mit der vorhandenen Konfiguration \u00fcberein."
+            "reauth_account_mismatch": "Die angegebene E-Mail-Adresse stimmt nicht mit der vorhandenen Konfiguration \u00fcberein.",
+            "unknown": "Unerwarteter Fehler"
         },
-        "abort": {
-            "single_instance_allowed": "Nur eine einzige Mysa-Konfiguration ist erlaubt.",
-            "reauth_successful": "Die erneute Authentifizierung war erfolgreich."
-        }
-    },
-    "options": {
         "step": {
-            "init": {
-                "title": "Mysa Optionen",
-                "description": "Erweiterte Ger\u00e4teeinstellungen konfigurieren.",
+            "reauth_confirm": {
                 "data": {
-                    "upgraded_lite_devices": "Aufger\u00fcstete Lite-Ger\u00e4te (Typ 5 erzwingen)",
-                    "estimated_max_current": "Gesch\u00e4tzter maximaler Strom (Ampere)",
-                    "simulated_energy": "Simulierte Energie erzwingen"
+                    "password": "Passwort",
+                    "username": "Benutzername (E-Mail)"
                 },
                 "data_description": {
-                    "upgraded_lite_devices": "W\u00e4hlen Sie Ger\u00e4te aus, die Sie mit der 'Magic Upgrade'-Funktion von Lite auf Full aktualisiert haben.",
-                    "estimated_max_current": "Gesch\u00e4tzter Strom (Ampere) f\u00fcr Lite-Ger\u00e4te zur Berechnung der simulierten Energie.",
-                    "simulated_energy": "Erzwingt f\u00fcr alle Ger\u00e4te die simulierte Leistungsberechnung basierend auf dem Arbeitszyklus."
-                }
+                    "password": "Ihr neues Mysa-Passwort.",
+                    "username": "Die mit Ihrem Mysa-Konto verkn\u00fcpfte E-Mail-Adresse."
+                },
+                "description": "Das Passwort f\u00fcr {username} ist ung\u00fcltig. Bitte geben Sie das neue Passwort ein.",
+                "title": "Mysa erneut authentifizieren"
+            },
+            "user": {
+                "data": {
+                    "password": "Passwort",
+                    "username": "Benutzername (E-Mail)"
+                },
+                "data_description": {
+                    "password": "Ihr Mysa-Passwort.",
+                    "username": "Die mit Ihrem Mysa-Konto verkn\u00fcpfte E-Mail-Adresse."
+                },
+                "description": "Geben Sie Ihre Mysa-Kontoanmeldedaten ein.",
+                "title": "Mysa Authentifizierung"
             }
         }
     },
-    "services": {
-        "upgrade_lite_device": {
-            "name": "Lite-Ger\u00e4t aufr\u00fcsten",
-            "description": "R\u00fcstet ein Mysa Lite-Thermostat auf volle Funktionen auf (Magic Upgrade)."
-        },
-        "downgrade_lite_device": {
-            "name": "Lite-Ger\u00e4t zur\u00fccksetzen",
-            "description": "Setzt ein Mysa-Thermostat von vollen Funktionen auf Lite zur\u00fcck."
-        }
-    },
     "entity": {
+        "binary_sensor": {
+            "connection": {
+                "name": "Verbindung"
+            }
+        },
+        "climate": {
+            "thermostat": {
+                "name": "Thermostat"
+            }
+        },
+        "number": {
+            "auto_deadband": {
+                "name": "Automatischer Totbereich"
+            },
+            "max_brightness": {
+                "name": "Maximalhelligkeit"
+            },
+            "max_setpoint": {
+                "name": "Maximale Sollwert"
+            },
+            "min_brightness": {
+                "name": "Mindesthelligkeit"
+            },
+            "min_setpoint": {
+                "name": "Minimale Sollwert"
+            }
+        },
         "select": {
+            "horizontal_swing": {
+                "name": "Horizontal Swing",
+                "state": {
+                    "auto": "Auto",
+                    "center": "Center",
+                    "left": "Left",
+                    "left_center": "Left Center",
+                    "right": "Right",
+                    "right_center": "Right Center",
+                    "right_wide": "Right Wide"
+                }
+            },
             "sensor_mode": {
                 "name": "Sensormodus",
                 "state": {
@@ -75,17 +86,249 @@
             }
         },
         "sensor": {
+            "adv_aux_uses_fan": {
+                "name": "Zusatzheizung nutzt L\u00fcfter"
+            },
+            "adv_cool_fan_delay": {
+                "name": "K\u00fchlgebl\u00e4severz\u00f6gerung"
+            },
+            "adv_cool_fan_run_on": {
+                "name": "K\u00fchlnachlauf"
+            },
+            "adv_cool_stage_two_delay": {
+                "name": "Stufe 2 K\u00fchlverz\u00f6gerung"
+            },
+            "adv_cool_stage_two_delta": {
+                "name": "Stufe 2 K\u00fchl-Delta"
+            },
+            "adv_cool_uses_fan": {
+                "name": "K\u00fchlung nutzt L\u00fcfter"
+            },
+            "adv_cool_when_reversed": {
+                "name": "K\u00fchlen bei Umkehrung"
+            },
+            "adv_fan_period": {
+                "name": "L\u00fcfterperiode"
+            },
+            "adv_fan_ramp": {
+                "name": "L\u00fcfter-Anlauf"
+            },
+            "adv_fan_runtime": {
+                "name": "L\u00fcfterlaufzeit"
+            },
+            "adv_heat_fan_delay": {
+                "name": "Heizgebl\u00e4severz\u00f6gerung"
+            },
+            "adv_heat_fan_run_on": {
+                "name": "Heiznachlauf"
+            },
+            "adv_heat_stage_two_delay": {
+                "name": "Stufe 2 Heizverz\u00f6gerung"
+            },
+            "adv_heat_stage_two_delta": {
+                "name": "Stufe 2 Heiz-Delta"
+            },
+            "adv_heat_uses_fan": {
+                "name": "Heizung nutzt L\u00fcfter"
+            },
+            "brightness": {
+                "name": "Helligkeit"
+            },
+            "cost": {
+                "name": "Stromtarif"
+            },
+            "current": {
+                "name": "Strom"
+            },
+            "duty_cycle": {
+                "name": "Tastverh\u00e4ltnis"
+            },
+            "emergency_heat_on_time": {
+                "name": "Laufzeit Notheizung"
+            },
+            "encryption_enabled": {
+                "name": "Verschl\u00fcsselung aktiviert"
+            },
+            "energy": {
+                "name": "Energie"
+            },
+            "estimated_current": {
+                "name": "Gesch\u00e4tzter Strom"
+            },
+            "fan_on_time": {
+                "name": "L\u00fcfterlaufzeit"
+            },
+            "fan_sequence": {
+                "name": "L\u00fcftersequenz"
+            },
+            "fault_test": {
+                "name": "Fehlertest"
+            },
+            "free_heap": {
+                "name": "Freier Speicher"
+            },
+            "heatsink_temperature": {
+                "name": "K\u00fchlk\u00f6rpertemperatur"
+            },
+            "humidity": {
+                "name": "Luftfeuchtigkeit"
+            },
+            "hvac_config_index": {
+                "name": "HVAC-Konfigurationsindex"
+            },
+            "infloor_temperature": {
+                "name": "Bodentemperatur"
+            },
             "ip_address": {
                 "name": "IP-Adresse"
             },
-            "serial_number": {
-                "name": "Seriennummer"
+            "max_current": {
+                "name": "Maximaler Strom"
+            },
+            "max_setpoint": {
+                "name": "Maximaler Sollwert"
+            },
+            "min_setpoint": {
+                "name": "Minimaler Sollwert"
+            },
+            "multiple_fan_speeds": {
+                "name": "Mehrere L\u00fcfterstufen"
+            },
+            "on_time": {
+                "name": "Gesamtlaufzeit"
+            },
+            "power": {
+                "name": "Wirkleistung"
+            },
+            "priv_key_ok": {
+                "name": "Status des privaten Schl\u00fcssels"
+            },
+            "pub_key_hash": {
+                "name": "Hash des \u00f6ffentlichen Schl\u00fcssels"
+            },
+            "rssi": {
+                "name": "Signalst\u00e4rke"
+            },
+            "secure_boot": {
+                "name": "Sicherer Start"
+            },
+            "stage_one_cool_on_time": {
+                "name": "Laufzeit K\u00fchlstufe 1"
+            },
+            "stage_two_cool_on_time": {
+                "name": "Laufzeit K\u00fchlstufe 2"
+            },
+            "stage_two_on_time": {
+                "name": "Laufzeit Stufe 2"
+            },
+            "temperature": {
+                "name": "Temperatur"
+            },
+            "timezone": {
+                "name": "Zeitzone"
+            },
+            "voltage": {
+                "name": "Spannung"
+            }
+        },
+        "switch": {
+            "allow_auto_mode": {
+                "name": "Allow Auto Mode"
+            },
+            "auto_brightness": {
+                "name": "Automatische Helligkeit"
+            },
+            "climate_plus": {
+                "name": "Klima+"
+            },
+            "lock": {
+                "name": "Sperre"
+            },
+            "proximity": {
+                "name": "N\u00e4herungsmodus"
+            },
+            "temperature_format": {
+                "name": "Anzeigeformat"
+            }
+        },
+        "update": {
+            "firmware": {
+                "name": "Firmware"
             }
         }
     },
     "exceptions": {
+        "set_ac_fan_mode_failed": {
+            "message": "Fehler beim Einstellen des AC-L\u00fcftermodus: {error}"
+        },
+        "set_ac_hvac_mode_failed": {
+            "message": "Fehler beim Einstellen des AC-HVAC-Modus: {error}"
+        },
+        "set_ac_swing_mode_failed": {
+            "message": "Fehler beim Einstellen des AC-Swing-Modus: {error}"
+        },
+        "set_ac_temperature_failed": {
+            "message": "Fehler beim Einstellen der AC-Zieltemperatur: {error}"
+        },
+        "set_horizontal_swing_failed": {
+            "message": "Fehler beim Einstellen des horizontalen AC-Swings: {error}"
+        },
+        "set_hvac_mode_failed": {
+            "message": "Fehler beim Einstellen des HVAC-Modus: {error}"
+        },
         "set_sensor_mode_failed": {
             "message": "Sensormodus konnte nicht festgelegt werden: {error}"
+        },
+        "set_temperature_failed": {
+            "message": "Fehler beim Einstellen der Temperatur: {error}"
+        }
+    },
+    "issues": {
+        "auth_failed": {
+            "fix_flow": {
+                "step": {
+                    "confirm": {
+                        "description": "Authentication with the Mysa API failed: {error}\n\nPlease reconfigure the integration with valid credentials.",
+                        "title": "Re-authenticate Mysa"
+                    }
+                }
+            },
+            "title": "Authentication Failed"
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "data": {
+                    "estimated_max_current": "Gesch\u00e4tzter maximaler Strom (Ampere)",
+                    "simulated_energy": "Simulierte Energie erzwingen",
+                    "upgraded_lite_devices": "Aufger\u00fcstete Lite-Ger\u00e4te (Typ 5 erzwingen)"
+                },
+                "data_description": {
+                    "estimated_max_current": "Gesch\u00e4tzter Strom (Ampere) f\u00fcr Lite-Ger\u00e4te zur Berechnung der simulierten Energie.",
+                    "simulated_energy": "Erzwingt f\u00fcr alle Ger\u00e4te die simulierte Leistungsberechnung basierend auf dem Arbeitszyklus.",
+                    "upgraded_lite_devices": "W\u00e4hlen Sie Ger\u00e4te aus, die Sie mit der 'Magic Upgrade'-Funktion von Lite auf Full aktualisiert haben."
+                },
+                "description": "Erweiterte Ger\u00e4teeinstellungen konfigurieren.",
+                "title": "Mysa Optionen"
+            }
+        }
+    },
+    "services": {
+        "downgrade_lite_device": {
+            "description": "Setzt ein Mysa-Thermostat von vollen Funktionen auf Lite zur\u00fcck.",
+            "name": "Lite-Ger\u00e4t zur\u00fccksetzen"
+        },
+        "upgrade_lite_device": {
+            "description": "R\u00fcstet ein Mysa Lite-Thermostat auf volle Funktionen auf (Magic Upgrade).",
+            "name": "Lite-Ger\u00e4t aufr\u00fcsten"
+        }
+    },
+    "system_health": {
+        "info": {
+            "api_connected": "API verbunden",
+            "devices": "Ger\u00e4te",
+            "mqtt_listener": "MQTT-Listener"
         }
     }
 }

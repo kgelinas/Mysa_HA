@@ -12,19 +12,24 @@ TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(TEST_DIR)
 sys.path.insert(0, ROOT_DIR)
 
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
-from homeassistant.const import EntityCategory
+from homeassistant.const import (
+    EntityCategory,
+    SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+    PERCENTAGE,
+)
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from custom_components.mysa import MysaData
-
-# Module-level imports after path setup
 from custom_components.mysa.sensor import (
     MysaCurrentSensor,
     MysaDiagnosticSensor,
+    MysaElectricityRateSensor,
     MysaEnergySensor,
     MysaHumiditySensor,
     MysaIpSensor,
@@ -115,22 +120,22 @@ def mock_api():
     """Create mock API."""
     api = MagicMock()
     api.get_zone_name = MagicMock(return_value="Living Room Zone")
-    api.get_devices = AsyncMock(
-        return_value={
-            "device1": {"Id": "device1", "Name": "Living Room", "Model": "BB-V2"},
-            "ac_device": {
-                "Id": "ac_device",
-                "Name": "Bedroom AC",
-                "Model": "AC-V1",
-                "SupportedCaps": {"modes": {"4": {}}},
-            },
-            "lite_device": {
-                "Id": "lite_device",
-                "Name": "Office",
-                "Model": "BB-V2-0-L",
-            },
-        }
-    )
+    _devices = {
+        "device1": {"Id": "device1", "Name": "Living Room", "Model": "BB-V2"},
+        "ac_device": {
+            "Id": "ac_device",
+            "Name": "Bedroom AC",
+            "Model": "AC-V1",
+            "SupportedCaps": {"modes": {"4": {}}},
+        },
+        "lite_device": {
+            "Id": "lite_device",
+            "Name": "Office",
+            "Model": "BB-V2-0-L",
+        },
+    }
+    api.get_devices = AsyncMock(return_value=_devices)
+    api.devices = _devices
     return api
 
 
@@ -176,6 +181,7 @@ class TestMysaDiagnosticSensorInit:
 
         assert entity._device_id == "device1"
         assert entity._attr_translation_key == "rssi"
+        assert entity.extra_state_attributes == {"device_id": "device1"}
 
     @pytest.mark.asyncio
     async def test_duty_sensor_init(
@@ -787,11 +793,9 @@ class TestSensorSetup:
         await mock_coordinator.async_refresh()
 
         mock_api = MagicMock()
-        mock_api.get_devices = AsyncMock(
-            return_value={
-                "device1": {"Id": "device1", "Name": "Heater", "Model": "BB-V2"}
-            }
-        )
+        _devices = {"device1": {"Id": "device1", "Name": "Heater", "Model": "BB-V2"}}
+        mock_api.get_devices = AsyncMock(return_value=_devices)
+        mock_api.devices = _devices
         mock_api.is_ac_device = MagicMock(return_value=False)
 
         mock_data = MagicMock(spec=MysaData)
@@ -835,11 +839,9 @@ class TestSensorSetup:
         await coordinator.async_refresh()
 
         mock_api = MagicMock()
-        mock_api.get_devices = AsyncMock(
-            return_value={
-                "device1": {"Id": "device1", "Name": "Heater", "Model": "BB-V2"}
-            }
-        )
+        _devices = {"device1": {"Id": "device1", "Name": "Heater", "Model": "BB-V2"}}
+        mock_api.get_devices = AsyncMock(return_value=_devices)
+        mock_api.devices = _devices
         mock_api.is_ac_device = MagicMock(return_value=False)
 
         mock_data = MagicMock(spec=MysaData)
@@ -875,15 +877,15 @@ class TestSensorSetup:
         await mock_coordinator.async_refresh()
 
         mock_api = MagicMock()
-        mock_api.get_devices = AsyncMock(
-            return_value={
-                "lite_device": {
-                    "Id": "lite_device",
-                    "Name": "Lite",
-                    "Model": "BB-V2-0-L",
-                }
+        _devices = {
+            "lite_device": {
+                "Id": "lite_device",
+                "Name": "Lite",
+                "Model": "BB-V2-0-L",
             }
-        )
+        }
+        mock_api.get_devices = AsyncMock(return_value=_devices)
+        mock_api.devices = _devices
         mock_api.is_ac_device = MagicMock(return_value=False)
 
         mock_data = MagicMock(spec=MysaData)
@@ -911,11 +913,9 @@ class TestSensorSetup:
         await mock_coordinator.async_refresh()
 
         mock_api = MagicMock()
-        mock_api.get_devices = AsyncMock(
-            return_value={
-                "ac_device": {"Id": "ac_device", "Name": "AC", "Model": "AC-V1"}
-            }
-        )
+        _devices = {"ac_device": {"Id": "ac_device", "Name": "AC", "Model": "AC-V1"}}
+        mock_api.get_devices = AsyncMock(return_value=_devices)
+        mock_api.devices = _devices
         mock_api.is_ac_device = MagicMock(return_value=True)
 
         mock_data = MagicMock(spec=MysaData)
@@ -1031,7 +1031,7 @@ class TestSensorFinalEdgeCases:
     """Final edge cases for sensor.py."""
 
     @pytest.mark.asyncio
-    async def test_diagnostic_sensor_no_zone_name(self, hass, mock_entry):
+    async def test_diagnostic_sensor_boolean_value(self, hass, mock_entry):
         """Test device_info does NOT include zone_name."""
         from custom_components.mysa.sensor import MysaDiagnosticSensor
 
@@ -2102,7 +2102,6 @@ async def test_sensor_device_info_zone_name(
 async def test_ip_sensor(hass, mock_coordinator, mock_entry, mock_device_data):
     """Test IP address sensor."""
     from homeassistant.const import EntityCategory
-
     from custom_components.mysa.sensor import MysaIpSensor
 
     mock_coordinator.data = {"device1": {"ip": "10.0.0.1"}}
@@ -2334,3 +2333,485 @@ class TestSensorCoverageGaps:
         assert entity.native_value is None
         mock_coordinator.data = {"other": {}}
         assert entity.native_value is None
+
+@pytest.mark.asyncio
+class TestSTV10SensorsExtended:
+    """Extended coverage for ST-V1-0 sensors."""
+
+    async def test_async_setup_entry_stv10_sensors(self, hass, mock_coordinator, mock_entry):
+        """Test setup creates ST-V1-0 specific sensors (Stage 2 Heat)."""
+        from custom_components.mysa.sensor import async_setup_entry
+        mock_api = MagicMock()
+        stv10_data = {"Id": "stv10_dev", "Name": "HVAC", "Model": "ST-V1-0"}
+        mock_api.get_devices = AsyncMock(return_value={"stv10_dev": stv10_data})
+        mock_api.devices = {"stv10_dev": stv10_data}
+        mock_api.is_ac_device = MagicMock(return_value=False)
+        # Mock device_caps for line 61
+        mock_caps = MagicMock()
+        mock_caps.is_stv10 = True
+        mock_api.device_caps = {"stv10_dev": mock_caps}
+
+        mock_data = MagicMock(spec=MysaData)
+        mock_data.coordinator = mock_coordinator
+        mock_data.api = mock_api
+        mock_entry.runtime_data = mock_data
+
+        # Populate coordinator data with Stage 2 Heat Flag
+        mock_coordinator.data = {
+            "stv10_dev": {
+                "hvac_config_index": 103,
+                "heating_stage_two_exists": 1,
+                "cooling_stage_two_exists": 1,
+                "is_reversible_heat_pump": 0,
+                "adv_heat_uses_fan": True,
+                "adv_cool_uses_fan": False,
+                "adv_aux_uses_fan": True,
+                "adv_fan_runtime": 120,
+                "adv_fan_period": 3600,
+                "adv_heat_stage_two_delta": 2.0,
+                "adv_cool_stage_two_delta": 1.5,
+                "adv_heat_stage_two_delay": 15,
+                "adv_fan_ramp": 4,
+                "adv_cool_fan_delay": 1,
+                "adv_heat_fan_delay": 2,
+                "adv_cool_fan_run_on": 3,
+                "adv_heat_fan_run_on": 5,
+                "multiple_fan_speeds": 0,
+                "fan_sequence": 4,
+                "temperature": 21.0,
+                "humidity": 45.0,
+                "ip": "192.168.1.100",
+                "min_setpoint": 15.0,
+                "max_setpoint": 30.0,
+            }
+        }
+
+        entities = []
+        def add_entities(new_entities):
+            entities.extend(new_entities)
+        async_add_entities = MagicMock(side_effect=add_entities)
+
+        await async_setup_entry(hass, mock_entry, async_add_entities)
+
+        assert async_add_entities.called
+
+        found_keys = set()
+        for e in entities:
+            if hasattr(e, "entity_description") and e.entity_description:
+                found_keys.add(e.entity_description.key)
+            elif hasattr(e, "_sensor_key"):
+                found_keys.add(e._sensor_key)
+            elif hasattr(e, "_attr_translation_key"):
+                found_keys.add(e._attr_translation_key)
+
+        # Verify Stage 2 Heat Sensors
+        assert "adv_heat_stage_two_delta" in found_keys
+        assert "adv_heat_stage_two_delay" in found_keys
+
+        # Verify New Fan Sensors
+        assert "adv_fan_ramp" in found_keys
+        assert "adv_cool_fan_delay" in found_keys
+        assert "adv_heat_fan_delay" in found_keys
+        assert "adv_cool_fan_run_on" in found_keys
+        assert "adv_heat_fan_run_on" in found_keys
+        assert "multiple_fan_speeds" in found_keys
+        assert "fan_sequence" in found_keys
+
+    async def test_async_setup_entry_stv10_heatpump(self, hass, mock_coordinator, mock_entry):
+        """Test setup filters sensors correctly for Heat Pump."""
+        from custom_components.mysa.sensor import async_setup_entry
+        mock_api = MagicMock()
+        stv10_data = {"Id": "stv10_hp", "Name": "HP", "Model": "ST-V1-0"}
+        mock_api.get_devices = AsyncMock(return_value={"stv10_hp": stv10_data})
+        mock_api.devices = {"stv10_hp": stv10_data}
+        mock_api.is_ac_device = MagicMock(return_value=False)
+
+        mock_data = MagicMock(spec=MysaData)
+        mock_data.coordinator = mock_coordinator
+        mock_data.api = mock_api
+        mock_entry.runtime_data = mock_data
+
+        # Populate coordinator data with Heat Pump Flag
+        mock_coordinator.data = {
+            "stv10_hp": {
+                "hvac_config_index": 61,
+                "heating_stage_two_exists": 0,
+                "cooling_stage_two_exists": 0,
+                "is_reversible_heat_pump": 1,
+                "adv_heat_uses_fan": True,
+                "adv_cool_when_reversed": True,
+            }
+        }
+
+        entities = []
+        def add_entities(new_entities):
+            entities.extend(new_entities)
+        async_add_entities = MagicMock(side_effect=add_entities)
+
+        await async_setup_entry(hass, mock_entry, async_add_entities)
+
+        found_keys = set()
+        for e in entities:
+            if hasattr(e, "entity_description") and e.entity_description:
+                found_keys.add(e.entity_description.key)
+            elif hasattr(e, "_sensor_key"):
+                found_keys.add(e._sensor_key)
+            elif hasattr(e, "_attr_translation_key"):
+                found_keys.add(e._attr_translation_key)
+
+        # Verify O/B Sensor is PRESENT
+        assert "adv_cool_when_reversed" in found_keys
+
+    async def test_diagnostic_sensor_boolean_value(self):
+        """Test that boolean values are returned as-is (coverage fix)."""
+        from custom_components.mysa.sensor import MysaDiagnosticSensor
+        coordinator = MagicMock()
+        coordinator.data = {"device_id": {"test_bool": True}}
+
+        sensor = MysaDiagnosticSensor(
+            coordinator=coordinator,
+            device_id="device_id",
+            device_data={},
+            sensor_key="test_bool",
+            translation_key="test_bool",
+            unit=None,
+            state_class=None,
+            device_class=None,
+            entry=MagicMock()
+        )
+
+        assert sensor.native_value is True
+
+        coordinator.data = {"device_id": {"test_bool": False}}
+        assert sensor.native_value is False
+
+        # Test hvac_config_index handling for non-int value
+        sensor._sensor_key = "hvac_config_index"
+        sensor._keys = ["hvac_config_index"]
+        coordinator.data["device_id"]["hvac_config_index"] = "foo"
+        assert sensor.native_value == "foo"
+
+
+# ===========================================================================
+# ST-V1-0 Sensor Filtering Tests
+# ===========================================================================
+
+
+class TestStv10SensorCreation:
+    """Test ST-V1-0 specific sensor creation logic."""
+
+    @pytest.mark.asyncio
+    async def test_stv10_sensors_filtered_by_availability(
+        self, hass, mock_coordinator, mock_entry
+    ):
+        """Test that ST-V1-0 sensors are only created if data exists."""
+        from custom_components.mysa.sensor import async_setup_entry
+
+        await mock_coordinator.async_refresh()
+
+        # Mock API to return an ST-V1-0 device
+        mock_api = MagicMock()
+        _devices = {
+            "stv1_device": {
+                "Id": "stv1_device",
+                "Name": "Thermostat",
+                "Model": "ST-V1-0",
+            }
+        }
+        mock_api.get_devices = AsyncMock(return_value=_devices)
+        mock_api.devices = _devices
+        # Mock device capabilities to confirm is_stv10=True
+        mock_api.device_caps = {}
+
+        mock_data = MagicMock(spec=MysaData)
+        mock_data.coordinator = mock_coordinator
+        mock_data.api = mock_api
+        mock_entry.runtime_data = mock_data
+
+        # Mock coordinator data with ONLY a few specific keys
+        # Missing keys: adv_cool_fan_delay, fan_sequence, etc.
+        mock_coordinator.data = {
+            "stv1_device": {
+                "hvac_config_index": 1,
+                "adv_heat_uses_fan": 1,
+                # Intentionally omitting other known ST-V1 keys
+            }
+        }
+
+        entities = []
+        async_add_entities = MagicMock(side_effect=lambda e: entities.extend(e))
+
+        await async_setup_entry(hass, mock_entry, async_add_entities)
+
+        # Check that we created sensors for existing keys
+        sensor_keys = [e._sensor_key for e in entities if hasattr(e, "_sensor_key")]
+
+        # Should contain:
+        assert "hvac_config_index" in sensor_keys
+        assert "adv_heat_uses_fan" in sensor_keys
+
+        assert "adv_cool_fan_delay" not in sensor_keys
+        assert "fan_sequence" not in sensor_keys
+
+
+class TestSensorConsolidated:
+    """Consolidated sensor tests from UI component coverage."""
+
+    @pytest.mark.asyncio
+    async def test_ui_components_setup_coverage_sensors(self, hass):
+        """Test async_setup_entry for sensor platform."""
+        from custom_components.mysa.sensor import async_setup_entry
+        mock_api = MagicMock()
+        mock_api.devices = {"d1": {"Model": "BB-V2-0"}}
+        mock_api.get_devices = AsyncMock(return_value=mock_api.devices)
+        mock_api.is_ac_device = MagicMock(return_value=False)
+
+        mock_entry = MagicMock()
+        mock_entry.runtime_data = MysaData(api=mock_api, coordinator=MagicMock())
+        mock_add_entities = MagicMock()
+
+        await async_setup_entry(hass, mock_entry, mock_add_entities)
+        assert mock_add_entities.called
+
+    @pytest.mark.asyncio
+    async def test_sensor_entity_logic_consolidated(self, hass):
+        """Test MysaSensor entity logic."""
+        coordinator = MagicMock()
+        device_id = "d1"
+        device_data = {}
+        api = MagicMock()
+        entry = MagicMock()
+
+        entity = MysaTemperatureSensor(
+            coordinator, device_id, device_data, api, entry
+        )
+
+        # Test native_value (extraction from coordinator data)
+        coordinator.data = {"d1": {"current_temp": 22.5}}
+        assert entity.native_value == 22.5
+
+        coordinator.data = {"d1": {}}
+        assert entity.native_value is None
+
+    @pytest.mark.asyncio
+    async def test_diagnostic_sensor_logic_consolidated(self, hass):
+        """Test MysaDiagnosticSensor logic."""
+        coordinator = MagicMock()
+        device_id = "d1"
+        device_data = {}
+        entry = MagicMock()
+
+        # 1. Duty Cycle (Percentage logic)
+        entity = MysaDiagnosticSensor(
+            coordinator,
+            device_id,
+            device_data,
+            "Duty",
+            "duty_cycle",
+            "%",
+            SensorStateClass.MEASUREMENT,
+            None,
+            entry,
+        )
+
+        coordinator.data = {"d1": {"dc": 0.5}}  # 50%
+        assert entity.native_value == 50.0
+
+        coordinator.data = {"d1": {"dc": 50}}  # 50 (raw)
+        assert entity.native_value == 50.0  # Should pass through
+
+        # 2. HVAC Config Index (Int logic)
+        entity_idx = MysaDiagnosticSensor(
+            coordinator,
+            device_id,
+            device_data,
+            "hvac_config_index",
+            "idx",
+            None,
+            None,
+            None,
+            entry,
+        )
+        coordinator.data = {"d1": {"hvac_config_index": 5.0}}
+        assert entity_idx.native_value == 5  # Int
+
+        # 3. Fallback/String
+        entity_str = MysaDiagnosticSensor(
+            coordinator,
+            device_id,
+            device_data,
+            "Unknown",
+            "unk",
+            None,
+            None,
+            None,
+            entry,
+        )
+        coordinator.data = {"d1": {"Unknown": "some_string"}}
+        assert entity_str.native_value == "some_string"
+
+    @pytest.mark.asyncio
+    async def test_sensor_types_coverage_consolidated(self, hass):
+        """Test all sensor types and device_info."""
+        coordinator = MagicMock()
+        device_id = "d1"
+        device_data = {"Model": "BB-V2-0"}
+        api = MagicMock()
+        entry = MagicMock()
+
+        # 1. Humidity
+        hum = MysaHumiditySensor(coordinator, device_id, device_data, api, entry)
+        coordinator.data = {"d1": {"current_humidity": 45}}
+        assert hum.native_value == 45
+        assert hum.device_info is not None
+
+        # 2. Power
+        pwr = MysaPowerSensor(coordinator, device_id, device_data, api, entry)
+        api.simulated_energy = False
+        coordinator.data = {
+            "d1": {
+                "Voltage": 120,
+                "Current": 12.5,  # Max current when on
+                "dc": 50,  # 50% duty cycle
+            }
+        }
+        # Expected: 120 * 12.5 * 0.5 = 750.0
+        assert pwr.native_value == 750.0
+
+        # 3. Energy (Riemann Sum)
+        nrg = MysaEnergySensor(coordinator, device_id, device_data, api, entry, pwr)
+        nrg.hass = hass
+        assert nrg.native_value == 0.0
+
+        with (
+            patch("custom_components.mysa.sensor.time.time") as mock_time,
+            patch.object(nrg, "async_write_ha_state"),
+        ):
+            # First update to set timestamp
+            mock_time.return_value = 1000.0
+            nrg._handle_coordinator_update()
+            assert nrg.native_value == 0.0
+
+            # Second update after 1 hour (3600s)
+            mock_time.return_value = 4600.0
+            # Power is 750W. Energy = 750/1000 * 1h = 0.75 kWh
+            nrg._handle_coordinator_update()
+            assert nrg.native_value == 0.75
+
+        # 4. IP Sensor
+        ip = MysaIpSensor(coordinator, device_id, device_data, entry)
+        coordinator.data = {"d1": {"ip": "192.168.1.10"}}
+        assert ip.native_value == "192.168.1.10"
+
+        # 5. Electricity Rate
+        rate = MysaElectricityRateSensor(coordinator, device_id, device_data, api, entry)
+        api.get_electricity_rate = MagicMock(return_value=0.15)
+        assert rate.native_value == 0.15
+
+    @pytest.mark.asyncio
+    async def test_sensor_diagnostics_and_stv1_consolidated(self, hass):
+        """Test detailed sensor setup logic and ST-V1 specifics."""
+        from custom_components.mysa.sensor import async_setup_entry
+
+        api = MagicMock()
+        api.devices = {"d1": {"Model": "BB-V2-0"}}
+        api.get_devices = AsyncMock(return_value=api.devices)
+        api.is_ac_device = MagicMock(return_value=False)
+
+        coordinator = MagicMock()
+        coordinator.data = {
+            "d1": {
+                "HeatSink": 30,
+                "Infloor": 25,
+                "Voltage": 240,
+                "Current": 8.0,
+            }
+        }
+
+        entry = MagicMock()
+        entry.runtime_data = MysaData(api=api, coordinator=coordinator)
+
+        mock_add_entities = MagicMock()
+        await async_setup_entry(hass, entry, mock_add_entities)
+
+        args = mock_add_entities.call_args[0][0]
+        keys = [
+            e._attr_translation_key for e in args if hasattr(e, "_attr_translation_key")
+        ]
+
+        assert "heatsink_temperature" in keys
+        assert "infloor_temperature" in keys
+        assert "voltage" in keys
+        assert "current" in keys
+
+        # 2. Test MysaCurrentSensor setup (Current missing)
+        mock_add_entities.reset_mock()
+        coordinator.data = {"d1": {}}
+        await async_setup_entry(hass, entry, mock_add_entities)
+        args = mock_add_entities.call_args[0][0]
+        types = [type(e).__name__ for e in args]
+        assert "MysaCurrentSensor" in types
+
+        # 3. Test ST-V1 setup with feature flags
+        api.devices = {"stv1": {"Model": "ST-V1-0"}}
+        api.get_devices = AsyncMock(return_value=api.devices)
+        api.is_ac_device = MagicMock(return_value=False)
+        coordinator.data = {
+            "stv1": {
+                "hvac_config_index": 1,
+                "adv_fan_runtime": 120,
+            }
+        }
+
+        await async_setup_entry(hass, entry, mock_add_entities)
+        args = mock_add_entities.call_args[0][0]
+        keys = []
+        for e in args:
+            if hasattr(e, "entity_description") and e.entity_description:
+                keys.append(e.entity_description.key)
+            elif hasattr(e, "_attr_translation_key") and e._attr_translation_key:
+                keys.append(e._attr_translation_key)
+            elif hasattr(e, "_sensor_key") and e._sensor_key:
+                keys.append(e._sensor_key)
+
+        assert "hvac_config_index" in keys
+        assert "adv_fan_runtime" in keys
+
+    @pytest.mark.asyncio
+    async def test_sensor_exceptions_coverage_consolidated(self, hass):
+        """Test exception paths and edge cases for sensors."""
+        coordinator = MagicMock()
+        device_id = "d1"
+        device_data = {"Model": "BB-V2-0"}
+        api = MagicMock()
+        entry = MagicMock()
+
+        # 1. MysaPowerSensor Simulated Path
+        pwr = MysaPowerSensor(coordinator, device_id, device_data, api, entry)
+        api.simulated_energy = True
+        entry.options = {"wattage_d1": 1000}
+        coordinator.data = {"d1": {"dc": 50}}
+        assert pwr.native_value == 500.0
+
+        # 2. MysaPowerSensor Real path Exception
+        api.simulated_energy = False
+        coordinator.data = {"d1": {"Voltage": "invalid", "Current": 10, "dc": 50}}
+        assert pwr.native_value == 500.0
+
+        # 3. MysaCurrentSensor Exception paths
+        cur = MysaCurrentSensor(coordinator, device_id, device_data, api, entry)
+        coordinator.data = {"d1": {"Current": "invalid", "Voltage": 240, "dc": 100}}
+        entry.options = {"wattage_d1": 2400}
+        assert cur.native_value == 10.0
+
+        # 4. MysaEnergySensor Restore Exception
+        with patch(
+            "custom_components.mysa.sensor.RestoreEntity.async_get_last_state"
+        ) as mock_restore:
+            mock_state = MagicMock()
+            mock_state.state = "invalid"
+            mock_restore.return_value = mock_state
+            nrg = MysaEnergySensor(coordinator, device_id, device_data, api, entry, pwr)
+            nrg.hass = hass
+            await nrg.async_added_to_hass()
+            assert nrg.native_value == 0.0

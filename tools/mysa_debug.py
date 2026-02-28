@@ -520,6 +520,13 @@ class MysaDebugTool:
             else:
                 print("Usage: mqtt <ID|all> <JSON>")
 
+        elif cmd in ("st", "state_update"):
+            if len(parts) >= 3:
+                await self.send_st_update(parts[1], parts[2])
+            else:
+                print("Usage: st <ID|all> <JSON>")
+
+
         elif cmd == "state":
             if len(parts) >= 2:
                 await self.show_state(parts[1])
@@ -538,11 +545,12 @@ class MysaDebugTool:
             else:
                 print("Usage: dump <ID|all>")
 
-        elif cmd == "batch":
+
+        elif cmd == "poll":
             if len(parts) >= 2:
-                await self.sub_batch(parts[1])
+                await self.poll_device(parts[1])
             else:
-                print("Usage: batch <ID|all>")
+                print("Usage: poll <ID|all>")
 
         else:
             print("Unknown command. Type 'help' or 'ex' for available commands.")
@@ -595,14 +603,13 @@ class MysaDebugTool:
         print("  users             Show /users API response (User Info, Devices)")
         print("  sniff <ID|all>    Toggle MQTT sniffing (Filter by ID or 'all')")
         print("  refresh <ID|all>  Force device to check cloud settings (MsgType 6)")
-        print("  dump <ID|all>     Force device to dump readings/info (MsgType 7)")
-        print(
-            "  batch <ID|all>    Try subscribing to /batch topic (WARNING: MAY DISCONNECT)"
-        )
+        print("  dump <ID|all>     Force metadata dump: FW, IP, Serial (MsgType 7)")
+        print("  poll <ID|all>     Request device state report (MsgType 11) — use with sniff")
 
         print("\n[ Device Control ]")
-        print("  http <ID|all> <JSON>  Send HTTP command directly")
+        print("  http <ID|all> <JSON>  Send HTTP command directly (POST /devices/<ID>)")
         print("  mqtt <ID|all> <JSON>  Send MQTT command directly")
+        print("  st <ID|all> <JSON>    Send ST-V1 state update directly (POST /state/<ID>/update)")
 
         print("\n[ Advanced ]")
         print("  advanced          Open advanced menu (Conversions, Dangerous Ops)")
@@ -852,7 +859,7 @@ class MysaDebugTool:
             print(f"\n✗ Failed to send killer ping: {e}")
 
     def show_examples(self):
-        did = list(self.devices.keys())[0] if self.devices else "DEVICE_ID"
+        did = "aabbccddeeff"
 
         print("\n" + "=" * 60)
         print("                   EXAMPLE COMMANDS")
@@ -908,6 +915,13 @@ class MysaDebugTool:
         print(f'  mqtt {did} {{"cmd":[{{"it":1,"tm":-1}}],"type":2,"ver":1}}')
         print("       ^ Climate+ mode (it: 0=Off, 1=On - uses Mysa temp sensor)")
 
+        print("\n--- ST-V1-0 Examples ---")
+        print(f'  st {did} {{"source":3,"targetCool":{{"desired":{{"temperature":2100}}}}}}   # Set Cool Setpoint to 21.0C')
+        print(f'  st {did} {{"source":3,"modes":{{"desired":{{"hvacStates":4}}}}}}              # Set HVAC mode to Cool (4)')
+        print(f'  st {did} {{"source":3,"targetAuto":{{"desired":{{"deadband":150}}}}}}       # Set auto deadband to 1.5C')
+        print(f'  st {did} {{"source":3,"physicalInterface":{{"lockout":3}}}}                # Set device lock (3=Lock, 1=Unlock)')
+        print(f'  st {did} {{"source":3,"hvacConfig":{{"idx":1}}}}                           # Set HVAC config index (e.g. Baseboard)')
+
         print("\n--- Device Type Values ---")
         print("  type=1  BB-V1 (Baseboard V1)")
         print("  type=2  AC-V1 (AC Controller)")
@@ -948,14 +962,22 @@ class MysaDebugTool:
 
             # Live state
             try:
-                r_state = self.session.get(f"{BASE_URL}/devices/state")  # type: ignore[union-attr]
-                r_state.raise_for_status()
-                states = r_state.json().get(
-                    "DeviceStatesObj", r_state.json().get("DeviceStates", [])
-                )
-                if isinstance(states, list):
-                    states = {d["Id"]: d for d in states}
-                state_json = states.get(did, {})
+                device = self.devices.get(did, {})
+                model = device.get("Model", "")
+                if "ST-V1" in model:
+                    r_state = self.session.post(f"{BASE_URL}/state/batch", json={"deviceIds": [did]})  # type: ignore[union-attr]
+                    r_state.raise_for_status()
+                    states = r_state.json()
+                    state_json = states.get(did, {})
+                else:
+                    r_state = self.session.get(f"{BASE_URL}/devices/state")  # type: ignore[union-attr]
+                    r_state.raise_for_status()
+                    states = r_state.json().get(
+                        "DeviceStatesObj", r_state.json().get("DeviceStates", [])
+                    )
+                    if isinstance(states, list):
+                        states = {d["Id"]: d for d in states}
+                    state_json = states.get(did, {})
             except Exception as e:
                 state_json = {"error": str(e)}
 
@@ -964,6 +986,38 @@ class MysaDebugTool:
 
             print("\n--- Live State (HTTP) ---")
             print(json.dumps(state_json, indent=2))
+
+
+    async def send_st_update(self, device_ref, json_str):
+        """Send ST-V1 state update via HTTP POST to /state/<ID>/update."""
+        if device_ref.lower() == "all":
+            dids = list(self.devices.keys())
+            print(f"Sending ST State Update to ALL {len(dids)} devices...")
+        else:
+            did = self._resolve_device(device_ref)
+            if not did:
+                return
+            dids = [did]
+
+        try:
+            payload = json.loads(json_str, strict=False)
+        except json.JSONDecodeError as e:
+            print(f"Invalid JSON: {e}")
+            return
+
+        for did in dids:
+            url = f"{BASE_URL}/state/{did}/update"
+            print(f"\nPOST {url}")
+            print(f"Body: {json.dumps(payload)}")
+
+            try:
+                r = self.session.post(url, json=payload)  # type: ignore[union-attr]
+                print(f"Response [{r.status_code}]: {r.text}")
+            except Exception as e:
+                print(f"ST Update Request failed for {did}: {e}")
+
+            # Send MsgType 6 nudge
+            await self.notify_settings_changed(did)
 
     async def send_http(self, device_ref, json_str):
         if device_ref.lower() == "all":
@@ -1073,6 +1127,14 @@ class MysaDebugTool:
             return
 
         for did in dids:
+            device = self.devices.get(did, {})
+            model = device.get("Model", "")
+
+            if "ST-V1" in model:
+                print(f"\n⚠️  ST-V1 devices (like {did}) use AWS IoT Shadows and do NOT support MsgType 6 'refresh' commands.")
+                print("   State changes are pushed instantly from the cloud. If you want to force a change, send an 'st' update.")
+                continue
+
             print(f"\nRequesting settings refresh from {did} (MsgType 6)...")
             await self.notify_settings_changed(did)
             print("✓ Request sent! Device should fetch new settings from cloud.")
@@ -1093,32 +1155,48 @@ class MysaDebugTool:
             return
 
         for did in dids:
-            print(f"\nRequesting metadata dump from {did} (MsgType 7)...")
+            device = self.devices.get(did, {})
+            model = device.get("Model", "")
 
-            timestamp = int(time.time())
-            payload = {"Device": did, "Timestamp": timestamp, "MsgType": 7}
+            if "ST-V1" in model:
+                print(f"\nRequesting metadata dump from {did} (HTTP/API)...")
+                try:
+                    url = f"{BASE_URL}/devices/{did}"
+                    r = self.session.get(url)  # type: ignore[union-attr]
+                    print("✓ Dump fetched! ST-V1 Metadata:")
+                    print(json.dumps(r.json(), indent=2))
+                except Exception as e:
+                    print(f"✗ Failed to fetch ST-V1 settings dump: {e}")
+            else:
+                print(f"\nRequesting metadata dump from {did} (MsgType 7)...")
 
-            safe_did = did.replace(":", "").lower()
-            topic = f"/v1/dev/{safe_did}/in"
+                timestamp = int(time.time())
+                payload = {"Device": did, "Timestamp": timestamp, "MsgType": 7}
 
-            try:
-                pub_pkt = mqtt.publish(
-                    topic,
-                    False,
-                    1,
-                    False,
-                    packet_id=14,
-                    payload=json.dumps(payload).encode(),
-                )
-                await self.ws.send(pub_pkt)
-                print("✓ Dump request sent! Watch for updates/logs.")
-            except Exception as e:
-                print(f"✗ Failed to send dump request: {e}")
+                safe_did = did.replace(":", "").lower()
+                topic = f"/v1/dev/{safe_did}/in"
 
-    async def sub_batch(self, device_ref):
-        """Try to subscribe to the /batch topic for a device (or 'all')."""
+                try:
+                    pub_pkt = mqtt.publish(
+                        topic,
+                        False,
+                        1,
+                        False,
+                        packet_id=14,
+                        payload=json.dumps(payload).encode(),
+                    )
+                    await self.ws.send(pub_pkt)
+                    print("✓ Dump request sent! Watch for updates/logs.")
+                except Exception as e:
+                    print(f"✗ Failed to send dump request: {e}")
+
+
+
+    async def poll_device(self, device_ref):
+        """Send MsgType 11 to request a state report from legacy (BBv1) devices."""
         if device_ref.lower() == "all":
             dids = list(self.devices.keys())
+            print(f"Requesting state poll for ALL {len(dids)} devices...")
         else:
             did = self._resolve_device(device_ref)
             if not did:
@@ -1126,26 +1204,61 @@ class MysaDebugTool:
             dids = [did]
 
         if not self.ws:
-            print("\n✗ MQTT not connected.")
+            print("\n✗ MQTT not connected. Cannot send poll request.")
             return
 
-        from custom_components.mysa import mqtt
-
-        specs = []
         for did in dids:
-            safe_did = did.replace(":", "").lower()
-            topic = f"/v1/dev/{safe_did}/batch"
-            specs.append(mqtt.SubscriptionSpec(topic, 0))
-            print(f"  • {topic}")
+            device = self.devices.get(did, {})
+            model = device.get("Model", "")
 
-        print(f"\n⚠️ Attempting to subscribe to {len(specs)} topics...")
+            # AWS IoT Devices Shadow explicitly supports 'poll' by querying the root shadow
+            if "ST-V1" in model:
+                print(f"  Polling {did} via Shadow GET...")
+                safe_id = did.replace(":", "").lower()
+                shadow_names = [
+                    "modes", "targetHeat", "targetCool", "physicalInterface",
+                    "latestTelemetry", "room", "targetAuto"
+                ]
+                topics = [f"$aws/things/{safe_id}/shadow/name/{name}/get" for name in shadow_names]
+                topics.append(f"$aws/things/{safe_id}/shadow/get")  # Also try root
 
-        try:
-            sub_pkt = mqtt.subscribe(99, specs)
-            await self.ws.send(sub_pkt)
-            print("✓ SUBSCRIBE packet sent. Watching for readings...")
-        except Exception as e:
-            print(f"✗ Failed to send subscribe: {e}")
+                payload = "{}"
+
+                try:
+                    for topic in topics:
+                        pub_pkt = mqtt.publish(
+                            topic,
+                            False,
+                            1,
+                            False,
+                            packet_id=15,
+                            payload=payload.encode(),
+                        )
+                        await self.ws.send(pub_pkt)
+                    print(f"  ✓ Poll (GET) sent to all 8 shadows for {did} — watch sniff output!")
+                except Exception as e:
+                    print(f"  ✗ Failed to send poll to {did}: {e}")
+            else:
+                print(f"  Polling {did} (MsgType 11)...")
+                timestamp = int(time.time())
+                payload_legacy = {"Device": did, "Timestamp": timestamp, "MsgType": 11}
+
+                safe_did = did.replace(":", "").lower()
+                topic = f"/v1/dev/{safe_did}/in"
+
+                try:
+                    pub_pkt = mqtt.publish(
+                        topic,
+                        False,
+                        1,
+                        False,
+                        packet_id=15,
+                        payload=json.dumps(payload_legacy).encode(),
+                    )
+                    await self.ws.send(pub_pkt)
+                    print(f"  ✓ Poll sent to {did} — watch sniff output for device reply on /out")
+                except Exception as e:
+                    print(f"  ✗ Failed to send poll to {did}: {e}")
 
     def _resolve_device(self, ref):
         """Resolve device by number or ID."""
@@ -1182,12 +1295,22 @@ class MysaDebugTool:
                     await asyncio.sleep(5)
                     continue
 
+                # Collect ST-V1 devices
+                stv10_devices = [
+                    did for did, info in self.devices.items()
+                    if "ST-V1" in info.get("Model", "")
+                ]
+
                 # Use MqttConnection context manager
                 async with MqttConnection(
-                    signed_url, list(self.devices.keys()), include_batch=False
+                    signed_url,
+                    list(self.devices.keys()),
+                    include_batch=False,
+                    stv10_devices=stv10_devices
                 ) as conn:
                     self.ws = conn.websocket
                     print("⚡ MQTT Connected!")
+                    print("  💡 Tip: run 'sniff all' then 'poll all' to see device replies.")
 
                     while conn.connected:
                         pkt = await conn.receive(timeout=MQTT_PING_INTERVAL + 5)
@@ -1218,7 +1341,10 @@ class MysaDebugTool:
         if self.sniff_filter:
             did = "unknown"
             if len(topic_parts) >= 4:
-                did = topic_parts[3]
+                if topic_parts[0] == "$aws" and topic_parts[1] == "things":
+                    did = topic_parts[2]
+                else:
+                    did = topic_parts[3]
             if did.lower() != self.sniff_filter.replace(":", "").lower():
                 return
 
@@ -1229,6 +1355,14 @@ class MysaDebugTool:
         try:
             payload = json.loads(pkt.payload)
             msg_type = payload.get("msg") or payload.get("MsgType")
+
+            # Try to grab state updates from ST-V1 shadow arrays if it's ST-V1 reporting.
+            if ("state" in payload and isinstance(payload["state"], dict)
+                    and "reported" in payload["state"]):
+                print(f"\n[{timestamp}] [SNIFF {arrow}] ST-V1 Shadow Update "
+                      f"(Topic: {pkt.topic}):")
+                print(json.dumps(payload["state"]["reported"], indent=2))
+                return
 
             # Special handling for Batch Data (MsgType 3)
             if msg_type == 3:

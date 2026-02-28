@@ -36,14 +36,21 @@ REGION = "us-east-1"
 USER_POOL_ID = "us-east-1_GUFWfhI7g"
 """Mysa's Cognito IDP user pool ID"""
 
-CLIENT_ID = "19efs8tgqe942atbqmot5m36t3"
-"""Mysa's Cognito IDP client ID"""
+CLIENT_ID = "6cktj934gasnc72f7jo2cmf6rt"
+"""Mysa's Cognito IDP client ID (Android app v4.11.0+)"""
 
 IDENTITY_POOL_ID = "us-east-1:ebd95d52-9995-45da-b059-56b865a18379"
-"""Mysa's Cognito Identity pool ID for AWS credentials"""
+"""Mysa's Cognito Identity pool ID for AWS credentials (old pool - required for MQTT)"""
 
 MQTT_WS_HOST = "a3q27gia9qg3zy-ats.iot.us-east-1.amazonaws.com"
 """Hostname for Mysa MQTT-over-WebSockets endpoint"""
+
+CREDENTIALS_VERSION = "2"
+"""
+Credential version identifier.
+Increment this when CLIENT_ID or IDENTITY_POOL_ID changes to force re-authentication.
+This prevents cached tokens from old credentials causing authentication failures.
+"""
 
 MQTT_WS_URL = f"https://{MQTT_WS_HOST}/mqtt"
 """Complete HTTPS URL for MQTT-over-Websockets connection"""
@@ -55,8 +62,11 @@ CLIENT_HEADERS = {
 }
 """HTTP headers matching Mysa Android app"""
 
-BASE_URL = "https://app-prod.mysa.cloud"
-"""Base URL for Mysa's REST API"""
+BASE_URL = "https://mysa-backend.mysa.cloud"
+"""Base URL for Mysa's REST API (modern backend)"""
+
+LEGACY_BASE_URL = "https://app-prod.mysa.cloud"
+"""Base URL for Mysa's legacy REST API"""
 
 
 # =============================================================================
@@ -273,6 +283,7 @@ def sigv4_sign_mqtt_url(aws_credentials: dict[str, Any]) -> str:
 
     """
     # pylint: disable=too-many-locals
+    # Justification: Handles complex token exchange and state extraction.
     # Justification: Auth flow requires handling many token parameters.
     # Parse URL
     method = "GET"

@@ -8,7 +8,7 @@ import os
 import sys
 from datetime import timedelta
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
 # Add project root to path for imports
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -207,7 +207,6 @@ class TestApiCoordinatorIntegration:
     @pytest.mark.asyncio
     async def test_coordinator_with_mocked_api(self, hass):
         """Test coordinator calling mocked MysaApi.get_state."""
-        from unittest.mock import patch
 
         from custom_components.mysa.client import MysaClient
         from custom_components.mysa.mysa_api import MysaApi
@@ -217,10 +216,19 @@ class TestApiCoordinatorIntegration:
         mock_api.client = MysaClient(hass, "u", "p")
         mock_api.states = {}
         mock_api._last_command_time = {}
-
+        mock_api._last_mqtt_poll_time = {}
+        mock_api._latest_timestamp = {}
+        mock_api._clock_skew = {}
+        mock_api.devices = {}
+        mock_api.realtime = MagicMock()
+        type(mock_api).is_connected = PropertyMock(return_value=False)
         with patch.object(
             MysaClient, "get_state", new_callable=AsyncMock
-        ) as mock_get_state:
+        ) as mock_get_state, patch(
+            "custom_components.mysa.mysa_api.MysaApi.is_mqtt_running",
+            new_callable=PropertyMock,
+            return_value=False,
+        ):
             mock_get_state.return_value = {
                 "device1": {"temperature": 22.5, "humidity": 50}
             }
@@ -263,7 +271,7 @@ class TestApiCoordinatorIntegration:
 
         await coordinator.async_refresh()
 
-        assert callback_called is True
+        assert callback_called
         assert coordinator.data["device"]["temp"] == 20.0
 
         # --- From test_constants.py ---
@@ -743,7 +751,7 @@ class TestHomesApiParsing:
         zones = {}
         homes = api_response.get("Homes", api_response.get("homes", []))
         for home in homes:
-            for zone in home.get("Zones", []):
+            for zone in home.get("Zones") or []:
                 z_id = zone.get("Id")
                 z_name = zone.get("Name")
                 if z_id and z_name:
@@ -760,7 +768,7 @@ class TestHomesApiParsing:
         zones = {}
         homes = api_response.get("Homes", api_response.get("homes", []))
         for home in homes:
-            for zone in home.get("Zones", []):
+            for zone in home.get("Zones") or []:
                 z_id = zone.get("Id")
                 z_name = zone.get("Name")
                 if z_id and z_name:
@@ -783,7 +791,7 @@ class TestHomesApiParsing:
         zones = {}
         homes = api_response.get("Homes", api_response.get("homes", []))
         for home in homes:
-            for zone in home.get("Zones", []):
+            for zone in home.get("Zones") or []:
                 z_id = zone.get("Id")
                 z_name = zone.get("Name")
                 if z_id and z_name:
@@ -811,7 +819,7 @@ class TestHomesApiParsing:
         zones = {}
         homes = api_response.get("Homes", api_response.get("homes", []))
         for home in homes:
-            for zone in home.get("Zones", []):
+            for zone in home.get("Zones") or []:
                 z_id = zone.get("Id")
                 z_name = zone.get("Name")
                 if z_id and z_name:
@@ -858,7 +866,7 @@ class TestHomesApiParsing:
 
         has_heating = device.get("SupportedCaps", {}).get("Heating", False)
 
-        assert has_heating is True
+        assert has_heating
 
     def test_thermostat_voltage_options(self):
         """Test thermostat voltage options."""
@@ -1173,9 +1181,14 @@ class TestMysaApiAsyncMocking:
         """Test mocking MysaApi.get_state with AsyncMock."""
         from custom_components.mysa.client import MysaClient
 
+
         with patch.object(
             MysaClient, "get_state", new_callable=AsyncMock
-        ) as mock_get_state:
+        ) as mock_get_state, patch(
+            "custom_components.mysa.mysa_api.MysaApi.is_mqtt_running",
+            new_callable=PropertyMock,
+            return_value=False,
+        ):
             mock_get_state.return_value = {
                 "device1": {
                     "temperature": 21.5,
@@ -1190,6 +1203,12 @@ class TestMysaApiAsyncMocking:
             api.client._user_obj = MagicMock()  # Session initialized for coverage
             api.states = {}
             api._last_command_time = {}
+            api._last_mqtt_poll_time = {}
+            api._latest_timestamp = {}
+            api._clock_skew = {}
+            api.devices = {}
+            api.realtime = MagicMock()
+            type(api).is_connected = PropertyMock(return_value=False)
 
             result = await api.get_state()
 
@@ -1213,6 +1232,12 @@ class TestMysaApiAsyncMocking:
         api._last_command_time = {}
         api.states = {}
         api.coordinator_callback = None
+        api._last_mqtt_poll_time = {}
+        api._latest_timestamp = {}
+        api._clock_skew = {}
+        api.devices = {"device1": {"type": 4}}
+        type(api).is_connected = PropertyMock(return_value=False)
+        type(api).is_mqtt_running = PropertyMock(return_value=False)
         api.upgraded_lite_devices = []
 
         await api.set_target_temperature("device1", 23.0)

@@ -4,6 +4,7 @@ Tests that instantiate and test real climate entity classes
 to improve code coverage for climate.py.
 """
 
+import asyncio
 import os
 import sys
 import time
@@ -19,7 +20,11 @@ import pytest
 from homeassistant.components.climate import (
     HVACAction,
     HVACMode,
+    ATTR_TARGET_TEMP_LOW,
+    ATTR_TARGET_TEMP_HIGH,
+    ATTR_TEMPERATURE,
 )
+from homeassistant.const import UnitOfTemperature
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
@@ -113,6 +118,21 @@ def mock_api():
     """Create mock API."""
     from custom_components.mysa.mysa_api import MysaApi
 
+    _devices = {
+        "device1": {"Id": "device1", "Name": "Living Room", "Model": "BB-V2"},
+        "ac_device": {
+            "Id": "ac_device",
+            "Name": "Bedroom AC",
+            "Model": "AC-V1",
+            "SupportedCaps": {"modes": {"4": {}}},
+        },
+        "lite_device": {
+            "Id": "lite_device",
+            "Name": "Office",
+            "Model": "BB-V2-0-L",
+        },
+    }
+
     api = MagicMock(spec=MysaApi)
     api.set_target_temperature = AsyncMock()
     api.set_hvac_mode = AsyncMock()
@@ -120,22 +140,24 @@ def mock_api():
     api.set_ac_swing_mode = AsyncMock()
     api.is_ac_device = MagicMock(return_value=False)
     api.get_zone_name = MagicMock(return_value="Living Room")
-    api.get_devices = AsyncMock(
-        return_value={
-            "device1": {"Id": "device1", "Name": "Living Room", "Model": "BB-V2"},
-            "ac_device": {
-                "Id": "ac_device",
-                "Name": "Bedroom AC",
-                "Model": "AC-V1",
-                "SupportedCaps": {"modes": {"4": {}}},
-            },
-            "lite_device": {
-                "Id": "lite_device",
-                "Name": "Office",
-                "Model": "BB-V2-0-L",
-            },
-        }
-    )
+    api.get_devices = AsyncMock(return_value=_devices)
+    # Pre-populate api.devices so platform setup (which reads api.devices directly) works
+    api.devices = _devices
+
+    # Pre-populate device_caps used by ST-V1
+    api.device_caps = {}
+    # Mock client and its async methods to prevent RuntimeWarnings
+    api.client = MagicMock()
+    api.client.fetch_homes = AsyncMock()
+    api.client.get_state = AsyncMock(return_value={})
+    # These internal methods might be called by get_state if not mocked properly,
+    # or if we are mocking get_state to return a coroutine that calls them.
+    # Actually, if we mock get_state, users won't call internal methods unless we use side_effect.
+    # But just in case:
+    api.client.async_request = AsyncMock()
+    api.client.fetch_live_metrics = AsyncMock()
+    api.client.fetch_device_settings = AsyncMock()
+
     return api
 
 
@@ -288,6 +310,8 @@ class TestMysaClimateProperties:
         action = climate_entity.hvac_action
 
         assert action == HVACAction.HEATING
+
+
 
     @pytest.mark.asyncio
     async def test_extra_state_attributes(self, hass, mock_coordinator, climate_entity):
@@ -447,6 +471,95 @@ class TestMysaClimateActions:
         # Round Down (e.g. 26.2 -> 26.0)
         await climate_entity.async_set_temperature(temperature=26.2)
         mock_api.set_target_temperature.assert_called_with("device1", 26.0)
+
+
+# ===========================================================================
+# MysaSTV10Climate Tests
+# ===========================================================================
+
+
+class TestMysaSTV10ClimateProperties:
+    """Test ST-V1 specific climate properties."""
+
+    @pytest.fixture
+    def stv10_device_data(self):
+        """Create mock device data for ST-V1 thermostat."""
+        return {
+            "Id": "stv1_device1",
+            "Name": "Office Baseboard",
+            "Model": "st-v1-0",
+            "type": 6,
+        }
+
+    @pytest.fixture
+    def stv10_entity(
+        self, hass, mock_coordinator, stv10_device_data, mock_api, mock_entry
+    ):
+        """Create ST-V1 climate entity for testing."""
+        from custom_components.mysa.climate import MysaSTV10Climate
+
+        return MysaSTV10Climate(
+            mock_coordinator,
+            "stv1_device1",
+            stv10_device_data,
+            mock_api,
+            mock_entry,
+        )
+
+    @pytest.mark.asyncio
+    async def test_hvac_action_fallback(self, hass, mock_coordinator, stv10_entity):
+        """Test ST-V1 hvac_action fallback to discrete relays."""
+        await mock_coordinator.async_refresh()
+
+        # Simulate ST-V1 payload: missing hvacState, but has hvac_raw_W1 (heating)
+        mock_coordinator.data = {
+            "stv1_device1": {
+                "Mode": 4,  # Auto/Heat mode roughly (mapped to HEAT internally if no cooling)
+                "TstatMode": 4,  # Maps to HEAT if st-v1 logic or HEAT_COOL
+                "hvac_raw_W1": True,
+                "hvac_raw_Y1": False,
+                "duty": 0,
+            }
+        }
+
+        with patch.object(type(stv10_entity), "hvac_mode", new_callable=PropertyMock) as mock_mode:
+            mock_mode.return_value = HVACMode.HEAT
+
+            action = stv10_entity.hvac_action
+            assert action == HVACAction.HEATING
+
+        # Simulate cooling
+        mock_coordinator.data = {
+            "stv1_device1": {
+                "Mode": 4,
+                "TstatMode": 3,
+                "hvac_raw_W1": False,
+                "hvac_raw_Y1": True,
+            }
+        }
+
+        with patch.object(type(stv10_entity), "hvac_mode", new_callable=PropertyMock) as mock_mode:
+            mock_mode.return_value = HVACMode.COOL
+
+            action = stv10_entity.hvac_action
+            assert action == HVACAction.COOLING
+
+        # Simulate idle
+        mock_coordinator.data = {
+            "stv1_device1": {
+                "Mode": 4,
+                "hvac_raw_W1": False,
+                "hvac_raw_W2": False,
+                "hvac_raw_Y1": False,
+                "hvac_raw_Y2": False,
+            }
+        }
+
+        with patch.object(type(stv10_entity), "hvac_mode", new_callable=PropertyMock) as mock_mode:
+            mock_mode.return_value = HVACMode.HEAT
+
+            action = stv10_entity.hvac_action
+            assert action == HVACAction.IDLE
 
 
 # ===========================================================================
@@ -626,7 +739,7 @@ class TestMysaACClimateActions:
         await mock_coordinator.async_refresh()
 
         # Step is 1.0 for AC
-        await ac_entity.async_set_target_temperature(temperature=22.4)
+        await ac_entity.async_set_temperature(temperature=22.4)
 
         # Should round to 22.0
         mock_api.set_target_temperature.assert_called_once_with("ac_device_123", 22.0)
@@ -1214,7 +1327,7 @@ class TestACClimateEdgeCases:
 
         assert entity.hvac_mode == HVACMode.OFF
         assert entity.fan_mode == "auto"
-        assert entity.swing_mode == "auto"
+        assert entity.swing_mode is None
 
     @pytest.mark.asyncio
     async def test_ac_hvac_mode_invalid_mode_id(
@@ -2095,16 +2208,16 @@ class TestClimateSetup:
         await mock_coordinator.async_refresh()
 
         mock_api = MagicMock()
-        mock_api.get_devices = AsyncMock(
-            return_value={
-                "ac_device": {
-                    "Id": "ac_device",
-                    "Name": "AC",
-                    "Model": "AC-V1",
-                    "SupportedCaps": {"modes": {"4": {}}},
-                }
+        _ac_devices = {
+            "ac_device": {
+                "Id": "ac_device",
+                "Name": "AC",
+                "Model": "AC-V1",
+                "SupportedCaps": {"modes": {"4": {}}},
             }
-        )
+        }
+        mock_api.get_devices = AsyncMock(return_value=_ac_devices)
+        mock_api.devices = _ac_devices
         mock_api.is_ac_device = MagicMock(return_value=True)
 
         mock_data = MagicMock(spec=MysaData)
@@ -2119,6 +2232,39 @@ class TestClimateSetup:
 
         assert len(entities) == 1
         assert isinstance(entities[0], MysaACClimate)
+
+    async def test_async_setup_entry_creates_stv10_climate(
+        self, hass, mock_coordinator, mock_entry
+    ):
+        """Test setup creates MysaSTV10Climate for ST-V1-0 devices."""
+        from custom_components.mysa.climate import MysaSTV10Climate, async_setup_entry
+
+        await mock_coordinator.async_refresh()
+
+        mock_api = MagicMock()
+        _stv10_devices = {
+            "stv10_device": {
+                "Id": "stv10_device",
+                "Name": "ST-V1-0",
+                "Model": "ST-V1-0",
+            }
+        }
+        mock_api.get_devices = AsyncMock(return_value=_stv10_devices)
+        mock_api.devices = _stv10_devices
+        mock_api.is_ac_device = MagicMock(return_value=False)
+
+        mock_data = MagicMock(spec=MysaData)
+        mock_data.coordinator = mock_coordinator
+        mock_data.api = mock_api
+        mock_entry.runtime_data = mock_data
+
+        entities = []
+        async_add_entities = MagicMock(side_effect=lambda e: entities.extend(e))
+
+        await async_setup_entry(hass, mock_entry, async_add_entities)
+
+        assert len(entities) == 1
+        assert isinstance(entities[0], MysaSTV10Climate)
 
 
 class TestClimateEdgeCasesAdditional:
@@ -2377,7 +2523,7 @@ class TestACClimateCoverage(TestACClimateEdgeCases):
 
         mock_api.set_target_temperature.side_effect = Exception("API Error")
         with pytest.raises(HomeAssistantError) as excinfo:
-            await ac_entity.async_set_target_temperature(temperature=23.0)
+            await ac_entity.async_set_temperature(temperature=23.0)
         assert excinfo.value.translation_key == "set_ac_temperature_failed"
         mock_api.set_target_temperature.assert_called()
 
@@ -2395,7 +2541,7 @@ class TestACClimateCoverage(TestACClimateEdgeCases):
         # Call with valid temperature
         # Should raise HomeAssistantError
         with pytest.raises(HomeAssistantError) as excinfo:
-            await ac_entity.async_set_target_temperature(22.0)
+            await ac_entity.async_set_temperature(temperature=22.0)
         assert excinfo.value.translation_key == "set_ac_temperature_failed"
 
         # Verify API called
@@ -2502,25 +2648,26 @@ class TestACClimateCoverageExtended:
             assert ac_entity.hvac_action == HVACAction.IDLE
 
     @pytest.mark.asyncio
-    async def test_ac_fan_swing_mode_logic(self, hass, ac_entity):
-        """Test AC fan and swing mode logic fallbacks (lines 542-554, 563-575).."""
+    async def test_ac_fan_swing_mode_logic(self, ac_entity):
+        """Test fan and swing mode logic for AC."""
+        from custom_components.mysa.climate import HVACMode
         from custom_components.mysa.const import AC_FAN_MEDIUM, AC_SWING_POSITION_3
 
-        # 1. No state -> defaults to "auto"
+        # 1. State missing
         ac_entity.coordinator.data = {}
         assert ac_entity.fan_mode == "auto"
-        assert ac_entity.swing_mode == "auto"
+        assert ac_entity.swing_mode is None
 
         # 2. Extract from state
         # fn=7 is medium, ss=6 is middle
         ac_entity.coordinator.data = {
-            "ac": {"fn": AC_FAN_MEDIUM, "ss": AC_SWING_POSITION_3}
+            "ac": {"fn": AC_FAN_MEDIUM, "ss": AC_SWING_POSITION_3, "md": 4}
         }
         assert ac_entity.fan_mode == "medium"
         assert ac_entity.swing_mode == "middle"
 
         # 3. Sticky value (requires raw keys to be missing to hit line 556/575)
-        ac_entity.coordinator.data = {"ac": {"some_other_key": 1}}
+        ac_entity.coordinator.data = {"ac": {"md": 4}}
         ac_entity._set_sticky_value("fan_mode", "high")
         ac_entity._set_sticky_value("swing_mode", "bottom")
         assert ac_entity.fan_mode == "high"
@@ -3164,3 +3311,870 @@ class TestClimateCoverage:
 
         assert "device1" in climate.coordinator.data
         assert climate.coordinator.data["device1"]["test_key_2"] == "test_val_2"
+
+
+@pytest.mark.asyncio
+class TestMysaSTV10ClimateExtended:
+    """Extended coverage for MysaSTV10Climate."""
+
+    async def test_stv10_fetch_loop_break(self, hass):
+        """Test that the climate fetch loop breaks when data arrives."""
+        from custom_components.mysa.climate import MysaSTV10Climate
+        device_id = "s1_dev"
+        device_data = {"Model": "ST-V1-0", "Name": "ST-V1-0"}
+        api = MagicMock()
+        api.states = {}
+        api.fetch_stv10_shadows = AsyncMock()
+
+        coordinator = MagicMock()
+        coordinator.data = api.states
+        entry = MagicMock()
+
+        climate = MysaSTV10Climate(coordinator, device_id, device_data, api, entry)
+        climate.hass = hass
+
+        async def side_effect_sleep(seconds):
+            # Simulate data arriving after 1st fetch
+            api.states[device_id] = {"target_heat": 20}
+
+        with patch("asyncio.sleep", AsyncMock(side_effect=side_effect_sleep)) as mock_sleep:
+            # Trigger the loop
+            climate._async_ensure_data()
+            assert climate._retry_fetch_task is not None
+            await climate._retry_fetch_task
+
+            # Should have fetched once and broken
+            assert api.fetch_stv10_shadows.call_count == 1
+            assert mock_sleep.call_count == 1
+
+    async def test_stv10_fetch_loop_max_attempts(self, hass):
+        """Test that the climate fetch loop stops after max attempts."""
+        from custom_components.mysa.climate import MysaSTV10Climate
+        device_id = "s1_dev"
+        device_data = {"Model": "ST-V1-0", "Name": "ST-V1-0"}
+        api = MagicMock()
+        api.states = {}
+        api.fetch_stv10_shadows = AsyncMock()
+
+        coordinator = MagicMock()
+        coordinator.data = api.states
+        entry = MagicMock()
+
+        climate = MysaSTV10Climate(coordinator, device_id, device_data, api, entry)
+        climate.hass = hass
+
+        with patch("asyncio.sleep", AsyncMock()) as mock_sleep:
+            climate._async_ensure_data()
+            assert climate._retry_fetch_task is not None
+            await climate._retry_fetch_task
+
+            # Max attempts is 20
+            # Note: The loop runs while not data and attempts < 20.
+            # If shadows never arrive, it hits 20 attempts.
+            assert api.fetch_stv10_shadows.call_count == 20
+            assert mock_sleep.call_count == 20
+
+    async def test_s1_climate_fallback(self, hass):
+        """Test S1 Climate fallback behaviors."""
+        from custom_components.mysa.climate import MysaSTV10Climate
+        device_id = "s1_dev"
+        device_data = {"Model": "ST-V1-0", "Name": "ST-V1-0"}
+        api = MagicMock()
+        api.states = {}
+        coordinator = MagicMock()
+        coordinator.data = api.states
+        entry = MagicMock()
+
+        climate = MysaSTV10Climate(coordinator, device_id, device_data, api, entry)
+        climate.hass = hass
+
+        # 1. State missing entirely
+        assert climate.target_temperature is None
+
+        # 2. State present but missing setpoints
+        api.states[device_id] = {"Online": True, "min_setpoint": 10.0, "max_setpoint": 30.0}
+        api.states[device_id]["md"] = 4  # Heat
+        assert climate.target_temperature is None
+
+        # 3. Target temperature low/high in non-HEAT_COOL
+        assert climate.target_temperature_low is None
+        assert climate.target_temperature_high is None
+
+    async def test_stv10_hvac_action_cases(self, hass):
+        """Test all hvac_action branches for ST-V1-0."""
+        from custom_components.mysa.climate import MysaSTV10Climate, HVACAction
+        device_id = "stv10_dev"
+        device_data = {"Model": "ST-V1-0", "Name": "ST-V1-0"}
+        api = MagicMock()
+        api.states = {}
+        coordinator = MagicMock()
+        coordinator.data = api.states
+        entry = MagicMock()
+        climate = MysaSTV10Climate(coordinator, device_id, device_data, api, entry)
+        climate.hass = hass
+
+        # 1. State missing -> IDLE
+        assert climate.hvac_action == HVACAction.IDLE
+
+        # 2. hvac_state != 4 -> IDLE
+        api.states[device_id] = {"hvac_state": 0}
+        assert climate.hvac_action == HVACAction.IDLE
+
+        # 3. activeMode cases
+        api.states[device_id]["hvac_state"] = 4
+        api.states[device_id]["active_mode"] = 4  # Heating
+        assert climate.hvac_action == HVACAction.HEATING
+
+        api.states[device_id]["active_mode"] = 3  # Cooling
+        assert climate.hvac_action == HVACAction.COOLING
+
+        api.states[device_id]["active_mode"] = 7  # Fan
+        assert climate.hvac_action == HVACAction.FAN
+
+        api.states[device_id]["active_mode"] = 0  # Idle
+        assert climate.hvac_action == HVACAction.IDLE
+
+    async def test_s1_dynamic_features(self, mock_api, mock_coordinator):
+        """Test S1 dynamic features based on mode."""
+        from custom_components.mysa.climate import MysaSTV10Climate, HVACMode, ClimateEntityFeature
+        device_id = "test_s1"
+        device_data = {"Model": "ST-V1-0", "Id": device_id, "Name": "Test S1"}
+        mock_api.device_caps = {}  # Add empty caps dict for init
+        climate = MysaSTV10Climate(mock_coordinator, device_id, device_data, mock_api, MagicMock())
+
+        # HEAT_COOL should have range feature
+        if mock_coordinator.data is None:
+            mock_coordinator.data = {}
+        mock_coordinator.data[device_id] = {"mode": 1} # 1 = Auto/HEAT_COOL
+        assert climate.hvac_mode == HVACMode.HEAT_COOL
+        assert bool(climate.supported_features & ClimateEntityFeature.TARGET_TEMPERATURE_RANGE)
+
+        # HEAT should NOT have range feature
+        if mock_coordinator.data is None:
+            mock_coordinator.data = {}
+        mock_coordinator.data[device_id] = {"mode": 4} # 4 = Heat
+        assert climate.hvac_mode == HVACMode.HEAT
+        assert not bool(climate.supported_features & ClimateEntityFeature.TARGET_TEMPERATURE_RANGE)
+        assert bool(climate.supported_features & ClimateEntityFeature.TARGET_TEMPERATURE)
+
+    async def test_climate_coverage_standalone_stv10(self, hass):
+        """Test climate hvac_mode valid path for coverage."""
+        from custom_components.mysa.climate import MysaSTV10Climate, HVACMode
+        coordinator = MagicMock()
+        api = MagicMock()
+        climate = MysaSTV10Climate(coordinator, "d1", {}, api, MagicMock())
+
+        with patch.object(climate, "_get_state_data", return_value={"md": 3}):
+            assert climate.hvac_mode == HVACMode.COOL
+            assert climate._last_mode == HVACMode.COOL
+
+    async def test_climate_fallback_coverage_stv10(self, hass):
+        """Test climate hvac_mode fallback to last_mode."""
+        from custom_components.mysa.climate import MysaSTV10Climate, HVACMode
+        coordinator = MagicMock()
+        api = MagicMock()
+        climate = MysaSTV10Climate(coordinator, "d1", {}, api, MagicMock())
+        climate._last_mode = HVACMode.HEAT
+
+        with patch.object(climate, "_get_state_data", return_value={}):
+            assert climate.hvac_mode == HVACMode.HEAT
+
+    async def test_dual_setpoints_with_state(self, hass):
+        """Test target_temperature_low/high with valid state data (lines 258-263, 268-273)."""
+        from custom_components.mysa.climate import MysaSTV10Climate
+        device_id = "stv10"
+        device_data = {"Model": "ST-V1-0", "Name": "ST-V1-0"}
+        api = MagicMock()
+        api.fetch_stv10_shadows = AsyncMock()
+        api.states = {
+            device_id: {
+                "target_heat": 18.0,
+                "target_cool": 24.0,
+                "mode": 1,  # Auto/HEAT_COOL
+            }
+        }
+
+        coordinator = MagicMock()
+        coordinator.data = api.states
+        entry = MagicMock()
+
+        with patch.object(MysaSTV10Climate, "_async_ensure_data"):
+            climate = MysaSTV10Climate(coordinator, device_id, device_data, api, entry)
+            climate.hass = hass
+
+        # Test target_temperature_low with state
+        assert climate.target_temperature_low == 18.0
+
+        # Test target_temperature_high with state
+        assert climate.target_temperature_high == 24.0
+
+        # Test with primary keys
+        coordinator.data["stv10"] = {
+            "target_heat": 19.0,
+            "target_cool": 25.0,
+            "mode": 1,
+        }
+        api.states["stv10"] = {"target_heat": 19.0, "target_cool": 25.0}
+
+        assert climate.target_temperature_low == 19.0
+        assert climate.target_temperature_high == 25.0
+
+
+# ===========================================================================
+# Consolidated Coverage Tests
+# ===========================================================================
+
+class TestClimateBaseConsolidated:
+    """Consolidated tests from test_climate_base.py."""
+
+    @pytest.fixture
+    def base_climate(self, hass, mock_api):
+        """Create a base MysaClimate instance for consolidated tests."""
+        from custom_components.mysa.climate import MysaClimate
+        coordinator = MagicMock()
+        coordinator.data = {}
+        device = {"id": "d1_base", "name": "Base", "model": "V1", "devTypeInt": 1}
+        entry = MagicMock()
+
+        entity = MysaClimate(coordinator, "d1_base", device, mock_api, entry)
+        entity.hass = hass
+        entity.entity_id = "climate.base_consolidated"
+        return entity
+
+    @pytest.mark.asyncio
+    async def test_target_temperature_low_high_consolidated(self, base_climate):
+        """Test generic target_temperature_low/high properties (lines 258-277)."""
+        base_climate.coordinator.data = {}
+        assert base_climate.target_temperature_low is None
+        assert base_climate.target_temperature_high is None
+
+        base_climate.coordinator.data = {"d1_base": {"target_heat": 20.0, "target_cool": 25.0}}
+        assert base_climate.target_temperature_low == 20.0
+        assert base_climate.target_temperature_high == 25.0
+
+        base_climate.coordinator.data = {"d1_base": {"heatSetpoint": 21.0, "coolSetpoint": 26.0}}
+        assert base_climate.target_temperature_low == 21.0
+        assert base_climate.target_temperature_high == 26.0
+
+    @pytest.mark.asyncio
+    async def test_extra_state_attributes_consolidated(self, base_climate):
+        """Test extra attributes."""
+        assert base_climate.device_info["identifiers"] == {("mysa", "d1_base")}
+        base_climate.coordinator.data = {"d1_base": {"current_humidity": 45}}
+        assert base_climate.current_humidity == 45
+        base_climate.coordinator.data = {"d1_base": {"hum": 50}}
+        assert base_climate.current_humidity == 50
+
+    @pytest.mark.asyncio
+    async def test_async_set_temperature_single_consolidated(self, base_climate, mock_api):
+        """Test async_set_temperature with single value."""
+        base_climate.coordinator.data = {"d1_base": {"mode": 4}}
+        await base_climate.async_set_temperature(**{"temperature": 22.0})
+        mock_api.set_target_temperature.assert_called_with("d1_base", 22.0)
+
+    @pytest.mark.asyncio
+    async def test_hvac_action_idle_check_consolidated(self, base_climate):
+        """Test base hvac_action idle check."""
+        base_climate.coordinator.data = {"d1_base": {"mode": 4}}
+        assert base_climate.hvac_action == HVACAction.IDLE
+        base_climate.coordinator.data = {"d1_base": {"mode": 4, "ambTemp": 20.0, "stpt": 22.0}}
+        assert base_climate.hvac_action == HVACAction.HEATING
+        base_climate.coordinator.data = {"d1_base": {"mode": 1}}
+        assert base_climate.hvac_action == HVACAction.OFF
+
+
+class TestClimateFahrenheitConsolidated:
+    """Consolidated tests from test_climate_fahrenheit.py."""
+
+    @pytest.fixture
+    def fahrenheit_coordinator(self, hass, mock_entry):
+        """Create coordinator with Fahrenheit data."""
+        async def async_update():
+            return {
+                "f_dev": {
+                    "ambTemp": 21.0,
+                    "SetPoint": 22.0,
+                    "temperature_format": "F",
+                    "mode": 3,
+                }
+            }
+        coordinator = DataUpdateCoordinator(hass, MagicMock(), name="mysa_f_test", update_method=async_update, config_entry=mock_entry)
+        return coordinator
+
+    @pytest.mark.asyncio
+    async def test_fahrenheit_properties_consolidated(self, hass, fahrenheit_coordinator, mock_api, mock_entry):
+        """Test properties convert correctly when in Fahrenheit."""
+        from custom_components.mysa.climate import MysaClimate
+        await fahrenheit_coordinator.async_refresh()
+        device_data = {"Id": "f_dev", "Name": "F Room", "Model": "BB-V2", "type": 4}
+        entity = MysaClimate(fahrenheit_coordinator, "f_dev", device_data, mock_api, mock_entry)
+        entity.hass = hass
+        assert entity.temperature_unit == UnitOfTemperature.FAHRENHEIT
+        assert entity.target_temperature_step == 1.0
+        assert entity.current_temperature == 70
+        assert entity.target_temperature == 72
+
+    @pytest.mark.asyncio
+    async def test_set_temperature_fahrenheit_consolidated(self, hass, fahrenheit_coordinator, mock_api, mock_entry):
+        """Test setting temperature in Fahrenheit converts to Celsius."""
+        from custom_components.mysa.climate import MysaClimate
+        await fahrenheit_coordinator.async_refresh()
+        device_data = {"Id": "f_dev", "Name": "F Room", "Model": "BB-V2", "type": 4}
+        entity = MysaClimate(fahrenheit_coordinator, "f_dev", device_data, mock_api, mock_entry)
+        entity.hass = hass
+        entity.entity_id = "climate.f_dev_consolidated"
+        await entity.async_set_temperature(temperature=72)
+        mock_api.set_target_temperature.assert_called_with("f_dev", 22.0)
+
+
+class TestSTV10HTTPExtractionConsolidated:
+    """Consolidated tests from test_stv10_http.py."""
+
+    @pytest.mark.asyncio
+    async def test_stv10_full_http_extraction_consolidated(self, hass):
+        """Test extracting state from the full JSON payload."""
+        from custom_components.mysa.mysa_api import MysaApi
+        api = MysaApi("u", "p", hass)
+        device_id = "000000000003"
+        api.devices = {device_id: {"Model": "ST-V1-0", "Id": device_id}}
+        full_response = {
+            "latestTelemetry": {"isConnected": True, "reading": {"deviceId": device_id, "roomTemperature": 20.83, "humidity": 45, "fanOnTime": 30, "onTime": 0}},
+            "targetHeat": {"desired": {"setpoint": 24, "lockoutMax": 3000, "lockoutMin": 600}},
+            "targetCool": {"desired": {"setpoint": 22, "lockoutMax": 3000, "lockoutMin": 600}},
+            "targetAuto": {"desired": {"enabled": 0}, "reported": {"enabled": 1}},
+            "modes": {"reported": {"hvacStates": {"DutyCycle": 15, "G": True}}},
+            "identity": {"reported": {"model": "ST-V1-0", "serial": "SDGW5Z8ZWL", "fw": "4.4.11"}},
+            "diagnostics": {"reported": {"freeHeap": 91475, "secureBootEnabled": 1}},
+            "physicalInterface": {"reported": {"format": "C"}},
+            "hvacConfig": {"reported": {"hvac_config_index": 119, "heating_stage_two_exists": 1}}
+        }
+        await api._on_mqtt_update(device_id, full_response)
+        state = api.states[device_id]
+        assert state["current_temp"] == 20.83
+        assert state["current_humidity"] == 45
+        assert state["min_setpoint"] == 6.0
+        assert state["max_setpoint"] == 30.0
+        assert state["auto_mode_enabled"] == 0
+        assert state["Duty"] == 15
+        assert state["hvac_raw_G"] is True
+        assert state["serial_number"] == "SDGW5Z8ZWL"
+        assert state["FirmwareVersion"] == "4.4.11"
+        assert state["free_heap"] == 91475
+
+    @pytest.mark.asyncio
+    async def test_stv10_deadband_extraction_consolidated(self, hass):
+        """Test extracting deadband."""
+        from custom_components.mysa.mysa_api import MysaApi
+        api = MysaApi("u", "p", hass)
+        device_id = "dev_db"
+        api.devices = {device_id: {"Model": "ST-V1-0"}}
+        update = {"targetAuto": {"reported": {"deadband": 250}}}
+        await api._on_mqtt_update(device_id, update)
+        assert api.states[device_id]["auto_deadband"] == 2.5
+
+
+class TestClimateFinalCoverageConsolidated:
+    """Consolidated tests from test_climate_final.py."""
+
+    @pytest.fixture
+    def stv10_climate_final(self, hass, mock_api, mock_coordinator, mock_entry):
+        """Create MysaSTV10Climate entity for final coverage tests."""
+        from custom_components.mysa.climate import MysaSTV10Climate
+        mock_device = {"id": "dev_final", "name": "Final", "model": "ST-V1-0", "devTypeInt": 1}
+        mock_api.device_caps = MagicMock()
+        mock_api.device_caps.get.return_value = MagicMock(target_temperature_step=0.5)
+        entity = MysaSTV10Climate(mock_coordinator, "dev_final", mock_device, mock_api, mock_entry)
+        entity.hass = hass
+        entity.entity_id = "climate.final_stv10"
+        return entity
+
+    @pytest.mark.asyncio
+    async def test_async_set_temperature_range_consolidated(self, stv10_climate_final, mock_api, mock_coordinator):
+        """Test setting temperature range."""
+        mock_coordinator.data = {"dev_final": {"mode": 1}}
+        await stv10_climate_final.async_set_temperature(**{ATTR_TARGET_TEMP_LOW: 18, ATTR_TARGET_TEMP_HIGH: 24})
+        mock_api.set_target_temperature_range.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_hvac_action_inference_consolidated(self, stv10_climate_final, mock_coordinator):
+        """Test hvac_action logic."""
+        mock_coordinator.data = {"dev_final": {"hvac_state": 4, "mode": 4, "current_temp": 15, "target_heat": 20}}
+        assert stv10_climate_final.hvac_action == HVACAction.HEATING
+        mock_coordinator.data["dev_final"]["mode"] = 3
+        assert stv10_climate_final.hvac_action == HVACAction.COOLING
+
+    @pytest.mark.asyncio
+    async def test_target_temperature_cool_fallback_consolidated(self, stv10_climate_final, mock_coordinator):
+        """Test target_temperature cool mode fallback."""
+        mock_coordinator.data = {"dev_final": {"mode": 3}}
+        with patch.object(stv10_climate_final, "_async_ensure_data") as mock_ensure:
+            assert stv10_climate_final.target_temperature is None
+            mock_ensure.assert_called_once()
+
+
+class TestClimateAdditionalExtraConsolidated:
+    """Additional extra coverage tests from test_extra_coverage.py."""
+
+    @pytest.mark.asyncio
+    async def test_climate_stv10_action_variants_consolidated(self, hass):
+        """Extra hvac_action cases for ST-V1-0."""
+        from custom_components.mysa.climate import MysaSTV10Climate
+        coordinator = MagicMock()
+        api = MagicMock()
+        climate = MysaSTV10Climate(coordinator, "stv10_extra", {"Model": "ST-V1-0"}, api, MagicMock())
+        climate.hass = hass
+
+        with patch.object(climate, "_async_ensure_data"):
+            # Heating
+            with patch.object(climate, "_get_state_data", return_value={"hvac_state": 4, "active_mode": 4}):
+                assert climate.hvac_action == HVACAction.HEATING
+            # Fan
+            with patch.object(climate, "_get_state_data", return_value={"hvac_state": 4, "active_mode": 7}):
+                assert climate.hvac_action == HVACAction.FAN
+            # Idle
+            with patch.object(climate, "_get_state_data", return_value={"hvac_state": 0}):
+                assert climate.hvac_action == HVACAction.IDLE
+
+
+class TestClimateExtraConsolidated:
+    """Remaining climate tests from test_extra_coverage.py and test_final_coverage.py."""
+
+    @pytest.mark.asyncio
+    async def test_climate_fahrenheit_extra_consolidated(self, hass):
+        """Cover Fahrenheit conversion lines in climate.py."""
+        from custom_components.mysa.climate import MysaClimate, MysaSTV10Climate
+
+        # Generic
+        climate = MysaClimate(MagicMock(), "d1", {"Model": "V1"}, MagicMock(), MagicMock())
+        climate.hass = hass
+        with patch.object(climate, "_get_state_data", return_value={"temperature_format": "F"}):
+            assert climate.temperature_unit == "°F"
+            assert climate._convert_to_display(20.0) == 68
+            assert climate._convert_from_display(68.0) == 20.0
+
+        # ST-V1
+        with patch.object(MysaSTV10Climate, "_async_ensure_data"):
+            stv1_climate = MysaSTV10Climate(MagicMock(), "s1", {"Model": "ST-V1-0"}, MagicMock(), MagicMock())
+            stv1_climate.hass = hass
+            with patch.object(stv1_climate, "_get_state_data", return_value={"temperature_format": "F"}):
+                assert stv1_climate.temperature_unit == "°F"
+                assert stv1_climate.target_temperature_step == 1.0
+
+    @pytest.mark.asyncio
+    async def test_climate_stv10_range_extra_consolidated(self, hass):
+        """Cover async_set_temperature with range."""
+        from custom_components.mysa.climate import MysaSTV10Climate
+        api = MagicMock()
+        api.device_caps.get.return_value = MagicMock(target_temperature_step=0.5)
+        climate = MysaSTV10Climate(MagicMock(), "d1", {"Model": "ST-V1-0"}, api, MagicMock())
+        climate.hass = hass
+        climate.async_write_ha_state = MagicMock()
+        api.set_target_temperature_range = AsyncMock()
+
+        await climate.async_set_temperature(**{ATTR_TARGET_TEMP_LOW: 18.0, ATTR_TARGET_TEMP_HIGH: 24.0})
+        api.set_target_temperature_range.assert_called_with("d1", 18.0, 24.0)
+
+    @pytest.mark.asyncio
+    async def test_climate_stv10_properties_extra_consolidated(self, hass):
+        """Cover ST-V1-0 target temperature properties."""
+        from custom_components.mysa.climate import MysaSTV10Climate
+        coordinator = MagicMock()
+        climate = MysaSTV10Climate(coordinator, "d1", {"Model": "ST-V1-0"}, MagicMock(), MagicMock())
+        climate.hass = hass
+
+        with patch.object(MysaSTV10Climate, "_async_ensure_data"):
+            # target_temp for Heat mode
+            coordinator.data = {"d1": {"md": 4, "target_heat": 20.0}}
+            assert climate.target_temperature == 20.0
+
+            # target_temp for Cool mode
+            coordinator.data["d1"] = {"md": 3, "target_cool": 22.0}
+            assert climate.target_temperature == 22.0
+
+    @pytest.mark.asyncio
+    async def test_climate_stv10_coverage_final_consolidated(self, hass):
+        """Cover missing lines from test_final_coverage.py."""
+        from custom_components.mysa.climate import MysaSTV10Climate, MysaACClimate
+        coordinator = MagicMock()
+        api = MagicMock()
+        climate = MysaSTV10Climate(coordinator, "d1", {"Model": "ST-V1-0"}, api, MagicMock())
+        climate.hass = hass
+        climate.entity_id = "climate.test_final"
+
+        with patch.object(MysaSTV10Climate, "_async_ensure_data", MagicMock()):
+            # OFF mode action
+            coordinator.data = {"d1": {"md": 0}}
+            assert climate.hvac_action == HVACAction.OFF
+
+            # target_temperature in OFF/FAN/HEAT_COOL
+            coordinator.data = {"d1": {"md": 7}} # FAN_ONLY
+            assert climate.target_temperature is None
+
+            # hvac_action variants
+            coordinator.data = {"d1": {"md": 4, "hvac_state": 4, "target_heat": 22.0, "current_temp": 20.0}}
+            assert climate.hvac_action == HVACAction.HEATING
+
+            coordinator.data = {"d1": {"md": 3, "hvac_state": 4, "target_cool": 20.0, "current_temp": 22.0}}
+            assert climate.hvac_action == HVACAction.COOLING
+
+            # fan_mode mapping
+            coordinator.data = {"d1": {"fan_mode": 2}}
+            assert climate.fan_mode == "medium"
+
+        # AC swing_mode edge case
+        ac_climate = MysaACClimate(coordinator, "d2", {"Model": "AC"}, api, MagicMock())
+        ac_climate.hass = hass
+        ac_climate.entity_id = "climate.ac_final"
+        with patch.object(MysaACClimate, "hvac_mode", new_callable=PropertyMock) as mock_mode:
+            mock_mode.return_value = HVACMode.COOL
+            coordinator.data = {"d2": None}
+            assert ac_climate.swing_mode == "auto"
+
+# ===========================================================================
+# Consolidated Tests
+# ===========================================================================
+
+
+class TestClimateConsolidated:
+    """Consolidated tests for climate.py coverage."""
+
+    @pytest.mark.asyncio
+    async def test_climate_stv10_additional_properties_consolidated(self, hass):
+        """Cover remaining properties in MysaSTV10Climate."""
+        from custom_components.mysa.climate import MysaSTV10Climate
+
+        coordinator = MagicMock()
+        api = MagicMock()
+        api.fetch_stv10_shadows = AsyncMock()
+        entry = MagicMock()
+
+        device_id = "stv10_cons"
+        device_data = {"Model": "ST-V1-0", "Id": device_id}
+
+        with patch.object(MysaSTV10Climate, "_async_ensure_data"):
+            climate = MysaSTV10Climate(coordinator, device_id, device_data, api, entry)
+            climate.hass = hass
+
+            # hvac_action cases
+            # 1. Heating
+            with patch.object(
+                climate,
+                "_get_state_data",
+                return_value={"hvac_state": 4, "active_mode": 4},
+            ):
+                assert climate.hvac_action == HVACAction.HEATING
+
+            # 2. Cooling
+            with patch.object(
+                climate,
+                "_get_state_data",
+                return_value={"hvac_state": 4, "active_mode": 3},
+            ):
+                assert climate.hvac_action == HVACAction.COOLING
+
+            # 3. Fan
+            with patch.object(
+                climate,
+                "_get_state_data",
+                return_value={"hvac_state": 4, "active_mode": 7},
+            ):
+                assert climate.hvac_action == HVACAction.FAN
+
+            # 4. Idle
+            with patch.object(
+                climate, "_get_state_data", return_value={"hvac_state": 0}
+            ):
+                assert climate.hvac_action == HVACAction.IDLE
+
+    @pytest.mark.asyncio
+    async def test_climate_fahrenheit_coverage_consolidated(self, hass):
+        """Cover Fahrenheit conversion lines in climate.py."""
+        from custom_components.mysa.climate import MysaClimate, MysaSTV10Climate
+
+        coordinator = MagicMock()
+        api = MagicMock()
+        entry = MagicMock()
+
+        device_id = "d1_fahr"
+        device_data = {"Model": "V1", "Id": device_id}
+
+        climate = MysaClimate(coordinator, device_id, device_data, api, entry)
+        climate.hass = hass
+
+        # Force Fahrenheit
+        with patch.object(
+            climate, "_get_state_data", return_value={"temperature_format": "F"}
+        ):
+            assert climate.temperature_unit == "°F"
+            assert climate.target_temperature_step == 1.0
+
+            # _convert_to_display
+            assert climate._convert_to_display(20.0) == 68
+
+            # _convert_from_display
+            assert climate._convert_from_display(68.0) == 20.0
+
+        # ST-V1 Fahrenheit step
+        with patch.object(MysaSTV10Climate, "_async_ensure_data"):
+            stv1_climate = MysaSTV10Climate(
+                coordinator, "s1_fahr", {"Model": "ST-V1-0"}, api, entry
+            )
+            stv1_climate.hass = hass
+            with patch.object(
+                stv1_climate, "_get_state_data", return_value={"temperature_format": "F"}
+            ):
+                assert stv1_climate.temperature_unit == "°F"
+                assert stv1_climate.target_temperature_step == 1.0
+
+    @pytest.mark.asyncio
+    async def test_climate_stv10_target_temperature_range_coverage_consolidated(
+        self, hass
+    ):
+        """Cover async_set_temperature with range."""
+        from custom_components.mysa.climate import MysaSTV10Climate
+
+        coordinator = MagicMock()
+        api = MagicMock()
+        entry = MagicMock()
+        cap = MagicMock()
+        cap.target_temperature_step = 0.5
+        api.device_caps.get.return_value = cap
+
+        climate = MysaSTV10Climate(coordinator, "d1_range", {"Model": "ST-V1-0"}, api, entry)
+        climate.hass = hass
+        climate.async_write_ha_state = MagicMock()
+
+        api.set_target_temperature_range = AsyncMock(return_value=None)
+        await climate.async_set_temperature(
+            **{ATTR_TARGET_TEMP_LOW: 18.0, ATTR_TARGET_TEMP_HIGH: 24.0}
+        )
+        api.set_target_temperature_range.assert_called_with("d1_range", 18.0, 24.0)
+
+    @pytest.mark.asyncio
+    async def test_climate_stv10_target_temp_properties_consolidated(self, hass):
+        """Cover ST-V1-0 target temperature properties."""
+        from custom_components.mysa.climate import MysaSTV10Climate
+
+        api = MagicMock()
+        api.states = {}
+        coordinator = MagicMock()
+        entry = MagicMock()
+
+        with patch.object(MysaSTV10Climate, "_async_ensure_data"):
+            climate = MysaSTV10Climate(coordinator, "d1_prop", {"Model": "ST-V1-0"}, api, entry)
+            climate.hass = hass
+
+            # 1. target_temperature for ST-V1-0
+            coordinator.data = {"d1_prop": {"md": 1, "target_heat": 20.0}}  # 1=HEAT_COOL
+            assert climate.target_temperature is None
+
+            # Change mode to COOL (3)
+            coordinator.data["d1_prop"] = {"md": 3, "target_cool": 22.0}
+            assert climate.target_temperature == 22.0
+
+            # 2. target_temperature_low/high
+            coordinator.data["d1_prop"] = {"md": 1}  # HEAT_COOL
+            assert climate.target_temperature_low is None
+            assert climate.target_temperature_high is None
+
+            # With target data
+            coordinator.data["d1_prop"] = {"md": 1, "target_heat": 20.5, "target_cool": 24.5}
+            assert climate.target_temperature_low == 20.5
+            assert climate.target_temperature_high == 24.5
+
+            # HVAC Action
+            coordinator.data["d1_prop"] = {
+                "md": 1,
+                "hvac_state": 4,
+                "active_mode": 3,
+            }  # 3=COOLING
+            assert climate.hvac_action == HVACAction.COOLING
+
+    @pytest.mark.asyncio
+    async def test_climate_final_coverage_targeted(self, hass):
+        """Targeted tests for remaining 8% coverage in climate.py."""
+        from custom_components.mysa.climate import MysaACClimate, MysaSTV10Climate
+
+        coordinator = MagicMock()
+        api = MagicMock()
+        entry = MagicMock()
+
+        # 1. HVACMode.HEAT_COOL features for AC (line 510)
+        ac_climate = MysaACClimate(coordinator, "ac1_targeted", {"Model": "AC"}, api, entry)
+        ac_climate.hass = hass
+        ac_climate.async_write_ha_state = MagicMock()
+        with patch.object(
+            MysaACClimate, "hvac_mode", new_callable=PropertyMock
+        ) as mock_mode:
+            mock_mode.return_value = HVACMode.HEAT_COOL
+            from homeassistant.components.climate import ClimateEntityFeature
+
+            assert (
+                ac_climate.supported_features
+                & ClimateEntityFeature.TARGET_TEMPERATURE_RANGE
+            )
+
+        # 2. async_set_temperature error handling for AC (lines 805-821)
+        api.set_target_temperature_range = AsyncMock(side_effect=Exception("API Fail"))
+        with pytest.raises(HomeAssistantError):
+            await ac_climate.async_set_temperature(
+                **{ATTR_TARGET_TEMP_LOW: 18.0, ATTR_TARGET_TEMP_HIGH: 24.0}
+            )
+
+        # 2b. AC Success Range Set (lines 820-821)
+        api.set_target_temperature_range = AsyncMock()
+        await ac_climate.async_set_temperature(
+            **{ATTR_TARGET_TEMP_LOW: 18.0, ATTR_TARGET_TEMP_HIGH: 24.0}
+        )
+        api.set_target_temperature_range.assert_called()
+
+        # 2c. AC line 824 (no temp)
+        await ac_climate.async_set_temperature()
+
+        # 3. async_will_remove_from_hass cancellation (lines 962-964)
+        with patch.object(MysaSTV10Climate, "_async_ensure_data"):
+            stv1_climate = MysaSTV10Climate(
+                coordinator, "stv1_targeted", {"Model": "ST-V1-0"}, api, entry
+            )
+            stv1_climate.hass = hass
+            stv1_climate.async_write_ha_state = MagicMock()
+            mock_task = MagicMock()
+            stv1_climate._retry_fetch_task = mock_task
+            await stv1_climate.async_will_remove_from_hass()
+            mock_task.cancel.assert_called_once()
+            assert stv1_climate._retry_fetch_task is None
+
+        # 4. Fallbacks when state missing (min_temp, max_temp, fan_mode)
+        # lines 1116, 1128, 1157, 1170
+        with patch.object(MysaSTV10Climate, "_async_ensure_data"):
+            climate = MysaSTV10Climate(
+                coordinator, "stv2_targeted", {"Model": "ST-V1-0"}, api, entry
+            )
+            climate.hass = hass
+            climate.async_write_ha_state = MagicMock()
+
+            # min_temp/max_temp WITH value (lines 1116, 1128)
+            coordinator.data = {"stv2_targeted": {"min_setpoint": 15.0, "max_setpoint": 30.0}}
+            assert climate.min_temp == 15.0
+            assert climate.max_temp == 30.0
+
+            # FALLBACKS (line 1119/1131)
+            coordinator.data = {"stv2_targeted": {}}  # Empty state
+            assert climate.min_temp is not None
+            assert climate.max_temp is not None
+
+            # target_temp_low/high (lines 1141-1163)
+            with patch.object(MysaSTV10Climate, "hvac_mode", new_callable=PropertyMock) as mock_mode:
+                mock_mode.return_value = HVACMode.HEAT_COOL
+
+                # Case with data (lines 1146, 1161)
+                coordinator.data = {"stv2_targeted": {"target_heat": 20.0, "target_cool": 25.0}}
+                assert climate.target_temperature_low == 20.0
+                assert climate.target_temperature_high == 25.0
+
+                # Case with NO data (lines 1141, 1157)
+                coordinator.data = {}
+                assert climate.target_temperature_low is None
+                assert climate.target_temperature_high is None
+
+            # fan_mode fallback (line 1170)
+            coordinator.data = {}  # Force _get_state_data to return None
+            assert climate.fan_mode == "auto"
+
+        # 5. async_set_hvac_mode error handling (lines 1288-1308)
+        api.set_stv10_hvac_mode = AsyncMock(side_effect=Exception("Mode Fail"))
+        with patch.object(MysaSTV10Climate, "_async_ensure_data"):
+            climate = MysaSTV10Climate(
+                coordinator, "stv3_targeted", {"Model": "ST-V1-0"}, api, entry
+            )
+            climate.hass = hass
+            climate.async_write_ha_state = MagicMock()
+            # Success path (lines 1288-1303)
+            api.set_stv10_hvac_mode = AsyncMock()
+            await climate.async_set_hvac_mode(HVACMode.HEAT)
+            api.set_stv10_hvac_mode.assert_called()
+
+            # Error path (lines 1304-1308)
+            api.set_stv10_hvac_mode = AsyncMock(side_effect=Exception("Mode Fail"))
+            climate._pending_updates = {"hvac_mode": {"value": "heat"}}
+            with pytest.raises(HomeAssistantError):
+                await climate.async_set_hvac_mode(HVACMode.HEAT)
+            assert "hvac_mode" not in climate._pending_updates
+
+        # 6. async_set_temperature single setpoint for ST-V1-0 (lines 1339-1346)
+        api.set_stv10_heat_setpoint = AsyncMock()
+        api.set_stv10_cool_setpoint = AsyncMock()
+        with patch.object(MysaSTV10Climate, "_async_ensure_data"):
+            climate = MysaSTV10Climate(
+                coordinator, "stv4_targeted", {"Model": "ST-V1-0"}, api, entry
+            )
+            climate.hass = hass
+            climate.async_write_ha_state = MagicMock()
+            # Heat only
+            await climate.async_set_temperature(**{ATTR_TARGET_TEMP_LOW: 19.0})
+            api.set_stv10_heat_setpoint.assert_called()
+            # Cool only
+            await climate.async_set_temperature(**{ATTR_TARGET_TEMP_HIGH: 25.0})
+            api.set_stv10_cool_setpoint.assert_called()
+
+        # 7. async_set_temperature general error path for ST-V1-0 (lines 1350-1352)
+        api.set_stv10_heat_setpoint.side_effect = Exception("Range Fail")
+        with pytest.raises(HomeAssistantError):
+            await climate.async_set_temperature(**{ATTR_TARGET_TEMP_LOW: 19.0})
+
+        # 8. async_set_temperature basic setpoint error path for ST-V1-0 (lines 1367-1371)
+        api.set_stv10_target_temperature = AsyncMock(side_effect=Exception("Temp Fail"))
+        # Ensure _pending_updates is used
+        climate._pending_updates = {"target_temperature": {"value": 21.0}}
+        with pytest.raises(HomeAssistantError):
+            await climate.async_set_temperature(**{ATTR_TEMPERATURE: 21.0})
+        assert "target_temperature" not in climate._pending_updates
+
+        # 8b. ST-V1 Success Set Temp (line 1366)
+        api.set_stv10_target_temperature = AsyncMock()
+        await climate.async_set_temperature(**{ATTR_TEMPERATURE: 21.0})
+        api.set_stv10_target_temperature.assert_called()
+
+        # 9. async_set_temperature with NO temp for ST-V1-0 (line 1356)
+        await climate.async_set_temperature()
+
+        # 10. ST-V1 Fan Mode Success (lines 1188-1189)
+        api.set_stv10_fan_mode = AsyncMock()
+        await climate.async_set_fan_mode("high")
+        api.set_stv10_fan_mode.assert_called()
+
+        # 11. hvac_action fallbacks and auto mode inference (lines 1245-1266)
+        with patch.object(MysaSTV10Climate, "_async_ensure_data"):
+             climate = MysaSTV10Climate(coordinator, "stv5_targeted", {"Model": "ST-V1-0"}, api, entry)
+             climate.hass = hass
+             climate.async_write_ha_state = MagicMock()
+
+             # Fallback line 1245-1252 (active_mode missing, use configured mode)
+             # HVACMode.COOL -> HVACAction.COOLING (line 1247)
+             with patch.object(MysaSTV10Climate, "hvac_mode", new_callable=PropertyMock) as mock_mode:
+                 mock_mode.return_value = HVACMode.COOL
+                 coordinator.data = {"stv5_targeted": {"hvac_state": 4}} # no active_mode
+                 assert climate.hvac_action == HVACAction.COOLING
+
+             # Auto Mode Inference line 1254-1266
+             # mode=HEAT_COOL (line 1251 will return None because not in simple_actions)
+             # current < low + 1.0 -> HEATING (line 1261)
+             with patch.object(MysaSTV10Climate, "hvac_mode", new_callable=PropertyMock) as mock_mode:
+                 mock_mode.return_value = HVACMode.HEAT_COOL
+                 coordinator.data = {"stv5_targeted": {"hvac_state": 4}}
+                 with patch.object(MysaSTV10Climate, "current_temperature", new_callable=PropertyMock) as mock_cur, \
+                      patch.object(MysaSTV10Climate, "target_temperature_low", new_callable=PropertyMock) as mock_low, \
+                      patch.object(MysaSTV10Climate, "target_temperature_high", new_callable=PropertyMock) as mock_high:
+
+                     mock_cur.return_value = 18.0
+                     mock_low.return_value = 20.0
+                     mock_high.return_value = 25.0
+                     assert climate.hvac_action == HVACAction.HEATING # 18 < 20+1
+
+                     # current > high - 1.0 -> COOLING (line 1263)
+                     mock_cur.return_value = 27.0
+                     assert climate.hvac_action == HVACAction.COOLING # 27 > 25-1
+
+                     # Fallback line 1266
+                     mock_cur.return_value = 22.0
+                     assert climate.hvac_action == HVACAction.HEATING

@@ -43,12 +43,12 @@ On first run, you'll be prompted for your Mysa account credentials. These are sa
 | `state <DID>`            | Show raw device state (HTTP)             |
 | `http <DID> <JSON>`      | Send HTTP POST to device settings        |
 | `mqtt <DID> <JSON>`      | Send MQTT command (auto-wrapped)         |
+| `st <DID> <JSON>`        | Send ST-V1 HTTP state update             |
 | `sniff`                  | Toggle MQTT sniffer mode                 |
 | `examples`               | Show example commands                    |
 | `advanced`               | Advanced/dangerous operations            |
 | `refresh <DID>`          | Force device to check cloud (MsgType 6)  |
 | `dump <DID>`             | Force metadata dump (MsgType 7)          |
-| `batch <DID>`            | Subscribe to /batch topic (MsgType 3)    |
 | `help` or `?`            | Show command help                        |
 | `q` or `quit`            | Exit                                     |
 
@@ -137,6 +137,27 @@ mqtt 1 {"cmd":[{"ssh":6,"tm":-1}],"type":2,"ver":1}
 mqtt 1 {"cmd":[{"it":1,"tm":-1}],"type":2,"ver":1}
 ```
 
+### ST-V1 Thermostats
+
+The ST-V1 thermostats heavily rely on HTTP state updates. You can use the `st` command to issue state updates:
+
+```bash
+# Set Cool Setpoint to 21.0C
+st 1 {"source":3,"targetCool":{"desired":{"temperature":2100}}}
+
+# Set HVAC mode to Cool (4)
+st 1 {"source":3,"modes":{"desired":{"hvacStates":4}}}
+
+# Set auto deadband to 1.5C
+st 1 {"source":3,"targetAuto":{"desired":{"deadband":150}}}
+
+# Set device lock (3=Lock, 1=Unlock)
+st 1 {"source":3,"physicalInterface":{"lockout":3}}
+
+# Set HVAC config index (e.g. Baseboard)
+st 1 {"source":3,"hvacConfig":{"idx":1}}
+```
+
 ## Device Type Values
 
 | Type | Model   | Description          |
@@ -146,6 +167,7 @@ mqtt 1 {"cmd":[{"it":1,"tm":-1}],"type":2,"ver":1}
 | 3    | INF-V1  | In-Floor Heating     |
 | 4    | BB-V2   | Baseboard V2         |
 | 5    | BB-V2-L | Baseboard V2 Lite    |
+| N/A  | ST-V1-0 | ST-V1 Thermostat     |
 
 ## Sniff Mode
 
@@ -205,32 +227,7 @@ CMD> state 1
 }
 ```
 
-## Batch Data (MsgType 3)
 
-Use `batch <DID>` or `batch all` to subscribe to the device's `/batch` topic.
-
-```
-CMD> batch 1
-  • /v1/dev/aa:bb:cc:dd:ee:ff/batch
-
-⚠️ Attempting to subscribe to 1 topics...
-✓ SUBSCRIBE packet sent. Watching for readings...
-```
-
-**Note**: Some brokers may disconnect the client immediately upon subscribing to this topic (Error 1005). If this happens, avoid using this command.
-
-When successfully subscribed, the tool will decode `MsgType 3` payloads:
-```
-[2024-01-27 18:30:12.456] [SNIFF →] MsgType 3 (Batch Data):
-{
-  "msg": 3,
-  "ts": 1706380212,
-  "ver": 1
-}
-  Version: v1 (12 readings)
-    • MysaReading(ts=1706380212, unknown1=0, current=1.2, voltage=120.0, power=144.0, ...)
-    • ...
-```
 
 ## Advanced Menu
 

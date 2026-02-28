@@ -1,12 +1,21 @@
+from unittest.mock import MagicMock
+from custom_components.mysa.switch import MysaSTV10AllowAutoModeSwitch
 """Tests for Switch entities."""
 
 import time
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
 import pytest
 
-from custom_components.mysa.switch import MysaClimatePlusSwitch
+from homeassistant.exceptions import HomeAssistantError
+from custom_components.mysa.switch import (
+    MysaAutoBrightnessSwitch,
+    MysaClimatePlusSwitch,
+    MysaLockSwitch,
+    MysaProximitySwitch,
+    MysaSTV10AllowAutoModeSwitch,
+)
 
 
 class TestMysaLockSwitch:
@@ -49,6 +58,48 @@ class TestMysaLockSwitch:
         unique_id = f"{device_id}_{sensor_key.lower()}"
 
         assert unique_id == "device1_lock"
+
+    async def test_lock_stv1_uses_shadow(self):
+        """Test lock switch uses shadow API for ST-V1-0."""
+        mock_coordinator = MagicMock()
+        mock_api = MagicMock()
+        mock_api.set_stv10_lock = AsyncMock()
+        mock_api.set_lock = AsyncMock()
+        device_data = {"Model": "ST-V1-0"}
+
+        switch = MysaLockSwitch(
+            mock_coordinator, "STV1", device_data, mock_api, MagicMock()
+        )
+        switch.async_write_ha_state = MagicMock()
+        switch.hass = MagicMock()
+
+        await switch.async_turn_on()
+        mock_api.set_stv10_lock.assert_called_with("STV1", True)
+        mock_api.set_lock.assert_not_called()
+
+        await switch.async_turn_off()
+        mock_api.set_stv10_lock.assert_called_with("STV1", False)
+
+    async def test_lock_legacy_uses_http(self):
+        """Test lock switch uses legacy API for non-ST-V1-0."""
+        mock_coordinator = MagicMock()
+        mock_api = MagicMock()
+        mock_api.set_stv10_lock = AsyncMock()
+        mock_api.set_lock = AsyncMock()
+        device_data = {"Model": "BB-V1"}
+
+        switch = MysaLockSwitch(
+            mock_coordinator, "BBV1", device_data, mock_api, MagicMock()
+        )
+        switch.async_write_ha_state = MagicMock()
+        switch.hass = MagicMock()
+
+        await switch.async_turn_on()
+        mock_api.set_lock.assert_called_with("BBV1", True)
+        mock_api.set_stv10_lock.assert_not_called()
+
+        await switch.async_turn_off()
+        mock_api.set_lock.assert_called_with("BBV1", False)
 
 
 class TestMysaAutoBrightnessSwitch:
@@ -119,6 +170,32 @@ class TestMysaProximitySwitch:
 
         assert name_suffix == "Wake on Approach"
 
+    async def test_proximity_stv1_uses_shadow(self):
+        """Test proximity switch uses shadow API for ST-V1-0."""
+        mock_coordinator = MagicMock()
+        mock_api = MagicMock()
+        mock_api.set_stv10_proximity = AsyncMock()
+    async def test_proximity_legacy_uses_http(self):
+        """Test proximity switch uses legacy API for non-ST-V1-0."""
+        mock_coordinator = MagicMock()
+        mock_api = MagicMock()
+        mock_api.set_stv10_proximity = AsyncMock()
+        mock_api.set_proximity = AsyncMock()
+        device_data = {"Model": "BB-V1"}
+
+        switch = MysaProximitySwitch(
+            mock_coordinator, "BBV1", device_data, mock_api, MagicMock()
+        )
+        switch.async_write_ha_state = MagicMock()
+        switch.hass = MagicMock()
+
+        await switch.async_turn_on()
+        mock_api.set_proximity.assert_called_with("BBV1", True)
+        mock_api.set_stv10_proximity.assert_not_called()
+
+        await switch.async_turn_off()
+        mock_api.set_proximity.assert_called_with("BBV1", False)
+
 
 class TestMysaClimatePlusSwitch:
     """Test Climate+ (thermostatic) switch entity for AC devices."""
@@ -143,6 +220,219 @@ class TestMysaClimatePlusSwitch:
 
         assert "it" in state_keys
         assert "IsThermostatic" in state_keys
+
+    async def test_switch_is_on_pending(self):
+        """Test is_on property with pending states."""
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {"dev1": {"lk": 0}} # Unlocked
+        mock_api = MagicMock()
+        device_data = {"Model": "BB-V1"}
+        entity = MysaLockSwitch(mock_coordinator, "dev1", device_data, mock_api, MagicMock())
+        assert entity.is_on == False
+
+        entity._pending_state = True # We are turning it ON (Locked)
+        entity._pending_timestamp = time.time()
+        assert entity.is_on == True # Should prefer pending
+
+        entity._pending_state = None
+        assert entity.is_on == False # Back to real state
+
+    async def test_switch_setup_entry(self, hass):
+        """Test switch setup_entry."""
+        from custom_components.mysa.switch import async_setup_entry
+        from custom_components.mysa import MysaData
+
+        mock_api = MagicMock()
+        mock_api.get_devices = AsyncMock()
+        mock_api.is_ac_device = MagicMock(return_value=False)
+        mock_api.devices = {
+            "heater1": {"Model": "BB-V2", "Name": "Heater"},
+            "stv1": {"Model": "ST-V1-0", "Name": "HVAC"},
+        }
+        mock_api.get_devices.return_value = mock_api.devices
+
+        mock_entry = MagicMock()
+        mock_entry.runtime_data = MysaData(mock_api, MagicMock())
+
+        async_add_entities = MagicMock()
+        await async_setup_entry(hass, mock_entry, async_add_entities)
+
+        async_add_entities.assert_called_once()
+        entities = async_add_entities.call_args[0][0]
+        # Heater: Lock, AutoBrightness, Proximity = 3
+        # ST-V1: Lock, AllowAutoMode = 2
+        # Total = 5
+        assert len(entities) == 5
+
+    async def test_switch_setup_entry_ac(self, hass):
+        """Test switch setup_entry with AC device."""
+        from custom_components.mysa.switch import async_setup_entry
+        from custom_components.mysa import MysaData
+
+        mock_api = MagicMock()
+        mock_api.get_devices = AsyncMock()
+        mock_api.is_ac_device = MagicMock(return_value=True) # It is AC
+        mock_api.devices = {
+            "ac1": {"Model": "AC-V1", "Name": "AC"},
+        }
+        mock_api.get_devices.return_value = mock_api.devices
+
+        mock_entry = MagicMock()
+        mock_entry.runtime_data = MysaData(mock_api, MagicMock())
+
+        async_add_entities = MagicMock()
+        await async_setup_entry(hass, mock_entry, async_add_entities)
+
+        async_add_entities.assert_called_once()
+        entities = async_add_entities.call_args[0][0]
+        # AC: Lock, Climate+ = 2
+        assert len(entities) == 2
+
+    def test_switch_device_info(self):
+        """Test device_info property (hit lines 109-114)."""
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {"dev1": {"sn": "123"}}
+        mock_api = MagicMock()
+
+        entity = MysaLockSwitch(mock_coordinator, "dev1", {"Model": "BB-V2"}, mock_api, MagicMock())
+        info = entity.device_info
+        assert info["identifiers"] == {("mysa", "dev1")}
+
+    def test_switch_extract_value_dict(self):
+        """Test _extract_value with dict branches (hit lines 126-129)."""
+        mock_coordinator = MagicMock()
+        entity = MysaLockSwitch(mock_coordinator, "dev1", {}, MagicMock(), MagicMock())
+
+        # Test 'v' key
+        assert entity._extract_value({"lk": {"v": 1}}, ["lk"]) == 1
+        # Test 'Id' key
+        assert entity._extract_value({"zone": {"Id": "z1"}}, ["zone"]) == "z1"
+
+    async def test_climate_plus_switch_error(self):
+        """Test climate plus switch turn_on error handling."""
+        mock_coordinator = MagicMock()
+        mock_api = MagicMock()
+        mock_api.set_ac_climate_plus = AsyncMock(side_effect=Exception("API Error"))
+
+        switch = MysaClimatePlusSwitch(mock_coordinator, "device1", {}, mock_api, MagicMock())
+        switch.async_write_ha_state = MagicMock()
+        switch.hass = MagicMock()
+
+        from homeassistant.exceptions import HomeAssistantError
+        with pytest.raises(HomeAssistantError):
+            await switch.async_turn_on()
+
+    async def test_climate_plus_switch_turn_off_error(self):
+        """Test climate plus switch turn_off error handling."""
+        mock_coordinator = MagicMock()
+        mock_api = MagicMock()
+        mock_api.set_ac_climate_plus = AsyncMock(side_effect=Exception("API Error"))
+
+        switch = MysaClimatePlusSwitch(mock_coordinator, "device1", {}, mock_api, MagicMock())
+        switch.async_write_ha_state = MagicMock()
+        switch.hass = MagicMock()
+
+        from homeassistant.exceptions import HomeAssistantError
+        with pytest.raises(HomeAssistantError):
+            await switch.async_turn_off()
+
+    async def test_turn_off_error_handling(self):
+        """Test async_turn_off error handling for all switches."""
+        mock_api = MagicMock()
+        mock_api.set_lock = AsyncMock(side_effect=Exception("API Error"))
+        mock_api.set_stv10_lock = AsyncMock(side_effect=Exception("API Error"))
+
+        lock_entity = MysaLockSwitch(MagicMock(), "dev1", {"Model": "BB-V1"}, mock_api, MagicMock())
+        lock_entity.hass = MagicMock()
+        lock_entity.async_write_ha_state = MagicMock()
+        from homeassistant.exceptions import HomeAssistantError
+        with pytest.raises(HomeAssistantError):
+            await lock_entity.async_turn_off()
+
+        lock_stv1 = MysaLockSwitch(MagicMock(), "dev1", {"Model": "ST-V1-0"}, mock_api, MagicMock())
+        lock_stv1.hass = MagicMock()
+        lock_stv1.async_write_ha_state = MagicMock()
+        with pytest.raises(HomeAssistantError):
+            await lock_stv1.async_turn_off()
+
+    async def test_auto_brightness_switch_error(self):
+        """Test auto brightness switch error handling."""
+        mock_api = MagicMock()
+        mock_api.set_auto_brightness = AsyncMock(side_effect=Exception("API Error"))
+        entity = MysaAutoBrightnessSwitch(MagicMock(), "dev1", {"Model": "BB-V1"}, mock_api, MagicMock())
+        entity.hass = MagicMock()
+        entity.async_write_ha_state = MagicMock()
+        from homeassistant.exceptions import HomeAssistantError
+        with pytest.raises(HomeAssistantError):
+            await entity.async_turn_on()
+        with pytest.raises(HomeAssistantError):
+            await entity.async_turn_off()
+
+    async def test_proximity_switch_all_errors(self):
+        """Test proximity switch error handling for both models."""
+        mock_api = MagicMock()
+        mock_api.set_proximity = AsyncMock(side_effect=Exception("API Error"))
+        mock_api.set_stv10_proximity = AsyncMock(side_effect=Exception("API Error"))
+
+        from homeassistant.exceptions import HomeAssistantError
+
+        # Legacy
+        entity = MysaProximitySwitch(MagicMock(), "dev1", {"Model": "BB-V1"}, mock_api, MagicMock())
+        entity.hass = MagicMock()
+        entity.async_write_ha_state = MagicMock()
+        with pytest.raises(HomeAssistantError):
+            await entity.async_turn_on()
+        with pytest.raises(HomeAssistantError):
+            await entity.async_turn_off()
+
+        # ST-V1
+        entity_stv1 = MysaProximitySwitch(MagicMock(), "dev1", {"Model": "ST-V1-0"}, mock_api, MagicMock())
+        entity_stv1.hass = MagicMock()
+        entity_stv1.async_write_ha_state = MagicMock()
+        with pytest.raises(HomeAssistantError):
+            await entity_stv1.async_turn_on()
+        with pytest.raises(HomeAssistantError):
+            await entity_stv1.async_turn_off()
+
+    async def test_turn_on_error_handling(self):
+        """Test async_turn_on error handling for all switches (hit lines 196-199)."""
+        mock_api = MagicMock()
+        mock_api.set_lock = AsyncMock(side_effect=Exception("API Error"))
+        mock_api.set_stv10_lock = AsyncMock(side_effect=Exception("API Error"))
+
+        from homeassistant.exceptions import HomeAssistantError
+
+        # Legacy Lock
+        lock_entity = MysaLockSwitch(MagicMock(), "dev1", {"Model": "BB-V1"}, mock_api, MagicMock())
+        lock_entity.hass = MagicMock()
+        lock_entity.async_write_ha_state = MagicMock()
+        with pytest.raises(HomeAssistantError):
+            await lock_entity.async_turn_on()
+
+        # ST-V1 Lock
+        lock_stv1 = MysaLockSwitch(MagicMock(), "dev1", {"Model": "ST-V1-0"}, mock_api, MagicMock())
+        lock_stv1.hass = MagicMock()
+        lock_stv1.async_write_ha_state = MagicMock()
+        with pytest.raises(HomeAssistantError):
+            await lock_stv1.async_turn_on()
+
+    def test_switch_additional_is_on(self):
+        """Test is_on for AutoBrightness and Proximity (hit lines 253, 314)."""
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {"dev1": {"ab": 1, "px": 1}}
+        mock_api = MagicMock()
+
+        ab_switch = MysaAutoBrightnessSwitch(mock_coordinator, "dev1", {}, mock_api, MagicMock())
+        assert ab_switch.is_on == True
+
+        px_switch = MysaProximitySwitch(mock_coordinator, "dev1", {}, mock_api, MagicMock())
+        assert px_switch.is_on == True
+
+    def test_switch_extract_value_none(self):
+        """Test _extract_value returns None at end (hit line 131)."""
+        mock_coordinator = MagicMock()
+        entity = MysaLockSwitch(mock_coordinator, "dev1", {}, MagicMock(), MagicMock())
+        assert entity._extract_value({"other": 1}, ["missing"]) is None
 
     def test_climate_plus_icon(self):
         """Test Climate+ switch icon."""
@@ -343,3 +633,290 @@ class TestSwitchCoverageGaps:
         mock_coordinator.data = {"dev1": {"key": True}}
         assert entity._get_state_with_pending(["key"]) is True
         assert entity._pending_state is None
+
+
+class TestSwitchConsolidated:
+    """Consolidated switch tests from extra and final coverage files."""
+
+    @pytest.mark.asyncio
+    async def test_switch_auto_mode_coverage_consolidated(self, hass):
+        """Cover missing lines in switch.py (454, 458-466, 470-478)."""
+        coordinator = MagicMock()
+        api = MagicMock()
+        api.set_stv10_allow_auto_mode = AsyncMock()
+        entry = MagicMock()
+
+        sw = MysaSTV10AllowAutoModeSwitch(
+            coordinator, "d1", {"Model": "ST-V1-0"}, api, entry
+        )
+        sw.hass = hass
+        sw.async_write_ha_state = MagicMock()
+
+        # 454: is_on
+        coordinator.data = {"d1": {"auto_mode_enabled": 1}}
+        assert sw.is_on is True
+
+        # 458-466: turn_on success/error
+        await sw.async_turn_on()
+        api.set_stv10_allow_auto_mode.assert_called_with("d1", True)
+
+        api.set_stv10_allow_auto_mode.side_effect = Exception("Fail")
+        with pytest.raises(HomeAssistantError):
+            await sw.async_turn_on()
+
+        # 470-478: turn_off success/error
+        api.set_stv10_allow_auto_mode.side_effect = None
+        await sw.async_turn_off()
+        api.set_stv10_allow_auto_mode.assert_called_with("d1", False)
+
+        api.set_stv10_allow_auto_mode.side_effect = Exception("Fail")
+        with pytest.raises(HomeAssistantError):
+            await sw.async_turn_off()
+
+        # TargetAuto dict coverage (lines 472-474)
+        api.set_stv10_allow_auto_mode.side_effect = None
+        coordinator.data = {"d1": {"targetAuto": {"enabled": True}}}
+        assert sw.is_on is True
+        coordinator.data = {"d1": {"targetAuto": {"enabled": False}}}
+        assert sw.is_on is False
+
+        # Fallback coverage (line 476)
+        coordinator.data = {"d1": {"something_else": True}}
+        assert sw.is_on is False
+
+        # None coordinator coverage (line 459)
+        coordinator.data = None
+        sw._pending_state = True
+        assert sw.is_on is True
+        sw._pending_state = None
+        assert sw.is_on is False
+
+        # Pending coverage (line 464)
+        coordinator.data = {"d1": {}}
+        sw._pending_state = True
+        assert sw.is_on is True
+
+    @pytest.mark.asyncio
+    async def test_switch_entity_logic_consolidated(self, hass):
+        """Test MysaSwitch entity logic."""
+        coordinator = MagicMock()
+        api = MagicMock()
+        entry = MagicMock()
+        device_id = "d1"
+        device_data = {}
+
+        # Use MysaLockSwitch which sets keys automatically
+        entity = MysaLockSwitch(coordinator, device_id, device_data, api, entry)
+        entity.hass = hass
+
+        # Test is_on
+        coordinator.data = {"d1": {"lk": 1}}  # 1 = on/locked
+        assert entity.is_on is True
+
+        coordinator.data = {"d1": {"lk": 0}}  # 0 = off/unlocked
+        assert entity.is_on is False
+
+        # Test methods
+        api.set_lock = AsyncMock()  # Generic lock setter
+        api.set_stv10_lock = AsyncMock()  # ST-V1 specific
+
+        # Test Generic
+        with patch.object(entity, "async_write_ha_state"):
+            await entity.async_turn_on()
+        api.set_lock.assert_called_with("d1", True)
+
+        with patch.object(entity, "async_write_ha_state"):
+            await entity.async_turn_off()
+        api.set_lock.assert_called_with("d1", False)
+
+        # Test ST-V1
+        device_data["Model"] = "ST-V1-0"
+        with patch.object(entity, "async_write_ha_state"):
+            await entity.async_turn_on()
+        api.set_stv10_lock.assert_called_with("d1", True)
+
+    @pytest.mark.asyncio
+    async def test_other_switches_logic_consolidated(self, hass):
+        """Test other switch types."""
+        coordinator = MagicMock()
+        api = MagicMock()
+        entry = MagicMock()
+        device_id = "d1"
+        device_data = {}
+
+        # AutoBrightness
+        sw = MysaAutoBrightnessSwitch(
+            coordinator, device_id, device_data, api, entry
+        )
+        sw.hass = hass
+        coordinator.data = {"d1": {"ab": 1}}
+        assert sw.is_on is True
+
+        api.set_auto_brightness = AsyncMock()
+        with patch.object(sw, "async_write_ha_state"):
+            await sw.async_turn_on()
+        api.set_auto_brightness.assert_called_with("d1", True)
+
+        # Proximity
+        sw = MysaProximitySwitch(coordinator, device_id, device_data, api, entry)
+        sw.hass = hass
+        coordinator.data = {"d1": {"px": 0}}
+        assert sw.is_on is False
+
+        api.set_proximity = AsyncMock()
+        with patch.object(sw, "async_write_ha_state"):
+            await sw.async_turn_on()
+        api.set_proximity.assert_called_with("d1", True)
+
+        # Climate Plus (AC)
+        sw = MysaClimatePlusSwitch(coordinator, device_id, device_data, api, entry)
+        sw.hass = hass
+        coordinator.data = {"d1": {"it": 1}}
+        assert sw.is_on is True
+
+        api.set_ac_climate_plus = AsyncMock()
+        with patch.object(sw, "async_write_ha_state"):
+            await sw.async_turn_off()
+        api.set_ac_climate_plus.assert_called_with("d1", False)
+
+    @pytest.mark.asyncio
+    async def test_switch_exceptions_consolidated(self, hass):
+        """Test exception handling in switch setters."""
+        coordinator = MagicMock()
+        api = MagicMock()
+        entry = MagicMock()
+        device_id = "d1"
+        device_data = {}
+
+        # Lock Switch Exception
+        sw = MysaLockSwitch(coordinator, device_id, device_data, api, entry)
+        sw.hass = hass
+        api.set_lock = AsyncMock(side_effect=Exception("Failed"))
+
+        with pytest.raises(HomeAssistantError):
+            with patch.object(sw, "async_write_ha_state"):
+                await sw.async_turn_on()
+
+        # AutoBrightness Exception
+        sw_ab = MysaAutoBrightnessSwitch(
+            coordinator, device_id, device_data, api, entry
+        )
+        sw_ab.hass = hass
+        api.set_auto_brightness = AsyncMock(side_effect=Exception("Failed"))
+
+        with pytest.raises(HomeAssistantError):
+            with patch.object(sw_ab, "async_write_ha_state"):
+                await sw_ab.async_turn_on()
+
+    @pytest.mark.asyncio
+    async def test_switch_base_logic_consolidated(self, hass):
+        """Test MysaSwitch base logic (pending state, extraction)."""
+        coordinator = MagicMock()
+        api = MagicMock()
+        entry = MagicMock()
+        device_id = "d1"
+        device_data = {}
+
+        sw = MysaLockSwitch(coordinator, device_id, device_data, api, entry)
+        sw.hass = hass
+
+        # Test _extract_value with dict logic
+        # value is {"v": 1}
+        coordinator.data = {"d1": {"Lock": {"v": 1}}}
+        assert sw.is_on is True
+
+        # value is {"Id": 1} (rare case handled in code)
+        coordinator.data = {"d1": {"Lock": {"Id": 0}}}
+        assert sw.is_on is False
+
+        # Test Pending State Logic
+        # 1. Sticky
+        sw._pending_state = True
+        sw._pending_timestamp = time.time()
+        # Cloud says Off
+        coordinator.data = {"d1": {"lk": 0}}
+        assert sw.is_on is True  # Sticky
+
+        # Case when coordinator.data is None (line 459 in switch.py)
+        coordinator.data = None
+        assert sw.is_on is True
+        sw._pending_state = None
+        assert sw.is_on is False
+
+        # 2. Convergence
+        sw._pending_state = True
+        sw._pending_timestamp = time.time()
+        # Cloud matches pending (True)
+        coordinator.data = {"d1": {"lk": 1}}
+        assert sw._pending_state is True
+        assert sw.is_on is True  # Should clear pending
+        assert sw._pending_state is None
+
+        # 3. Expiration
+        sw._pending_state = True
+        sw._pending_timestamp = time.time() - 31  # Expired
+        # Cloud says Off
+        coordinator.data = {"d1": {"lk": 0}}
+        assert sw.is_on is False  # Uses cloud value
+        assert sw._pending_state is None
+
+    @pytest.mark.asyncio
+    async def test_setup_stv1_switch_consolidated(self, hass):
+        """Test ST-V1 switch setup (AutoBrightness excluded)."""
+        from custom_components.mysa.switch import async_setup_entry
+
+        mock_api = MagicMock()
+        mock_api.devices = {"d1": {"Model": "ST-V1-0"}}
+        mock_api.get_devices = AsyncMock(return_value=mock_api.devices)
+        mock_api.is_ac_device = MagicMock(return_value=False)
+
+        mock_entry = MagicMock()
+        from custom_components.mysa import MysaData
+        mock_entry.runtime_data = MysaData(api=mock_api, coordinator=MagicMock())
+
+        mock_add_entities = MagicMock()
+        await async_setup_entry(hass, mock_entry, mock_add_entities)
+
+        # Verify entities added
+        args = mock_add_entities.call_args[0][0]
+        # Should have Lock, but NOT Proximity or AutoBrightness
+        types = [type(e).__name__ for e in args]
+        assert "MysaLockSwitch" in types
+        assert "MysaProximitySwitch" not in types
+        assert "MysaAutoBrightnessSwitch" not in types
+
+@pytest.mark.asyncio
+async def test_switch_is_on_missing_coverage():
+    """Test missing branches in MysaSTV10AllowAutoModeSwitch."""
+    from unittest.mock import MagicMock
+    from custom_components.mysa.switch import MysaSTV10AllowAutoModeSwitch
+    mock_coordinator = MagicMock()
+    mock_coordinator.data = None
+    mock_api = MagicMock()
+    device_data = {"Model": "ST-V1-0"}
+
+    entity = MysaSTV10AllowAutoModeSwitch(mock_coordinator, "dev1", device_data, mock_api, MagicMock())
+
+    entity._pending_state = True
+    assert entity.is_on == True
+    entity._pending_state = False
+    assert entity.is_on == False
+    entity._pending_state = None
+    assert entity.is_on == False
+
+    mock_coordinator.data = {"dev1": {"auto_mode_enabled": 0}}
+    entity._pending_state = True
+    assert entity.is_on is True
+
+    mock_coordinator.data = {"dev1": {"targetAuto": {"enabled": 1}}}
+    entity._pending_state = None
+    assert entity.is_on == True
+
+    mock_coordinator.data = {"dev1": {"targetAuto": {"enabled": 0}}}
+    assert entity.is_on == False
+
+    mock_coordinator.data = {"dev1": {"targetAuto": "invalid"}}
+    assert entity.is_on == False
+
+    mock_coordinator.data = {"dev1": {}}
+    assert entity.is_on == False

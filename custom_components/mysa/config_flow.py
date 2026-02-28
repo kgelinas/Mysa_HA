@@ -1,6 +1,8 @@
 """Config flow for Mysa integration."""
 
 # pylint: disable=abstract-method
+# Justification: Inherits from HA ConfigFlow which has abstract methods like async_step_user.
+
 # Justification: ConfigFlow inherits abstract methods handled by base class meta-programming.
 # Suppress abstract-method check as we inherit from ConfigFlow but implement
 # only the methods required for this specific implementation.

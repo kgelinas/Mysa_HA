@@ -1,6 +1,8 @@
 """Switch platform for Mysa."""
 
 # pylint: disable=abstract-method
+# Justification: Inherits from HA SwitchEntity and RestoreEntity which have abstract methods.
+
 # Justification: HA Entity properties implement the required abstracts.
 import logging
 import time
@@ -36,7 +38,8 @@ async def async_setup_entry(
     """Set up Mysa switches."""
     coordinator = entry.runtime_data.coordinator
     api = entry.runtime_data.api
-    devices = await api.get_devices()
+    # Get devices to create entities
+    devices = api.devices
     entities: list[SwitchEntity] = []
     for device_id, device_data in devices.items():
         is_ac = api.is_ac_device(device_id)
@@ -44,14 +47,31 @@ async def async_setup_entry(
         entities.append(MysaLockSwitch(coordinator, device_id, device_data, api, entry))
         # Heating thermostat only switches
         if not is_ac:
-            entities.append(
-                MysaAutoBrightnessSwitch(
-                    coordinator, device_id, device_data, api, entry
+            # Check for non-AC device type (ST-V1-0 vs BB-V2/V1)
+            model = str(device_data.get("Model", ""))
+            is_stv1 = "ST-V1-0" in model
+
+            # AutoBrightness only for BB-based devices (V1/V2), NOT ST-V1 (HVAC)
+            if not is_stv1:
+                entities.append(
+                    MysaAutoBrightnessSwitch(
+                        coordinator, device_id, device_data, api, entry
+                    )
                 )
-            )
-            entities.append(
-                MysaProximitySwitch(coordinator, device_id, device_data, api, entry)
-            )
+
+            # ST-V1 specific switches
+            if is_stv1:
+                entities.append(
+                    MysaSTV10AllowAutoModeSwitch(
+                        coordinator, device_id, device_data, api, entry
+                    )
+                )
+
+            # Proximity/Away (only for legacy BB-V1/V2, NOT ST-V1-0)
+            if not is_stv1:
+                entities.append(
+                    MysaProximitySwitch(coordinator, device_id, device_data, api, entry)
+                )
         # AC only switches
         if is_ac:
             entities.append(
@@ -91,7 +111,7 @@ class MysaSwitch(
         self._device_data = device_data
         self._attr_translation_key = translation_key
         self._attr_unique_id = f"{device_id}_{sensor_key.lower()}"
-        self._pending_state: bool | None = None
+        self._pending_state: Any | None = None
         self._pending_timestamp: float | None = None
 
     @property
@@ -145,7 +165,7 @@ class MysaSwitch(
                 return current_val
 
             # 3. Return pending state (Sticky)
-            return self._pending_state
+            return bool(self._pending_state)
 
         return current_val if current_val is not None else False
 
@@ -178,7 +198,12 @@ class MysaLockSwitch(MysaSwitch):  # TODO: Implement abstract methods
         self._pending_timestamp = time.time()
         self.async_write_ha_state()
         try:
-            await self._api.set_lock(self._device_id, True)
+            # Check for ST-V1-0 specific handling
+            model = str(self._device_data.get("Model", ""))
+            if "ST-V1-0" in model:
+                await self._api.set_stv10_lock(self._device_id, True)
+            else:
+                await self._api.set_lock(self._device_id, True)
         except Exception as e:
             self._pending_state = None
             self.async_write_ha_state()
@@ -194,7 +219,12 @@ class MysaLockSwitch(MysaSwitch):  # TODO: Implement abstract methods
         self._pending_timestamp = time.time()
         self.async_write_ha_state()
         try:
-            await self._api.set_lock(self._device_id, False)
+            # Check for ST-V1-0 specific handling
+            model = str(self._device_data.get("Model", ""))
+            if "ST-V1-0" in model:
+                await self._api.set_stv10_lock(self._device_id, False)
+            else:
+                await self._api.set_lock(self._device_id, False)
         except Exception as e:
             self._pending_state = None
             self.async_write_ha_state()
@@ -300,7 +330,11 @@ class MysaProximitySwitch(MysaSwitch):  # TODO: Implement abstract methods
         self._pending_timestamp = time.time()
         self.async_write_ha_state()
         try:
-            await self._api.set_proximity(self._device_id, True)
+            model = str(self._device_data.get("Model", ""))
+            if "ST-V1-0" in model:
+                await self._api.set_stv10_proximity(self._device_id, True)
+            else:
+                await self._api.set_proximity(self._device_id, True)
         except Exception as e:
             self._pending_state = None
             self.async_write_ha_state()
@@ -316,7 +350,11 @@ class MysaProximitySwitch(MysaSwitch):  # TODO: Implement abstract methods
         self._pending_timestamp = time.time()
         self.async_write_ha_state()
         try:
-            await self._api.set_proximity(self._device_id, False)
+            model = str(self._device_data.get("Model", ""))
+            if "ST-V1-0" in model:
+                await self._api.set_stv10_proximity(self._device_id, False)
+            else:
+                await self._api.set_proximity(self._device_id, False)
         except Exception as e:
             self._pending_state = None
             self.async_write_ha_state()
@@ -390,3 +428,73 @@ class MysaClimatePlusSwitch(MysaSwitch):  # TODO: Implement abstract methods
                 translation_key="set_climate_plus_failed",
                 translation_placeholders={"error": str(e)},
             ) from e
+
+
+class MysaSTV10AllowAutoModeSwitch(MysaSwitch):
+    """Switch for ST-V1-0 Allow Auto Mode."""
+
+    def __init__(
+        self,
+        coordinator: DataUpdateCoordinator[dict[str, Any]],
+        device_id: str,
+        device_data: dict[str, Any],
+        api: MysaApi,
+        entry: ConfigEntry[MysaData],
+    ) -> None:
+        """Initialize."""
+        super().__init__(
+            coordinator,
+            device_id,
+            device_data,
+            api,
+            entry,
+            "auto_mode_enabled",
+            "allow_auto_mode",
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return true if auto mode is enabled."""
+        if self.coordinator.data is None:
+            return self._pending_state or False
+        state = self.coordinator.data.get(self._device_id, {})
+
+        # 1. Check pending first
+        if self._pending_state is not None:
+            return bool(self._pending_state)
+
+        # 2. Check simple key
+        val = state.get("auto_mode_enabled")
+        if val is not None:
+            return bool(val)
+
+        # 3. Check targetAuto dict
+        target_auto = state.get("targetAuto")
+        if isinstance(target_auto, dict):
+            return bool(target_auto.get("enabled"))
+
+        return False
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Enable auto mode."""
+        self._pending_state = True
+        self._pending_timestamp = time.time()
+        self.async_write_ha_state()
+        try:
+            await self._api.set_stv10_allow_auto_mode(self._device_id, True)
+        except Exception as e:
+            self._pending_state = None
+            self.async_write_ha_state()
+            raise HomeAssistantError(f"Failed to set auto mode: {e}") from e
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Disable auto mode."""
+        self._pending_state = False
+        self._pending_timestamp = time.time()
+        self.async_write_ha_state()
+        try:
+            await self._api.set_stv10_allow_auto_mode(self._device_id, False)
+        except Exception as e:
+            self._pending_state = None
+            self.async_write_ha_state()
+            raise HomeAssistantError(f"Failed to set auto mode: {e}") from e

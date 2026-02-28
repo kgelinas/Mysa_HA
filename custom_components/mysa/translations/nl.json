@@ -1,71 +1,82 @@
 {
     "config": {
-        "step": {
-            "user": {
-                "title": "Mysa Authenticatie",
-                "description": "Voer uw Mysa-accountgegevens in.",
-                "data": {
-                    "username": "Gebruikersnaam (E-mail)",
-                    "password": "Wachtwoord"
-                },
-                "data_description": {
-                    "username": "Het e-mailadres gekoppeld aan uw Mysa-account.",
-                    "password": "Uw Mysa-wachtwoord."
-                }
-            },
-            "reauth_confirm": {
-                "title": "Mysa opnieuw verifi\u00ebren",
-                "description": "Het wachtwoord voor {username} is ongeldig. Voer het nieuwe wachtwoord in.",
-                "data": {
-                    "username": "Gebruikersnaam (E-mail)",
-                    "password": "Wachtwoord"
-                },
-                "data_description": {
-                    "username": "Het e-mailadres gekoppeld aan uw Mysa-account.",
-                    "password": "Uw nieuwe Mysa-wachtwoord."
-                }
-            }
+        "abort": {
+            "reauth_successful": "Herauthenticatie was succesvol.",
+            "single_instance_allowed": "Slechts \u00e9\u00e9n Mysa-configuratie is toegestaan."
         },
         "error": {
             "invalid_auth": "Ongeldige authenticatie",
-            "unknown": "Onverwachte fout",
-            "reauth_account_mismatch": "Het opgegeven e-mailadres komt niet overeen met de bestaande configuratie."
+            "reauth_account_mismatch": "Het opgegeven e-mailadres komt niet overeen met de bestaande configuratie.",
+            "unknown": "Onverwachte fout"
         },
-        "abort": {
-            "single_instance_allowed": "Slechts \u00e9\u00e9n Mysa-configuratie is toegestaan.",
-            "reauth_successful": "Herauthenticatie was succesvol."
-        }
-    },
-    "options": {
         "step": {
-            "init": {
-                "title": "Mysa Opties",
-                "description": "Geavanceerde apparaatinstellingen configureren.",
+            "reauth_confirm": {
                 "data": {
-                    "upgraded_lite_devices": "Ge\u00fcpgradede Lite-apparaten (Type 5 forceren)",
-                    "estimated_max_current": "Geschatte maximale stroom (Amp\u00e8re)",
-                    "simulated_energy": "Forceer Gesimuleerde Energie"
+                    "password": "Wachtwoord",
+                    "username": "Gebruikersnaam (E-mail)"
                 },
                 "data_description": {
-                    "upgraded_lite_devices": "Selecteer apparaten die u hebt ge\u00fcpgraded van Lite naar Full met de 'Magic Upgrade'-functie.",
-                    "estimated_max_current": "Geschatte stroom (Amp\u00e8re) voor Lite-apparaten voor berekening van gesimuleerde energie.",
-                    "simulated_energy": "Forceer alle apparaten om gesimuleerde vermogensberekening te gebruiken op basis van de inschakelduur."
-                }
+                    "password": "Uw nieuwe Mysa-wachtwoord.",
+                    "username": "Het e-mailadres gekoppeld aan uw Mysa-account."
+                },
+                "description": "Het wachtwoord voor {username} is ongeldig. Voer het nieuwe wachtwoord in.",
+                "title": "Mysa opnieuw verifi\u00ebren"
+            },
+            "user": {
+                "data": {
+                    "password": "Wachtwoord",
+                    "username": "Gebruikersnaam (E-mail)"
+                },
+                "data_description": {
+                    "password": "Uw Mysa-wachtwoord.",
+                    "username": "Het e-mailadres gekoppeld aan uw Mysa-account."
+                },
+                "description": "Voer uw Mysa-accountgegevens in.",
+                "title": "Mysa Authenticatie"
             }
         }
     },
-    "services": {
-        "upgrade_lite_device": {
-            "name": "Lite-apparaat upgraden",
-            "description": "Upgradet een Mysa Lite-thermostaat naar volledige functies (Magic Upgrade)."
-        },
-        "downgrade_lite_device": {
-            "name": "Lite-apparaat terugzetten",
-            "description": "Zet een Mysa-thermostaat terug van volledige functies naar Lite."
-        }
-    },
     "entity": {
+        "binary_sensor": {
+            "connection": {
+                "name": "Verbinding"
+            }
+        },
+        "climate": {
+            "thermostat": {
+                "name": "Thermostaat"
+            }
+        },
+        "number": {
+            "auto_deadband": {
+                "name": "Automatische dode band"
+            },
+            "max_brightness": {
+                "name": "Maximale helderheid"
+            },
+            "max_setpoint": {
+                "name": "Maximum setpoint"
+            },
+            "min_brightness": {
+                "name": "Minimale helderheid"
+            },
+            "min_setpoint": {
+                "name": "Minimum setpoint"
+            }
+        },
         "select": {
+            "horizontal_swing": {
+                "name": "Horizontal Swing",
+                "state": {
+                    "auto": "Auto",
+                    "center": "Center",
+                    "left": "Left",
+                    "left_center": "Left Center",
+                    "right": "Right",
+                    "right_center": "Right Center",
+                    "right_wide": "Right Wide"
+                }
+            },
             "sensor_mode": {
                 "name": "Sensormodus",
                 "state": {
@@ -75,17 +86,249 @@
             }
         },
         "sensor": {
+            "adv_aux_uses_fan": {
+                "name": "Aux met Ventilator"
+            },
+            "adv_cool_fan_delay": {
+                "name": "Vertraging koelventilator"
+            },
+            "adv_cool_fan_run_on": {
+                "name": "Naloop koelventilator"
+            },
+            "adv_cool_stage_two_delay": {
+                "name": "Vertraging koelen trap 2"
+            },
+            "adv_cool_stage_two_delta": {
+                "name": "Delta koelen trap 2"
+            },
+            "adv_cool_uses_fan": {
+                "name": "Koelen met Ventilator"
+            },
+            "adv_cool_when_reversed": {
+                "name": "Koelen indien omgekeerd"
+            },
+            "adv_fan_period": {
+                "name": "Ventilator Periode"
+            },
+            "adv_fan_ramp": {
+                "name": "Ventilatorhelling"
+            },
+            "adv_fan_runtime": {
+                "name": "Ventilator Looptijd"
+            },
+            "adv_heat_fan_delay": {
+                "name": "Vertraging verwarmingsventilator"
+            },
+            "adv_heat_fan_run_on": {
+                "name": "Naloop verwarmingsventilator"
+            },
+            "adv_heat_stage_two_delay": {
+                "name": "Fase 2 Verwarming Vertraging"
+            },
+            "adv_heat_stage_two_delta": {
+                "name": "Fase 2 Verwarming Delta"
+            },
+            "adv_heat_uses_fan": {
+                "name": "Verwarmen met Ventilator"
+            },
+            "brightness": {
+                "name": "Helderheid"
+            },
+            "cost": {
+                "name": "Elektriciteitstarief"
+            },
+            "current": {
+                "name": "Stroom"
+            },
+            "duty_cycle": {
+                "name": "Inschakelduur"
+            },
+            "emergency_heat_on_time": {
+                "name": "Looptijd noodverwarming"
+            },
+            "encryption_enabled": {
+                "name": "Versleuteling ingeschakeld"
+            },
+            "energy": {
+                "name": "Energie"
+            },
+            "estimated_current": {
+                "name": "Geschatte stroom"
+            },
+            "fan_on_time": {
+                "name": "Looptijd ventilator"
+            },
+            "fan_sequence": {
+                "name": "Ventilatorvolgorde"
+            },
+            "fault_test": {
+                "name": "Foutentest"
+            },
+            "free_heap": {
+                "name": "Vrij geheugen"
+            },
+            "heatsink_temperature": {
+                "name": "Koellichaamtemperatuur"
+            },
+            "humidity": {
+                "name": "Luchtvochtigheid"
+            },
+            "hvac_config_index": {
+                "name": "HVAC Config Index"
+            },
+            "infloor_temperature": {
+                "name": "Vloertemperatuur"
+            },
             "ip_address": {
                 "name": "IP-adres"
             },
-            "serial_number": {
-                "name": "Serienummer"
+            "max_current": {
+                "name": "Maximale stroom"
+            },
+            "max_setpoint": {
+                "name": "Maximaal instelpunt"
+            },
+            "min_setpoint": {
+                "name": "Minimaal instelpunt"
+            },
+            "multiple_fan_speeds": {
+                "name": "Meerdere ventilatorsnelheden"
+            },
+            "on_time": {
+                "name": "Totale looptijd"
+            },
+            "power": {
+                "name": "Actief vermogen"
+            },
+            "priv_key_ok": {
+                "name": "Status priv\u00e9sleutel"
+            },
+            "pub_key_hash": {
+                "name": "Hash van publieke sleutel"
+            },
+            "rssi": {
+                "name": "Signaalsterkte"
+            },
+            "secure_boot": {
+                "name": "Veilig opstarten"
+            },
+            "stage_one_cool_on_time": {
+                "name": "Looptijd koelen trap 1"
+            },
+            "stage_two_cool_on_time": {
+                "name": "Looptijd koelen trap 2"
+            },
+            "stage_two_on_time": {
+                "name": "Looptijd trap 2"
+            },
+            "temperature": {
+                "name": "Temperatuur"
+            },
+            "timezone": {
+                "name": "Tijdzone"
+            },
+            "voltage": {
+                "name": "Spanning"
+            }
+        },
+        "switch": {
+            "allow_auto_mode": {
+                "name": "Allow Auto Mode"
+            },
+            "auto_brightness": {
+                "name": "Automatische helderheid"
+            },
+            "climate_plus": {
+                "name": "Klimaat+"
+            },
+            "lock": {
+                "name": "Vergrendeling"
+            },
+            "proximity": {
+                "name": "Nabijheidsmodus"
+            },
+            "temperature_format": {
+                "name": "Weergaveformaat"
+            }
+        },
+        "update": {
+            "firmware": {
+                "name": "Firmware"
             }
         }
     },
     "exceptions": {
+        "set_ac_fan_mode_failed": {
+            "message": "AC-ventilatormodus instellen mislukt: {error}"
+        },
+        "set_ac_hvac_mode_failed": {
+            "message": "AC HVAC-modus instellen mislukt: {error}"
+        },
+        "set_ac_swing_mode_failed": {
+            "message": "AC-swingmodus instellen mislukt: {error}"
+        },
+        "set_ac_temperature_failed": {
+            "message": "AC-temperatuur instellen mislukt: {error}"
+        },
+        "set_horizontal_swing_failed": {
+            "message": "Horizontale swing instellen mislukt: {error}"
+        },
+        "set_hvac_mode_failed": {
+            "message": "HVAC-modus instellen mislukt: {error}"
+        },
         "set_sensor_mode_failed": {
-            "message": "Kon sensormodus niet instellen: {error}"
+            "message": "Sensormodus instellen mislukt: {error}"
+        },
+        "set_temperature_failed": {
+            "message": "Doeltemperatuur instellen mislukt: {error}"
+        }
+    },
+    "issues": {
+        "auth_failed": {
+            "fix_flow": {
+                "step": {
+                    "confirm": {
+                        "description": "Authentication with the Mysa API failed: {error}\n\nPlease reconfigure the integration with valid credentials.",
+                        "title": "Re-authenticate Mysa"
+                    }
+                }
+            },
+            "title": "Authentication Failed"
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "data": {
+                    "estimated_max_current": "Geschatte maximale stroom (Amp\u00e8re)",
+                    "simulated_energy": "Forceer Gesimuleerde Energie",
+                    "upgraded_lite_devices": "Ge\u00fcpgradede Lite-apparaten (Type 5 forceren)"
+                },
+                "data_description": {
+                    "estimated_max_current": "Geschatte stroom (Amp\u00e8re) voor Lite-apparaten voor berekening van gesimuleerde energie.",
+                    "simulated_energy": "Forceer alle apparaten om gesimuleerde vermogensberekening te gebruiken op basis van de inschakelduur.",
+                    "upgraded_lite_devices": "Selecteer apparaten die u hebt ge\u00fcpgraded van Lite naar Full met de 'Magic Upgrade'-functie."
+                },
+                "description": "Geavanceerde apparaatinstellingen configureren.",
+                "title": "Mysa Opties"
+            }
+        }
+    },
+    "services": {
+        "downgrade_lite_device": {
+            "description": "Zet een Mysa-thermostaat terug van volledige functies naar Lite.",
+            "name": "Lite-apparaat terugzetten"
+        },
+        "upgrade_lite_device": {
+            "description": "Upgradet een Mysa Lite-thermostaat naar volledige functies (Magic Upgrade).",
+            "name": "Lite-apparaat upgraden"
+        }
+    },
+    "system_health": {
+        "info": {
+            "api_connected": "API verbonden",
+            "devices": "Apparaten",
+            "mqtt_listener": "MQTT-luisteraar"
         }
     }
 }

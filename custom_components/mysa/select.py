@@ -1,6 +1,8 @@
 """Select platform for Mysa AC horizontal swing."""
 
 # pylint: disable=abstract-method
+# Justification: Inherits from HA SelectEntity and RestoreEntity which have abstract methods.
+
 # Justification: HA Entity properties implement the required abstracts.
 import logging
 import time
@@ -61,6 +63,11 @@ async def async_setup_entry(
             entities.append(
                 MysaSensorModeSelect(coordinator, device_id, device_data, api, entry)
             )
+
+        # Add temperature format select for all heating devices
+        entities.append(
+            MysaTemperatureFormatSelect(coordinator, device_id, device_data, api, entry)
+        )
 
     if entities:
         async_add_entities(entities)
@@ -315,3 +322,117 @@ class MysaSensorModeSelect(
                 translation_key="set_sensor_mode_failed",
                 translation_placeholders={"error": str(e)},
             ) from e
+
+
+class MysaTemperatureFormatSelect(
+    SelectEntity, CoordinatorEntity[DataUpdateCoordinator[dict[str, Any]]]
+):
+    """Select entity for Temperature Display Format."""
+
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_translation_key = "temperature_format"
+
+    def __init__(
+        self,
+        coordinator: DataUpdateCoordinator[dict[str, Any]],
+        device_id: str,
+        device_data: dict[str, Any],
+        api: MysaApi,
+        entry: ConfigEntry[MysaData],
+    ) -> None:
+        """Initialize."""
+        super().__init__(coordinator)
+        self._device_id = device_id
+        self._device_data = device_data
+        self._api = api
+        self._entry = entry
+        self._attr_unique_id = f"{device_id}_display_format"
+        self._pending_option: str | None = None
+        self._pending_timestamp: float | None = None
+        self._options = ["Celsius", "Fahrenheit"]
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device info."""
+        state = (
+            self.coordinator.data.get(self._device_id)
+            if self.coordinator.data
+            else None
+        )
+        return MysaDeviceLogic.get_device_info(
+            self._device_id, self._device_data, state
+        )
+
+    @property
+    def options(self) -> list[str]:
+        """Return list of available options."""
+        return self._options
+
+    def _get_start_value(self, state: dict[str, Any] | None) -> str | None:
+        """Extract value helper."""
+        if not state:
+            return None
+        # Check temperature_format or Format
+        # Priority: temperature_format (normalized), Format (raw)
+        val = state.get("temperature_format")
+        if val is None:
+            val = state.get("Format") or state.get("format")
+
+        # Normalize to F/C
+        if val in ["fahrenheit", "F"]:
+            return "F"
+        if val in ["celsius", "C"]:
+            return "C"
+        return None
+
+    @property
+    def current_option(self) -> str | None:
+        """Return current format."""
+        state = (
+            self.coordinator.data.get(self._device_id)
+            if self.coordinator.data
+            else None
+        )
+        val = self._get_start_value(state)  # "F" or "C"
+
+        current_cloud = "Fahrenheit" if val == "F" else "Celsius"
+
+        if self._pending_option is not None:
+            # 1. Check expiration
+            if self._pending_timestamp and (time.time() - self._pending_timestamp > 30):
+                self._pending_option = None
+                self._pending_timestamp = None
+                return current_cloud
+
+            # 2. Check convergence
+            if current_cloud == self._pending_option:
+                self._pending_option = None
+                self._pending_timestamp = None
+                return current_cloud
+
+            # 3. Sticky
+            return self._pending_option
+
+        return current_cloud
+
+    async def async_select_option(self, option: str) -> None:
+        """Set display format."""
+        is_fahrenheit = option == "Fahrenheit"
+        self._pending_option = option
+        self._pending_timestamp = time.time()
+        self.async_write_ha_state()
+
+        try:
+            # Check model to decide setter
+            model = str(self._device_data.get("Model", ""))
+            if "ST-V1-0" in model:
+                await self._api.set_stv10_temperature_format(
+                    self._device_id, is_fahrenheit
+                )
+            else:
+                await self._api.set_temperature_format(self._device_id, is_fahrenheit)
+        except Exception as e:
+            _LOGGER.error("Failed to set display format: %s", e)
+            self._pending_option = None
+            raise HomeAssistantError(f"Failed to set format: {e}") from e

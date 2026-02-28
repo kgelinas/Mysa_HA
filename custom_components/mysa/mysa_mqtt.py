@@ -1,6 +1,6 @@
 """Mysa MQTT Module.
 
-Shared MQTT utilities for Mysa devices.
+Shared MQTT utility functions for Mysa.
 Used by both the Home Assistant integration and debug tool.
 """
 
@@ -26,6 +26,8 @@ try:
     from .const import MQTT_KEEPALIVE, MQTT_USER_AGENT
 except ImportError:
     # Support direct execution of this file (outside Home Assistant context)
+    # Justification: Support dual execution contexts (HA integration vs standalone debug tool).
+    # Variables are only defined in one branch at runtime.
     import mqtt  # type: ignore[no-redef]
     from const import MQTT_KEEPALIVE, MQTT_USER_AGENT  # type: ignore[no-redef]
 
@@ -37,13 +39,16 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def build_subscription_topics(
-    device_ids: list[str], include_batch: bool = True
+    device_ids: list[str],
+    include_batch: bool = True,
+    stv10_devices: list[str] | None = None,
 ) -> list[mqtt.SubscriptionSpec]:
     """Build MQTT subscription topic list for devices.
 
     Args:
         device_ids: List of device IDs (MAC addresses)
         include_batch: Whether to include the /batch topic
+        stv10_devices: List of devices to subscribe to shadow topics for
 
     Returns:
         List of mqtt.SubscriptionSpec objects
@@ -62,6 +67,13 @@ def build_subscription_topics(
             sub_topics.append(
                 mqtt.SubscriptionSpec(f"/v1/dev/{safe_device_id}/batch", 0x00)
             )
+
+        # Add ST-V1-0 Shadow Wildcard if applicable
+        if stv10_devices and device_id in stv10_devices:
+            sub_topics.append(
+                mqtt.SubscriptionSpec(f"$aws/things/{safe_device_id}/shadow/#", 0x01)
+            )
+
     return sub_topics
 
 
@@ -150,18 +162,21 @@ def create_connect_packet(keepalive: int = MQTT_KEEPALIVE) -> bytes:
     return mqtt.connect(str(uuid1()), keepalive)
 
 
-def create_subscribe_packet(device_ids: list[str], packet_id: int = 1) -> bytes:
+def create_subscribe_packet(
+    device_ids: list[str], packet_id: int = 1, stv10_devices: list[str] | None = None
+) -> bytes:
     """Create MQTT SUBSCRIBE packet for device topics.
 
     Args:
         device_ids: List of device IDs to subscribe to
         packet_id: MQTT packet ID
+        stv10_devices: List of devices that are ST-V1-0 models (need shadow sub)
 
     Returns:
         MQTT SUBSCRIBE packet bytes
 
     """
-    topics = build_subscription_topics(device_ids)
+    topics = build_subscription_topics(device_ids, stv10_devices=stv10_devices)
     return mqtt.subscribe(packet_id, topics)
 
 
@@ -185,6 +200,7 @@ class MqttConnection:
         device_ids: list[str],
         keepalive: int = MQTT_KEEPALIVE,
         include_batch: bool = True,
+        stv10_devices: list[str] | None = None,
     ):
         """Initialize MQTT connection.
 
@@ -193,12 +209,14 @@ class MqttConnection:
             device_ids: List of device IDs to subscribe to
             keepalive: MQTT keepalive interval in seconds
             include_batch: Whether to include the /batch topic
+            stv10_devices: List of devices to treat as ST-V1-0 (shadow sub)
 
         """
         self.signed_url = signed_url
         self.device_ids = device_ids
         self.keepalive = keepalive
         self.include_batch = include_batch
+        self.stv10_devices = stv10_devices or []
         self._ws: WebSocketClientProtocol | None = None
         self._connected: bool = False
 
@@ -222,16 +240,53 @@ class MqttConnection:
 
         # Subscribe to device topics
         if self.device_ids:
-            sub_topics = build_subscription_topics(self.device_ids, self.include_batch)
-            sub_pkt = mqtt.subscribe(1, sub_topics)
-            await self._ws.send(sub_pkt)
+            # Chunk subscriptions to avoid broker limits (e.g. AWS IoT limit is 8 topics per packet)
+            # We chunk by device to keep it simple and safe.
+            chunk_size = 2
+            device_ids_list = list(self.device_ids)
 
-            # Wait for SUBACK
-            resp = await self._ws.recv()
-            pkt = parse_mqtt_packet(resp)
-            if not isinstance(pkt, mqtt.SubackPacket):
-                await self._ws.close()
-                raise RuntimeError(f"Expected SUBACK, got {pkt}")
+            for i in range(0, len(device_ids_list), chunk_size):
+                chunk_devs = device_ids_list[i : i + chunk_size]
+                sub_topics = build_subscription_topics(
+                    chunk_devs, self.include_batch, self.stv10_devices
+                )
+
+                # Packet ID starting at 1 and incrementing
+                sub_pkt = mqtt.subscribe(i // chunk_size + 1, sub_topics)
+                await self._ws.send(sub_pkt)
+
+                # Wait for SUBACK, ignoring any intervening PUBLISH packets
+                while True:
+                    resp = await self._ws.recv()
+                    pkt = parse_mqtt_packet(resp)
+                    if isinstance(pkt, mqtt.SubackPacket):
+                        break
+                    if not isinstance(pkt, mqtt.PublishPacket):
+                        await self._ws.close()
+                        raise RuntimeError(f"Expected SUBACK, got {pkt}")
+                    # Ignore PUBLISH packets during handshake
+
+                # Verify individual return codes (MQTT 3.1.1 spec: 0x80 is failure)
+                # Topics for this chunk are in order: [Out, In, Batch] if batch, else [Out, In]
+                step = 3 if self.include_batch else 2
+                for j, device_id in enumerate(chunk_devs):
+                    # Check Out/In topics (required)
+                    if (
+                        pkt.return_codes[j * step] == 0x80
+                        or pkt.return_codes[j * step + 1] == 0x80
+                    ):
+                        await self._ws.close()
+                        raise RuntimeError(
+                            f"Broker rejected standard topics for device {device_id}"
+                        )
+
+                    # Check Batch topic (optional fallback)
+                    if self.include_batch and pkt.return_codes[j * step + 2] == 0x80:
+                        _LOGGER.warning(
+                            "Broker rejected batch topic for device %s. Monitoring "
+                            "will continue without high-precision data.",
+                            device_id,
+                        )
 
             _LOGGER.info("Subscribed to %d device topics", len(self.device_ids))
 
@@ -252,6 +307,7 @@ class MqttConnection:
                 disconnect_pkt = mqtt.disconnect()
                 await self._ws.send(disconnect_pkt)
             except Exception:  # pylint: disable=broad-except
+                # Justification: Must catch all errors to keep the callback loop alive.
                 # Justification: Ensure listener loop continues despite parsing errors.
                 # Swallow exceptions during disconnect (e.g. network down)
                 # to ensure finally block runs and socket is closed.

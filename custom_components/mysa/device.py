@@ -1,7 +1,9 @@
 """Device logic and constants for Mysa devices."""
 
 # pylint: disable=too-many-return-statements, too-many-branches
+# Justification: Central logic class mapping various device features and states.
 # pylint: disable=too-many-statements, too-many-locals
+# Justification: State normalization requires handling many keys and edge cases.
 # Justification: Device logic requires handling diverse payloads and state normalizations
 # in a single pass.
 import logging
@@ -11,6 +13,12 @@ from homeassistant.helpers.device_registry import CONNECTION_NETWORK_MAC, Device
 
 from .const import (
     AC_FAN_MODES,
+    AC_MODE_AUTO,
+    AC_MODE_COOL,
+    AC_MODE_DRY,
+    AC_MODE_FAN_ONLY,
+    AC_MODE_HEAT,
+    AC_MODE_OFF,
     AC_PAYLOAD_TYPE,
     AC_SWING_MODES,
     DOMAIN,
@@ -61,6 +69,14 @@ class MysaDeviceLogic:
             return False
         model = str(device_info.get("Model", ""))
         return model.startswith("AC-")
+
+    @staticmethod
+    def is_stv10_device(device_info: dict[str, Any] | None) -> bool:
+        """Check if device is an ST-V1-0 controller."""
+        if not device_info:
+            return False
+        model = str(device_info.get("Model", ""))
+        return "st-v1-0" in model.lower()
 
     @staticmethod
     def get_payload_type(
@@ -147,7 +163,13 @@ class MysaDeviceLogic:
         sp_val = get_v(["sp", "stpt", "SetPoint"])
         if sp_val is not None:
             state["SetPoint"] = sp_val
-        duty_val = get_v(["dc", "Duty", "DutyCycle"])
+        th_val = get_v(["target_heat", "heatSetpoint"])
+        if th_val is not None:
+            state["target_heat"] = th_val
+        tc_val = get_v(["target_cool", "coolSetpoint"])
+        if tc_val is not None:
+            state["target_cool"] = tc_val
+        duty_val = get_v(["dc", "Duty", "dtyCycle", "DutyCycle"])
         if duty_val is not None:
             state["Duty"] = duty_val
         rssi_val = get_v(["rssi", "Rssi", "RSSI"])
@@ -159,6 +181,19 @@ class MysaDeviceLogic:
         current_val = get_v(["amps", "Current"])
         if current_val is not None:
             state["Current"] = current_val
+        # Handle 'temperature' and 'humidity' variants
+        temp_val = get_v(["currentTemperature", "ambTemp", "current_temp_raw"])
+        if temp_val is not None:
+            # Most devices send C*100, some send C
+            f_temp = float(temp_val)
+            if f_temp > 100:
+                state["current_temp"] = f_temp / 100.0
+            else:
+                state["current_temp"] = f_temp
+
+        hum_val = get_v(["currentHumidity", "humidity", "hum", "relativeHumidity"])
+        if hum_val is not None:
+            state["current_humidity"] = float(hum_val)
         hs_val = get_v(["hs", "HeatSink"])
         if hs_val is not None:
             state["HeatSink"] = hs_val
@@ -293,6 +328,11 @@ class MysaDeviceLogic:
         if fw_val is not None:
             state["FirmwareVersion"] = str(fw_val)
 
+        # Diagnostics
+        heap_val = get_v(["freeHeap", "FreeHeap"])
+        if heap_val is not None:
+            state["free_heap"] = int(heap_val)
+
         # ---------------------------------------------------------------------
         # Section 3: AC Controller Specific Logic
         # ---------------------------------------------------------------------
@@ -383,3 +423,65 @@ class MysaDeviceLogic:
                         state["SwingMode"] = AC_SWING_MODES.get(
                             int(acstate_v["5"]), "unknown"
                         )
+
+    @staticmethod
+    def get_ac_mode_value(mode_str: str) -> int:
+        """Map HA mode string to AC mode integer."""
+        if "off" in mode_str:
+            mode_val = AC_MODE_OFF
+        elif "heat_cool" in mode_str or "auto" in mode_str:
+            mode_val = AC_MODE_AUTO
+        elif "cool" in mode_str:
+            mode_val = AC_MODE_COOL
+        elif "heat" in mode_str:
+            mode_val = AC_MODE_HEAT
+        elif "dry" in mode_str:
+            mode_val = AC_MODE_DRY
+        elif "fan" in mode_str:
+            mode_val = AC_MODE_FAN_ONLY
+        else:
+            mode_val = AC_MODE_OFF
+        return mode_val
+
+    @staticmethod
+    def get_stv10_mode_value(mode_str: str) -> int:
+        """Map HA mode string to ST-V1-0 mode integer."""
+        if "off" in mode_str:
+            mode_val = 0
+        elif "heat_cool" in mode_str or "auto" in mode_str:
+            mode_val = 1
+        elif "cool" in mode_str:
+            mode_val = 3
+        elif "heat" in mode_str:
+            mode_val = 4
+        elif "fan" in mode_str:
+            mode_val = 7
+        else:
+            mode_val = 0
+        return mode_val
+
+    @staticmethod
+    def extract_timestamp(updates: dict[str, Any]) -> int | None:
+        """Extract and validate timestamp from updates."""
+        # 1. Check top-level timestamp
+        ts = updates.get("Timestamp") or updates.get("time") or updates.get("timestamp")
+        if ts is not None:
+            try:
+                return int(ts)
+            except (ValueError, TypeError):
+                pass
+
+        # 2. Check for nested timestamps in field dicts (e.g., CorrectedTemp: {t, v})
+        # HTTP updates often have a slightly older top-level timestamp or none at all,
+        # but individual fields have fresh 't' timestamps we should respect.
+        max_ts: int | None = None
+        for value in updates.values():
+            if isinstance(value, dict) and "t" in value:
+                try:
+                    field_ts = int(value["t"])
+                    if max_ts is None or field_ts > max_ts:
+                        max_ts = field_ts
+                except (ValueError, TypeError):
+                    pass
+
+        return max_ts

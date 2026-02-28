@@ -423,3 +423,96 @@ class TestMysaDeviceLogic:
         state = {"MaxCurrent": 15}
         MysaDeviceLogic.normalize_state(state)
         assert state["MaxCurrent"] == 15
+
+    def test_get_ac_mode_value(self):
+        """Test mapping HA AC modes to Mysa values."""
+        assert MysaDeviceLogic.get_ac_mode_value("cool") == 4
+        assert MysaDeviceLogic.get_ac_mode_value("heat") == 3
+        assert MysaDeviceLogic.get_ac_mode_value("auto") == 2
+        assert MysaDeviceLogic.get_ac_mode_value("fan_only") == 5
+        assert MysaDeviceLogic.get_ac_mode_value("dry") == 6
+        assert MysaDeviceLogic.get_ac_mode_value("off") == 1
+        assert MysaDeviceLogic.get_ac_mode_value("unknown") == 1
+
+    def test_get_stv10_mode_value(self):
+        """Test mapping HA S1 modes to Mysa values."""
+        assert MysaDeviceLogic.get_stv10_mode_value("cool") == 3
+        assert MysaDeviceLogic.get_stv10_mode_value("heat") == 4
+        assert MysaDeviceLogic.get_stv10_mode_value("auto") == 1
+        assert MysaDeviceLogic.get_stv10_mode_value("heat_cool") == 1
+        assert MysaDeviceLogic.get_stv10_mode_value("fan_only") == 7
+        assert MysaDeviceLogic.get_stv10_mode_value("off") == 0
+        assert MysaDeviceLogic.get_stv10_mode_value("unknown") == 0
+
+    def test_extract_timestamp_new(self):
+        """Test timestamp extraction logic."""
+        # Top level
+        assert MysaDeviceLogic.extract_timestamp({"Timestamp": "123"}) == 123
+        assert MysaDeviceLogic.extract_timestamp({"time": 456}) == 456
+        assert MysaDeviceLogic.extract_timestamp({"timestamp": 789}) == 789
+
+        # Nested
+        updates = {
+            "Temp": {"v": 20, "t": 1000},
+            "Humidity": {"v": 40, "t": 2000}
+        }
+        assert MysaDeviceLogic.extract_timestamp(updates) == 2000
+
+        # Invalid nested
+        updates = {"Temp": {"v": 20, "t": "invalid"}}
+        assert MysaDeviceLogic.extract_timestamp(updates) is None
+
+        # Invalid top level
+        assert MysaDeviceLogic.extract_timestamp({"Timestamp": "invalid"}) is None
+
+        assert MysaDeviceLogic.extract_timestamp({"Timestamp": 1, "time": 2}) == 1
+
+    def test_normalize_state_dual_setpoints(self):
+        """Test target_heat and target_cool extraction (lines 168, 171)."""
+        # Test target_heat extraction
+        state = {"target_heat": 18.0}
+        MysaDeviceLogic.normalize_state(state)
+        assert state["target_heat"] == 18.0
+
+        # Test heatSetpoint extraction
+        state = {"heatSetpoint": 19.0}
+        MysaDeviceLogic.normalize_state(state)
+        assert state["target_heat"] == 19.0
+
+        # Test target_cool extraction
+        state = {"target_cool": 26.0}
+        MysaDeviceLogic.normalize_state(state)
+        assert state["target_cool"] == 26.0
+
+        # Test coolSetpoint extraction
+        state = {"coolSetpoint": 27.0}
+        MysaDeviceLogic.normalize_state(state)
+        assert state["target_cool"] == 27.0
+
+        # Test both together
+        state = {"heatSetpoint": 19.0, "coolSetpoint": 27.0}
+        MysaDeviceLogic.normalize_state(state)
+        assert state["target_heat"] == 19.0
+        assert state["target_cool"] == 27.0
+
+    def test_normalize_state_sensors_nested(self):
+        """Test normalization of sensors with nested 'v' dictionaries."""
+        # Test Temperature nested
+        state = {"currentTemperature": {"v": 2150}}
+        MysaDeviceLogic.normalize_state(state)
+        assert state["current_temp"] == 21.5
+
+        # Test Humidity nested
+        state = {"currentHumidity": {"v": 45.5}}
+        MysaDeviceLogic.normalize_state(state)
+        assert state["current_humidity"] == 45.5
+
+        # Test ambTemp nested (C*100)
+        state = {"ambTemp": {"v": 2200}}
+        MysaDeviceLogic.normalize_state(state)
+        assert state["current_temp"] == 22.0
+
+        # Test current_temp_raw nested (C)
+        state = {"current_temp_raw": {"v": 23.0}}
+        MysaDeviceLogic.normalize_state(state)
+        assert state["current_temp"] == 23.0

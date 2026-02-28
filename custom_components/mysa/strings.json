@@ -78,6 +78,16 @@
         }
     },
     "entity": {
+        "binary_sensor": {
+            "connection": {
+                "name": "Connection"
+            }
+        },
+        "climate": {
+            "thermostat": {
+                "name": "Thermostat"
+            }
+        },
         "switch": {
             "lock": {
                 "name": "Lock"
@@ -90,6 +100,9 @@
             },
             "climate_plus": {
                 "name": "Climate+"
+            },
+            "allow_auto_mode": {
+                "name": "Allow Auto Mode"
             }
         },
         "number": {
@@ -98,6 +111,15 @@
             },
             "max_brightness": {
                 "name": "Max Brightness"
+            },
+            "auto_deadband": {
+                "name": "Auto Deadband"
+            },
+            "min_setpoint": {
+                "name": "Min Setpoint"
+            },
+            "max_setpoint": {
+                "name": "Max Setpoint"
             }
         },
         "select": {
@@ -118,6 +140,13 @@
                 "state": {
                     "ambient": "Ambient",
                     "floor": "Floor"
+                }
+            },
+            "temperature_format": {
+                "name": "Display Format",
+                "state": {
+                    "Celsius": "Celsius",
+                    "Fahrenheit": "Fahrenheit"
                 }
             }
         },
@@ -172,6 +201,99 @@
             },
             "timezone": {
                 "name": "Time Zone"
+            },
+            "hvac_config_index": {
+                "name": "HVAC Config Index"
+            },
+            "adv_heat_uses_fan": {
+                "name": "Heat Uses Fan"
+            },
+            "adv_cool_uses_fan": {
+                "name": "Cool Uses Fan"
+            },
+            "adv_aux_uses_fan": {
+                "name": "Aux Uses Fan"
+            },
+            "adv_fan_runtime": {
+                "name": "Fan Runtime"
+            },
+            "adv_fan_period": {
+                "name": "Fan Period"
+            },
+            "adv_heat_stage_two_delta": {
+                "name": "Stage 2 Heat Delta"
+            },
+            "adv_heat_stage_two_delay": {
+                "name": "Stage 2 Heat Delay"
+            },
+            "adv_cool_when_reversed": {
+                "name": "Cool When Reversed"
+            },
+            "max_current": {
+                "name": "Max Current"
+            },
+            "free_heap": {
+                "name": "Free Heap"
+            },
+            "adv_fan_ramp": {
+                "name": "Fan Ramp"
+            },
+            "adv_cool_fan_delay": {
+                "name": "Cool Fan Delay"
+            },
+            "adv_heat_fan_delay": {
+                "name": "Heat Fan Delay"
+            },
+            "adv_cool_fan_run_on": {
+                "name": "Cool Fan Run-on"
+            },
+            "adv_heat_fan_run_on": {
+                "name": "Heat Fan Run-on"
+            },
+            "multiple_fan_speeds": {
+                "name": "Multiple Fan Speeds"
+            },
+            "fan_sequence": {
+                "name": "Fan Sequence"
+            },
+            "on_time": {
+                "name": "Runtime Total"
+            },
+            "fan_on_time": {
+                "name": "Runtime Fan"
+            },
+            "stage_two_on_time": {
+                "name": "Runtime Stage 2"
+            },
+            "stage_one_cool_on_time": {
+                "name": "Runtime Cool Stage 1"
+            },
+            "stage_two_cool_on_time": {
+                "name": "Runtime Cool Stage 2"
+            },
+            "emergency_heat_on_time": {
+                "name": "Runtime Emergency Heat"
+            },
+            "secure_boot": {
+                "name": "Secure Boot"
+            },
+            "encryption_enabled": {
+                "name": "Encryption Enabled"
+            },
+            "priv_key_ok": {
+                "name": "Private Key Status"
+            },
+            "pub_key_hash": {
+                "name": "Public Key Hash"
+            },
+            "fault_test": {
+                "name": "Fault Test"
+            },
+            "adv_cool_stage_two_delta": {
+                "name": "Stage 2 Cool Delta"
+            },
+            "adv_cool_stage_two_delay": {
+                "name": "Stage 2 Cool Delay"
             }
         },
         "update": {
@@ -204,6 +326,13 @@
         },
         "set_sensor_mode_failed": {
             "message": "Failed to set sensor mode: {error}"
+        }
+    },
+    "system_health": {
+        "info": {
+            "api_connected": "API Connected",
+            "devices": "Devices",
+            "mqtt_listener": "MQTT Listener"
         }
     }
 }

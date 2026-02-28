@@ -165,6 +165,7 @@ def publish(  # TODO: Refactor to reduce arguments
 ) -> bytes:
     """Create a PUBLISH packet."""
     # pylint: disable=too-many-arguments,too-many-positional-arguments
+    # Justification: Wraps underlying gmqtt client creation with all options.
     # Justification: Helper function used internally for packet construction.
     if qos > 0 and packet_id is None:
         raise ValueError("QoS > 0 requires a packet_id")

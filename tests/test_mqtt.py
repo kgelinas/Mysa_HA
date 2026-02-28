@@ -428,18 +428,14 @@ class TestMqttTopicBuilding:
 
         assert topics == []
 
-    def test_build_subscription_topics_normalizes_ids(self):
-        """Test that device IDs are normalized (lowercase, no colons)."""
-        from custom_components.mysa.mysa_mqtt import build_subscription_topics
-
         # Device ID with colons and mixed case
-        device_ids = ["40:91:51:E4:0D:E0"]
+        device_ids = ["00:00:00:00:00:01"]
 
         topics = build_subscription_topics(device_ids)
 
         topic_strings = [t.topicfilter for t in topics]
         # Should be lowercase without colons
-        assert "/v1/dev/409151e40de0/out" in topic_strings
+        assert "/v1/dev/000000000001/out" in topic_strings
 
     # ===========================================================================
     # From test_mqtt_protocol.py

@@ -3,7 +3,22 @@
 All notable changes to this project will be documented in this file.
 
 
-## [0.9.1] - 2026-01-28
+## [0.9.2-beta2] - 2026-02-28
+### Changed
+- **Major refactoring**: Aligning with Mysa App for API and MQTT.
+- **Device Type**: Added support for new device types (e.g., new HVAC models (ST-V1)).
+
+### Fixed
+- **Squashed bugs**: many bug with optimistic update , related to MQTT echo etc fixed
+
+## [0.9.2-beta1] - 2026-01-29
+### Added
+- **MQTT Stability (1005 Fix)**: Implemented chunked topic subscriptions (maximum 2 devices per packet) to prevent connection dropped by broker (Error 1005) on accounts with multiple devices.
+- **Handshake Resilience**: Updated MQTT handshake to handle incoming data during the subscription phase gracefully.
+- **Batch Observation**: The `mysa_debug` tool now supports high-precision `/batch` topic observation for advanced diagnostics. (Note: This is disabled in the main integration to prevent database redundancy).
+- **Note**: Improvements to `state_class` may trigger a one-time "Statistics mismatch" notice in Home Assistant Developer Tools. This is expected and safe to accept to enable long-term history for diagnostic sensors.
+
+## [0.9.1] - 2026-01-29
 ### Added
 - **Sensor Mode Selector**: New `Sensor Mode` select entity for In-Floor devices (INF-V1). Allows manual switching between "Ambient" and "Floor" modes.
 - **Beta Channel**: Documented beta release process for HACS testing.

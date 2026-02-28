@@ -61,16 +61,16 @@ class TestMysaBinarySensor:
     async def test_async_setup_entry(self, hass, mock_coordinator, mock_config_entry):
         """Test setup creates binary sensors."""
         mock_api = MagicMock()
-        mock_api.get_devices = AsyncMock(
-            return_value={
-                "device1": {"Id": "device1", "Name": "Test Device", "Model": "BB-V2"},
-                "device2": {
-                    "Id": "device2",
-                    "Name": "Offline Device",
-                    "Model": "BB-V1",
-                },
-            }
-        )
+        _devices = {
+            "device1": {"Id": "device1", "Name": "Test Device", "Model": "BB-V2"},
+            "device2": {
+                "Id": "device2",
+                "Name": "Offline Device",
+                "Model": "BB-V1",
+            },
+        }
+        mock_api.get_devices = AsyncMock(return_value=_devices)
+        mock_api.devices = _devices
 
         mock_data = MagicMock(spec=MysaData)
         mock_data.coordinator = mock_coordinator

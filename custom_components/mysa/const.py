@@ -58,6 +58,11 @@ AC_FAN_MODES = {
 # Reverse mapping for setting fan mode
 AC_FAN_MODES_REVERSE = {v: k for k, v in AC_FAN_MODES.items()}
 
+# Fallback minimum fan modes when SupportedCaps is too restrictive
+# Matches Mysa app's manual control behavior which allows these modes
+# regardless of what the backend reports in SupportedCaps
+AC_FAN_MODES_FALLBACK = [AC_FAN_AUTO, AC_FAN_LOW, AC_FAN_HIGH]
+
 # Swing Positions (vertical and horizontal share the same values)
 AC_SWING_AUTO = 3
 AC_SWING_POSITION_1 = 4  # Top / Left

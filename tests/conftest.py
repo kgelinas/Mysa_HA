@@ -5,12 +5,13 @@ Shared fixtures and configuration for all tests.
 
 import os
 import sys
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
 # Mock pycognito globally ONLY if not in VCR record mode
 MYSA_RECORD = os.environ.get("MYSA_RECORD", "0") == "1"
 if not MYSA_RECORD:
     try:
+        # Justification: Importing just to check if the module is available to conditionally mock it.
         import pycognito  # pylint: disable=unused-import
     except ImportError:
         sys.modules["pycognito"] = MagicMock()
@@ -131,7 +132,25 @@ def mock_api():
     api.start_mqtt_listener = AsyncMock()
     api.stop_mqtt_listener = AsyncMock()
     api.devices = api.get_devices.return_value
+    api.device_caps = {}
     api.simulated_energy = False
+    api.upgraded_lite_devices = []
+    api._latest_timestamp = {}
+    api._clock_skew = {}
+    api._last_command_time = {}
+    api._last_mqtt_poll_time = {}
+    api.realtime = MagicMock()
+    type(api).is_mqtt_running = PropertyMock(return_value=True)
+
+    # Mock client and its async methods to prevent RuntimeWarnings
+    api.client = MagicMock()
+    api.client.fetch_homes = AsyncMock()
+    api.client.get_state = AsyncMock(return_value={})
+    api.client.async_request = AsyncMock()
+    api.client.fetch_live_metrics = AsyncMock()
+    api.client.fetch_device_settings = AsyncMock()
+    api.client.fetch_smart_schedules = AsyncMock()
+
     return api
 
 

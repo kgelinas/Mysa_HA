@@ -3,6 +3,8 @@
 import logging
 from typing import Any
 
+# pylint: disable=abstract-method
+# Justification: Inherits from HA BinarySensorEntity and RestoreEntity which have abstract methods.
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
@@ -33,7 +35,8 @@ async def async_setup_entry(
     """Set up Mysa binary sensors."""
     coordinator = entry.runtime_data.coordinator
     api = entry.runtime_data.api
-    devices = await api.get_devices()
+    # Get devices to create entities
+    devices = api.devices
 
     entities = []
     for device_id, device_data in devices.items():
@@ -86,4 +89,5 @@ class MysaConnectionSensor(
         state = self.coordinator.data.get(self._device_id)
         if not state:
             return False
-        return bool(state.get("Connected", False))
+        # Legacy uses "Connected", ST-V1 uses "isConnected" from batch telemetry
+        return bool(state.get("Connected") or state.get("isConnected", False))

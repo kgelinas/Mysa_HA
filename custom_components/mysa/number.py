@@ -1,6 +1,8 @@
 """Number platform for Mysa."""
 
 # pylint: disable=abstract-method
+# Justification: Inherits from HA NumberEntity and RestoreEntity which have abstract methods.
+
 # Justification: HA Entity properties implement the required abstracts.
 import logging
 import time
@@ -36,17 +38,32 @@ async def async_setup_entry(
     """Set up Mysa number entities."""
     coordinator = entry.runtime_data.coordinator
     api = entry.runtime_data.api
-    devices = await api.get_devices()
+    # Get devices to create entities
+    devices = api.devices
 
     entities: list[NumberEntity] = []
     for device_id, device_data in devices.items():
-        # Min/Max Brightness are settable configuration values
+        # Min/Max Brightness
         entities.append(
             MysaMinBrightnessNumber(coordinator, device_id, device_data, api, entry)
         )
         entities.append(
             MysaMaxBrightnessNumber(coordinator, device_id, device_data, api, entry)
         )
+
+        # Min/Max Setpoint limits for all heating devices
+        entities.append(
+            MysaMinSetpointNumber(coordinator, device_id, device_data, api, entry)
+        )
+        entities.append(
+            MysaMaxSetpointNumber(coordinator, device_id, device_data, api, entry)
+        )
+
+        # ST-V1-0 Auto Deadband
+        if MysaDeviceLogic.is_stv10_device(device_data):
+            entities.append(
+                MysaAutoDeadbandNumber(coordinator, device_id, device_data, api, entry)
+            )
 
     async_add_entities(entities)
 
@@ -60,9 +77,9 @@ class MysaNumber(
     duplicate code, and implement abstract methods.
     """
 
-    _attr_native_min_value = 0
-    _attr_native_max_value = 100
-    _attr_native_step = 1
+    _attr_native_min_value: float = 0.0
+    _attr_native_max_value: float = 100.0
+    _attr_native_step: float = 1.0
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_mode = NumberMode.SLIDER
     _attr_has_entity_name = True
@@ -250,3 +267,190 @@ class MysaMaxBrightnessNumber(MysaNumber):
                 translation_placeholders={"error": str(e)},
             ) from e
         # Don't clear pending - let it expire or converge
+
+
+class MysaAutoDeadbandNumber(MysaNumber):
+    """Number entity for ST-V1-0 Auto Mode Deadband."""
+
+    _attr_native_min_value = 2.0
+    _attr_native_max_value = 6.0
+    _attr_native_step = 0.5
+    _attr_native_unit_of_measurement = "°C"
+
+    def __init__(
+        self,
+        coordinator: DataUpdateCoordinator[dict[str, Any]],
+        device_id: str,
+        device_data: dict[str, Any],
+        api: MysaApi,
+        entry: ConfigEntry[MysaData],
+    ) -> None:
+        """Initialize."""
+        super().__init__(
+            coordinator,
+            device_id,
+            device_data,
+            api,
+            entry,
+            "AutoDeadband",
+            "auto_deadband",
+        )
+        # Inherit available from coordinator?
+        # CoordinatorEntity by default is available if coordinator.last_update_success
+        # We want to override this to also check auto_mode_enabled
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        # 1. Check parent availability (coordinator success)
+        if not super().available:
+            return False
+
+        # 2. Only hide when Auto Mode is explicitly disabled (app-parity).
+        # If the key is absent (e.g. just after reboot, before first poll),
+        # we treat the state as unknown and keep the entity available to
+        # avoid a false "unavailable" flash on startup.
+        state = self.coordinator.data.get(self._device_id, {})
+
+        # Check simple key: only hide if explicitly 0
+        val = state.get("auto_mode_enabled")
+        if val is not None:
+            return bool(val)
+
+        # Check shadow structure: only hide if explicitly 0
+        target_auto = state.get("targetAuto")
+        if isinstance(target_auto, dict) and "enabled" in target_auto:
+            return bool(target_auto["enabled"])
+
+        # Key absent entirely → state unknown, keep available (avoid false flash)
+        return True
+
+    @property
+    def native_value(self) -> float | None:
+        """Return current deadband value."""
+        # ST-V1-0 usually reports auto_deadband in degrees, autoDeadband in centidegrees
+        val = self._get_value_with_pending(["auto_deadband", "autoDeadband"])
+        if val is None:
+            return None
+        # Heuristic: if > 50, it's likely centidegrees (2.0-6.0 range expected)
+        return float(val) / 100.0 if float(val) > 50 else float(val)
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Set deadband value."""
+        self._pending_value = float(value)
+        self._pending_time = time.time()
+        self.async_write_ha_state()
+        try:
+            await self._api.set_stv10_auto_deadband(self._device_id, float(value))
+        except Exception as e:
+            self._pending_value = None
+            self.async_write_ha_state()
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_target_failed",
+                translation_placeholders={"error": str(e)},
+            ) from e
+
+
+class MysaMinSetpointNumber(MysaNumber):
+    """Number entity for minimum setpoint limit."""
+
+    _attr_native_min_value = 5.0
+    _attr_native_max_value = 30.0
+    _attr_native_step = 0.5
+    _attr_native_unit_of_measurement = "°C"
+
+    def __init__(
+        self,
+        coordinator: DataUpdateCoordinator[dict[str, Any]],
+        device_id: str,
+        device_data: dict[str, Any],
+        api: MysaApi,
+        entry: ConfigEntry[MysaData],
+    ) -> None:
+        """Initialize."""
+        super().__init__(
+            coordinator,
+            device_id,
+            device_data,
+            api,
+            entry,
+            "MinSetpoint",
+            "min_setpoint",
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        """Return current min setpoint value."""
+        # Note: legacy devices usually report mnsp/MinSetpoint in centidegrees
+        # ST-V1-0 reports min_setpoint in degrees and MinSetpoint/lockoutMin in centidegrees
+        val = self._get_value_with_pending(["min_setpoint", "mns", "MinSetpoint"])
+        if val is None:
+            return None
+        # Heuristic: if > 100, it's likely centidegrees
+        return float(val) / 100.0 if float(val) > 100 else float(val)
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Set minimum setpoint."""
+        self._pending_value = float(
+            value * 100
+        )  # Store as centidegrees for pending check
+        self._pending_time = time.time()
+        self.async_write_ha_state()
+        try:
+            await self._api.set_min_setpoint(self._device_id, value)
+        except Exception as e:
+            self._pending_value = None
+            self.async_write_ha_state()
+            raise HomeAssistantError(f"Failed to set min setpoint: {e}") from e
+
+
+class MysaMaxSetpointNumber(MysaNumber):
+    """Number entity for maximum setpoint limit."""
+
+    _attr_native_min_value = 5.0
+    _attr_native_max_value = 30.0
+    _attr_native_step = 0.5
+    _attr_native_unit_of_measurement = "°C"
+
+    def __init__(
+        self,
+        coordinator: DataUpdateCoordinator[dict[str, Any]],
+        device_id: str,
+        device_data: dict[str, Any],
+        api: MysaApi,
+        entry: ConfigEntry[MysaData],
+    ) -> None:
+        """Initialize."""
+        super().__init__(
+            coordinator,
+            device_id,
+            device_data,
+            api,
+            entry,
+            "MaxSetpoint",
+            "max_setpoint",
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        """Return current max setpoint value."""
+        # Note: legacy devices usually report mxsp/MaxSetpoint in centidegrees
+        # ST-V1-0 reports max_setpoint in degrees and MaxSetpoint/lockoutMax in centidegrees
+        val = self._get_value_with_pending(["max_setpoint", "mxs", "MaxSetpoint"])
+        if val is None:
+            return None
+        # Heuristic: if > 100, it's likely centidegrees
+        return float(val) / 100.0 if float(val) > 100 else float(val)
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Set maximum setpoint."""
+        self._pending_value = float(value * 100)
+        self._pending_time = time.time()
+        self.async_write_ha_state()
+        try:
+            await self._api.set_max_setpoint(self._device_id, value)
+        except Exception as e:
+            self._pending_value = None
+            self.async_write_ha_state()
+            raise HomeAssistantError(f"Failed to set max setpoint: {e}") from e

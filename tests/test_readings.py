@@ -36,7 +36,7 @@ def test_parse_batch_v0():
     assert len(parsed) == 1
     r = parsed[0]
     assert r["ambTemp"] == 21.1
-    assert r["unknown2"] == 1
+    assert r["checksum"] == 1
 
 
 def test_parse_batch_v1():

@@ -2,14 +2,19 @@
 
 # pylint: disable=abstract-method, too-many-lines, too-many-public-methods
 # Justification:
-# abstract-method: HA Entity properties implement the required abstracts.
-# too-many-lines/methods: Climate entity handles complex HVAC logic and many protocol features.
+# abstract-method: Inherits from HA mixins (RestoreEntity) which may have abstract methods.
+# too-many-lines: Handles multiple climate device types (Baseboard, AC, ST-V1-0) in one file.
+# too-many-public-methods: Climate entities require many property overrides.
+
+import asyncio
 import logging
 import time
 from typing import Any, cast
 
 from homeassistant.components.climate import ClimateEntity
 from homeassistant.components.climate.const import (
+    ATTR_TARGET_TEMP_HIGH,
+    ATTR_TARGET_TEMP_LOW,
     ClimateEntityFeature,
     HVACAction,
     HVACMode,
@@ -32,6 +37,7 @@ from homeassistant.helpers.update_coordinator import (
 from . import MysaData
 from .const import (
     AC_FAN_MODES,
+    AC_FAN_MODES_FALLBACK,
     AC_FAN_MODES_REVERSE,
     AC_MODE_AUTO,
     AC_MODE_COOL,
@@ -60,11 +66,17 @@ async def async_setup_entry(
     api = entry.runtime_data.api
 
     # Get devices to create entities
-    devices = await api.get_devices()
+    devices = api.devices
     entities: list[ClimateEntity] = []
     for device_id, device_data in devices.items():
         # Use appropriate entity class based on device type
-        if api.is_ac_device(device_id):
+        model = device_data.get("Model", "")
+        if "ST-V1-0" in model:
+            _LOGGER.debug("Creating ST-V1-0 climate entity for %s", device_id)
+            entities.append(
+                MysaSTV10Climate(coordinator, device_id, device_data, api, entry)
+            )
+        elif api.is_ac_device(device_id):
             _LOGGER.debug("Creating AC climate entity for %s", device_id)
             entities.append(
                 MysaACClimate(coordinator, device_id, device_data, api, entry)
@@ -82,7 +94,6 @@ class MysaClimate(
 ):
     """Representation of a Mysa Thermostat."""
 
-    _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_supported_features: Any = (
         ClimateEntityFeature.TARGET_TEMPERATURE
         | ClimateEntityFeature.TURN_OFF
@@ -136,6 +147,35 @@ class MysaClimate(
         return val
 
     @property
+    def temperature_unit(self) -> str:
+        """Return the unit of measurement."""
+        state = self._get_state_data()
+        if state and state.get("temperature_format") == "F":
+            return UnitOfTemperature.FAHRENHEIT
+        return UnitOfTemperature.CELSIUS
+
+    @property
+    def target_temperature_step(self) -> float:
+        """Return the supported step of target temperature."""
+        if self.temperature_unit == UnitOfTemperature.FAHRENHEIT:
+            return 1.0
+        return 0.5  # Default for Celsius
+
+    def _convert_to_display(self, temp_c: float | None) -> float | None:
+        """Convert Celsius value to display unit (F or C)."""
+        if temp_c is None:
+            return None
+        if self.temperature_unit == UnitOfTemperature.FAHRENHEIT:
+            return round(temp_c * 9 / 5 + 32)
+        return round(temp_c, 1)  # Round to 1 decimal place for Celsius
+
+    def _convert_from_display(self, temp: float) -> float:
+        """Convert display value (F or C) to Celsius."""
+        if self.temperature_unit == UnitOfTemperature.FAHRENHEIT:
+            return (temp - 32) * 5 / 9
+        return temp
+
+    @property
     def current_temperature(self) -> float | None:
         """Return current temperature."""
         state = self._get_state_data()
@@ -156,7 +196,13 @@ class MysaClimate(
             )
         else:
             # Ambient Mode or non-Infloor device: prioritize Ambient temp
-            primary_keys = ["CorrectedTemp", "ambTemp", "ambient_t"]
+            primary_keys = [
+                "current_temp",
+                "current_temp_raw",
+                "CorrectedTemp",
+                "ambTemp",
+                "ambient_t",
+            ]
 
         val = self._extract_value(state, primary_keys)
 
@@ -185,7 +231,8 @@ class MysaClimate(
         if val is not None:
             try:
                 f_val = float(val)
-                return f_val if f_val != 0 else None
+                # Apply conversion
+                return self._convert_to_display(f_val if f_val != 0 else None)
             except (ValueError, TypeError):
                 pass
         return None
@@ -204,7 +251,31 @@ class MysaClimate(
         # Avoid resetting to 0.0 if device reports 0 (common in Dry mode)
         current = float(val) if val is not None and float(val) != 0 else None
         val = self._get_sticky_value("target_temperature", current)
-        return float(val) if val is not None else None
+        return self._convert_to_display(float(val)) if val is not None else None
+
+    @property
+    def target_temperature_low(self) -> float | None:
+        """Return the lower bound target temperature (Heat)."""
+        state = self._get_state_data()
+        if not state:
+            return None
+        val = self._extract_value(
+            state, ["target_heat", "heatSetpoint", "heatsetpoint"]
+        )
+        val = self._get_sticky_value("target_temperature_low", val)
+        return self._convert_to_display(float(val)) if val is not None else None
+
+    @property
+    def target_temperature_high(self) -> float | None:
+        """Return the upper bound target temperature (Cool)."""
+        state = self._get_state_data()
+        if not state:
+            return None
+        val = self._extract_value(
+            state, ["target_cool", "coolSetpoint", "coolsetpoint"]
+        )
+        val = self._get_sticky_value("target_temperature_high", val)
+        return self._convert_to_display(float(val)) if val is not None else None
 
     @property
     def current_humidity(self) -> float | None:
@@ -213,7 +284,7 @@ class MysaClimate(
         if not state:
             return None
 
-        val = self._extract_value(state, ["hum", "Humidity"])
+        val = self._extract_value(state, ["current_humidity", "hum", "Humidity"])
         if val is not None:
             return float(val)
         return None
@@ -221,8 +292,14 @@ class MysaClimate(
     def _get_state_data(self) -> dict[str, Any] | None:
         """Helper to get state data from coordinator."""
         if self.coordinator.data is None:
+            _LOGGER.debug("MysaClimate %s: coordinator.data is None", self._device_id)
             return None
-        return cast(dict[str, Any] | None, self.coordinator.data.get(self._device_id))
+        data = cast(dict[str, Any] | None, self.coordinator.data.get(self._device_id))
+        if data is None:
+            _LOGGER.debug(
+                "MysaClimate %s: device not in coordinator.data", self._device_id
+            )
+        return data
 
     def _extract_value(self, state: dict[str, Any] | None, keys: list[str]) -> Any:
         """Helper to extract a value from state dictionary."""
@@ -294,11 +371,10 @@ class MysaClimate(
             result = HVACMode.HEAT
 
         _LOGGER.debug(
-            "Device %s hvac_mode: mode_id=%s -> result=%s (raw keys: %s)",
+            "Device %s hvac_mode: mode_id=%s -> result=%s",
             self._device_id,
             mode_id,
             result,
-            list(state.keys()),
         )
 
         val = self._get_sticky_value("hvac_mode", result)
@@ -363,14 +439,21 @@ class MysaClimate(
         if temp is None:
             return
         try:
-            # Round to target step (default 0.5)
-            step = self._attr_target_temperature_step or 0.5
+            # Round to target step (default 0.5 C or 1.0 F)
+            # Logic: Input `temp` is in display unit (F or C).
+            # We want to store sticky in display unit, but send C to API.
+            step = self.target_temperature_step
             temp = round(temp / step) * step
 
-            # Optimistic update
+            # Optimistic update (in display unit)
             self._set_sticky_value("target_temperature", temp)
 
-            await self._api.set_target_temperature(self._device_id, temp)
+            # Convert to Celsius for API
+            temp_c = self._convert_from_display(temp)
+            # Ensure 0.5 precision for device
+            temp_c = round(temp_c * 2) / 2
+
+            await self._api.set_target_temperature(self._device_id, temp_c)
             self.async_write_ha_state()
         except Exception as e:
             if "target_temperature" in self._pending_updates:
@@ -412,17 +495,25 @@ class MysaClimate(
 class MysaACClimate(MysaClimate):
     """Mysa AC Climate Entity with fan and swing mode support."""
 
-    _attr_supported_features: Any = (
-        ClimateEntityFeature.TARGET_TEMPERATURE
-        | ClimateEntityFeature.TURN_OFF
-        | ClimateEntityFeature.TURN_ON
-        | ClimateEntityFeature.FAN_MODE
-        | ClimateEntityFeature.SWING_MODE
-    )
+    @property
+    def supported_features(self) -> ClimateEntityFeature:
+        """Return supported features for AC."""
+        features = (
+            ClimateEntityFeature.TARGET_TEMPERATURE
+            | ClimateEntityFeature.TURN_OFF
+            | ClimateEntityFeature.TURN_ON
+            | ClimateEntityFeature.FAN_MODE
+            | ClimateEntityFeature.SWING_MODE
+        )
+        # Enable range support if in HEAT_COOL mode for ST-V1-0 devices
+        if self.hvac_mode == HVACMode.HEAT_COOL:
+            features |= ClimateEntityFeature.TARGET_TEMPERATURE_RANGE
+        return features
+
     # AC temperature range (from SupportedCaps)
     _attr_min_temp = 16.0
     _attr_max_temp = 31.0
-    _attr_target_temperature_step = 1.0  # AC typically uses 1 degree steps
+    # _attr_target_temperature_step removed in favor of dynamic property
 
     def __init__(
         self,
@@ -445,6 +536,12 @@ class MysaACClimate(MysaClimate):
 
         # Track last used mode for smart turn-on
         self._last_mode: HVACMode | None = None
+
+    @property
+    def target_temperature_step(self) -> float:
+        """Return the supported step of target temperature for AC."""
+        # AC units typically use 1 degree steps in both C and F
+        return 1.0
 
     def _build_supported_options(self) -> None:
         """Build lists of supported modes from SupportedCaps."""
@@ -481,6 +578,25 @@ class MysaACClimate(MysaClimate):
                     fan_name = AC_FAN_MODES.get(speed)
                     if fan_name:
                         self._supported_fan_modes.append(fan_name)
+
+                # Fallback: If SupportedCaps only provides auto, use minimum fallback set
+                # This matches the Mysa app's manual control behavior which allows
+                # at least auto, low, and high regardless of backend restrictions
+                if (
+                    len(self._supported_fan_modes) == 1
+                    and self._supported_fan_modes[0] == "auto"
+                ):
+                    _LOGGER.info(
+                        "AC %s SupportedCaps only shows auto fan mode, "
+                        "applying fallback to match app manual control (auto, low, high)",
+                        self._device_id,
+                    )
+                    self._supported_fan_modes = [
+                        mode
+                        for speed in AC_FAN_MODES_FALLBACK
+                        if (mode := AC_FAN_MODES.get(speed)) is not None
+                    ]
+
                 break
 
         # Get swing positions from first available mode's capabilities
@@ -619,6 +735,15 @@ class MysaACClimate(MysaClimate):
     @property
     def swing_mode(self) -> str | None:
         """Return current swing mode (vertical)."""
+        # Hide swing mode if not in a mode that typically supports it
+        if self.hvac_mode not in (
+            HVACMode.HEAT,
+            HVACMode.COOL,
+            HVACMode.HEAT_COOL,
+            HVACMode.FAN_ONLY,
+        ):
+            return None
+
         state = self._get_state_data()
         if not state:
             return "auto"
@@ -667,16 +792,46 @@ class MysaACClimate(MysaClimate):
                 translation_placeholders={"error": str(e)},
             ) from e
 
-    async def async_set_target_temperature(self, temperature: float) -> None:
+    async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set new target temperature."""
         try:
-            step = self._attr_target_temperature_step or 1.0
+            step = self.target_temperature_step
+
+            # Handle range if provided (Heat/Cool Auto)
+            if (low := kwargs.get(ATTR_TARGET_TEMP_LOW)) is not None and (
+                high := kwargs.get(ATTR_TARGET_TEMP_HIGH)
+            ) is not None:
+                # Optimistic update
+                self._set_sticky_value("target_temperature_low", low)
+                self._set_sticky_value("target_temperature_high", high)
+
+                # Convert to C for API (AC usually expects int C)
+                low_c = self._convert_from_display(low)
+                high_c = self._convert_from_display(high)
+                # Ensure int for AC? API seems to handle floats but usually ACs use ints.
+                # Mysa app likely sends ints for AC.
+                # Let's round to nearest int for AC specifically to be safe?
+                # The API layer set_target_temperature_range just passes float.
+                # Let's keep consistent with MysaClimate base logic: round to step then convert.
+
+                await self._api.set_target_temperature_range(
+                    self._device_id, low_c, high_c
+                )
+                self.async_write_ha_state()
+                return
+
+            if (temperature := kwargs.get(ATTR_TEMPERATURE)) is None:
+                return
+
             temp = round(temperature / step) * step
 
             # Optimistic update
             self._set_sticky_value("target_temperature", temp)
 
-            await self._api.set_target_temperature(self._device_id, temp)
+            # Convert to C
+            temp_c = self._convert_from_display(temp)
+
+            await self._api.set_target_temperature(self._device_id, temp_c)
             self.async_write_ha_state()
         except Exception as e:
             if "target_temperature" in self._pending_updates:
@@ -746,3 +901,471 @@ class MysaACClimate(MysaClimate):
                 )
 
         await self.async_set_hvac_mode(target_mode)
+
+
+class MysaSTV10Climate(MysaClimate):
+    """Mysa ST-V1-0 Climate Entity (AWS Shadow)."""
+
+    @property
+    def supported_features(self) -> ClimateEntityFeature:
+        """Return supported features for ST-V1-0."""
+        features = ClimateEntityFeature.TURN_OFF | ClimateEntityFeature.TURN_ON
+        mode = self.hvac_mode
+        if mode == HVACMode.HEAT_COOL:
+            features |= ClimateEntityFeature.TARGET_TEMPERATURE_RANGE
+        elif mode in (HVACMode.HEAT, HVACMode.COOL):
+            features |= ClimateEntityFeature.TARGET_TEMPERATURE
+
+        # Linc devices often support fan mode
+        features |= ClimateEntityFeature.FAN_MODE
+
+        return features
+
+    # ST-V1-0 HVAC modes: 0=Off, 1=Auto, 3=Cool, 4=Heat, 7=Fan
+    _attr_hvac_modes = [
+        HVACMode.OFF,
+        HVACMode.HEAT_COOL,  # Auto
+        HVACMode.COOL,
+        HVACMode.HEAT,
+        HVACMode.FAN_ONLY,
+    ]
+
+    def __init__(
+        self,
+        coordinator: DataUpdateCoordinator[dict[str, Any]],
+        device_id: str,
+        device_data: dict[str, Any],
+        api: MysaApi,
+        entry: ConfigEntry[MysaData],
+    ) -> None:
+        """Initialize the ST-V1-0 climate entity."""
+        super().__init__(coordinator, device_id, device_data, api, entry)
+        self._last_mode: HVACMode | None = None
+        self._retry_fetch_task: asyncio.Task[None] | None = None
+
+        # Initialize temperature step from capabilities
+        cap = api.device_caps.get(device_id)
+        if cap:
+            self._attr_target_temperature_step = cap.target_temperature_step
+        else:
+            self._attr_target_temperature_step = 0.5
+
+    @property
+    def target_temperature_step(self) -> float:
+        """Return the supported step of target temperature from capabilities."""
+        if self.temperature_unit == UnitOfTemperature.FAHRENHEIT:
+            return 1.0
+        return float(self._attr_target_temperature_step)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Run when entity will be removed from hass."""
+        if self._retry_fetch_task:
+            self._retry_fetch_task.cancel()
+            self._retry_fetch_task = None
+        await super().async_will_remove_from_hass()
+
+    def _async_ensure_data(self) -> None:
+        """Ensure data exists by retrying fetch with Fibonacci backoff."""
+        if self._retry_fetch_task and not self._retry_fetch_task.done():
+            return
+
+        async def _fetch_loop() -> None:
+            # Fibonacci sequence: 1, 1, 2, 3, 5, 8, 13, 21, 34, 34...
+            delays = [1, 1, 2, 3, 5, 8, 13, 21, 34]
+            idx = 0
+            # ST-V1-0 shadows (heatSetpoint/coolSetpoint) are critical but sometimes slow to arrive.
+            # We fetch until we have at least one or hit a max attempt limit.
+            max_attempts = 20
+            for _attempt in range(max_attempts):
+                # Check if data arrived
+                state = self._get_state_data()
+                if state and ("target_heat" in state or "target_cool" in state):
+                    _LOGGER.debug(
+                        "MysaSTV10Climate %s: Setpoint data arrived, stopping fetch loop",
+                        self._device_id,
+                    )
+                    break
+
+                # Using public fetch method
+                await self._api.fetch_stv10_shadows(self._device_id)
+
+                # Wait for next delay
+                delay = delays[idx] if idx < len(delays) else 34
+                if idx < len(delays):
+                    idx += 1
+
+                await asyncio.sleep(delay)
+
+        self._retry_fetch_task = self.hass.async_create_task(_fetch_loop())
+
+    @property
+    def hvac_mode(self) -> HVACMode | None:
+        """Return hvac mode for ST-V1-0."""
+        state = self._get_state_data()
+
+        # Priority: Optimistic -> MQTT (md/mode) -> HTTP (Mode)
+        mode_id = self._extract_value(state, ["md", "mode", "Mode"])
+
+        mapping = {
+            0: HVACMode.OFF,
+            1: HVACMode.HEAT_COOL,
+            3: HVACMode.COOL,
+            4: HVACMode.HEAT,
+            7: HVACMode.FAN_ONLY,
+        }
+
+        # If getting a valid mode, resolve it
+        current_mode = None
+        if mode_id is not None:
+            current_mode = mapping.get(int(mode_id))
+
+        # Handle sticky/optimistic updates
+        val = self._get_sticky_value("hvac_mode", current_mode)
+
+        # If sticky value is valid, return it
+        if isinstance(val, HVACMode):
+            if current_mode is not None:
+                self._last_mode = current_mode
+            return val
+
+        # If data is missing (temporarily), stick to last known if available to prevent flapping
+        # This prevents 'capabilities updating too often' if the mode key flickers
+        if self._last_mode is not None:
+            return self._last_mode
+
+        return None
+
+    @property
+    def target_temperature(self) -> float | None:
+        """Return target temperature."""
+        state = self._get_state_data()
+        if not state:
+            _LOGGER.warning(
+                "MysaSTV10Climate %s: No state data available", self._device_id
+            )
+            if self.hass:
+                self._async_ensure_data()
+            return None
+
+        # ST-V1-0 has separate Heat/Cool targets
+        mode = self.hvac_mode
+
+        _LOGGER.debug(
+            "MysaSTV10Climate %s: determining target_temperature for mode '%s'",
+            self._device_id,
+            mode,
+        )
+
+        if mode in (HVACMode.OFF, HVACMode.FAN_ONLY, HVACMode.HEAT_COOL):
+            _LOGGER.debug(
+                "MysaSTV10Climate %s: target_temperature is None because mode is %s",
+                self._device_id,
+                mode,
+            )
+            return None
+
+        if mode == HVACMode.COOL:
+            temp = self._extract_value(
+                state, ["target_cool", "stpt", "sp", "SetPoint", "TstatSetpoint"]
+            )
+            _LOGGER.debug(
+                "MysaSTV10Climate %s: Cool mode, extracted target_temp=%s",
+                self._device_id,
+                temp,
+            )
+            if temp is not None:
+                return self._convert_to_display(float(temp))
+
+            # Fallback for UI visibility at startup
+            _LOGGER.debug(
+                "MysaSTV10Climate %s: Cool target is None, waiting for update",
+                self._device_id,
+            )
+            if self.hass:
+                self._async_ensure_data()
+            return None
+
+        # Default to Heat or generic
+        temp = self._extract_value(
+            state, ["target_heat", "stpt", "sp", "SetPoint", "TstatSetpoint"]
+        )
+        _LOGGER.debug(
+            "MysaSTV10Climate %s: Heat mode, extracted target_temp=%s",
+            self._device_id,
+            temp,
+        )
+        if temp is not None:
+            return self._convert_to_display(float(temp))
+
+        # Fallback for UI visibility at startup
+        _LOGGER.debug(
+            "MysaSTV10Climate %s: Heat target is None, waiting for update",
+            self._device_id,
+        )
+        if self.hass:
+            self._async_ensure_data()
+        return None
+
+    @property
+    def min_temp(self) -> float:
+        """Return the minimum temperature."""
+        state = self._get_state_data()
+        if state:
+            val = self._extract_value(state, ["min_setpoint"])
+            if val is not None:
+                return cast(float, self._convert_to_display(float(val)))
+        if self.hass:
+            self._async_ensure_data()
+        return cast(float, self._convert_to_display(self._attr_min_temp))
+
+    @property
+    def max_temp(self) -> float:
+        """Return the maximum temperature."""
+        state = self._get_state_data()
+        if state:
+            val = self._extract_value(state, ["max_setpoint"])
+            if val is not None:
+                return cast(float, self._convert_to_display(float(val)))
+        if self.hass:
+            self._async_ensure_data()
+        return cast(float, self._convert_to_display(self._attr_max_temp))
+
+    @property
+    def target_temperature_low(self) -> float | None:
+        """Return the lower bound target temperature."""
+        if self.hvac_mode != HVACMode.HEAT_COOL:
+            return None
+
+        state = self._get_state_data()
+        if not state:
+            return None
+        temp = self._extract_value(
+            state, ["target_heat", "heatSetpoint", "stpt", "sp", "SetPoint"]
+        )
+        if temp is not None:
+            return self._convert_to_display(float(temp))
+        return None
+
+    @property
+    def target_temperature_high(self) -> float | None:
+        """Return the upper bound target temperature."""
+        if self.hvac_mode != HVACMode.HEAT_COOL:
+            return None
+
+        state = self._get_state_data()
+        if not state:
+            return None
+        temp = self._extract_value(
+            state, ["target_cool", "coolSetpoint", "stpt", "sp", "SetPoint"]
+        )
+        if temp is not None:
+            return self._convert_to_display(float(temp))
+        return None
+
+    @property
+    def fan_mode(self) -> str | None:
+        """Return current fan mode for ST-V1-0."""
+        state = self._get_state_data()
+        if not state:
+            return "auto"
+
+        fan_val = self._extract_value(state, ["fan_mode", "fanMode"])
+        # ST-V1-0 Fan Modes: 0=Auto, 1=Low, 2=Medium, 3=High
+        mapping = {0: "auto", 1: "low", 2: "medium", 3: "high"}
+
+        if fan_val is not None:
+            return mapping.get(int(fan_val), "auto")
+
+        return "auto"
+
+    @property
+    def fan_modes(self) -> list[str]:
+        """Return list of supported fan modes."""
+        return ["auto", "low", "medium", "high"]
+
+    async def async_set_fan_mode(self, fan_mode: str) -> None:
+        """Set new fan mode."""
+        await self._api.set_stv10_fan_mode(self._device_id, fan_mode)
+        self.async_write_ha_state()
+
+    @property
+    # Justification: Handling multiple disjoint state checks for accurate HVAC action mapping.
+    def hvac_action(self) -> HVACAction:  # pylint: disable=too-many-return-statements, too-many-locals
+        """Return the current running hvac operation."""
+        if self.hvac_mode == HVACMode.OFF:
+            return HVACAction.OFF
+
+        state = self._get_state_data()
+        # ST-V1-0 hvacState bitmask: Bit 2 (val 4) = Compressor/Heat Running
+        hvac_state = (
+            self._extract_value(state, ["hvac_state", "hvacState"]) if state else None
+        )
+
+        if not state:
+            return HVACAction.IDLE
+
+        if hvac_state is not None:
+            is_running = int(hvac_state) & 4 != 0
+            if not is_running:
+                return HVACAction.IDLE
+        else:
+            # Fallback to direct relay state if bitmask is unavailable
+            w1 = self._extract_value(state, ["hvac_raw_W1"])
+            w2 = self._extract_value(state, ["hvac_raw_W2"])
+            y1 = self._extract_value(state, ["hvac_raw_Y1"])
+            y2 = self._extract_value(state, ["hvac_raw_Y2"])
+
+            heat_running = bool(w1 or w2)
+            cool_running = bool(y1 or y2)
+
+            if heat_running:
+                return HVACAction.HEATING
+            if cool_running:
+                return HVACAction.COOLING
+
+            # Not heating or cooling
+            return HVACAction.IDLE
+
+        # Determine from reported active_mode/mode (most accurate for ST-V1-0)
+        active_mode = self._extract_value(
+            state, ["active_mode", "activeMode", "mode", "md"]
+        )
+        active_mapping = {
+            0: HVACAction.IDLE,
+            1: HVACAction.HEATING,  # Auto -> Heating (default if running)
+            3: HVACAction.COOLING,
+            4: HVACAction.HEATING,
+            7: HVACAction.FAN,
+        }
+
+        if active_mode is not None and int(active_mode) != 1:
+            return active_mapping.get(int(active_mode), HVACAction.HEATING)
+
+        # Fallback to configured mode if active_mode is missing
+        mode = self.hvac_mode
+        simple_actions = {
+            HVACMode.COOL: HVACAction.COOLING,
+            HVACMode.FAN_ONLY: HVACAction.FAN,
+            HVACMode.HEAT: HVACAction.HEATING,
+        }
+        if mode and (action := simple_actions.get(mode)):
+            return action
+
+        # Auto Mode Inference
+        current = self.current_temperature
+        low = self.target_temperature_low
+        high = self.target_temperature_high
+
+        if current is not None:
+            if low is not None and current < low + 1.0:
+                return HVACAction.HEATING
+            if high is not None and current > high - 1.0:
+                return HVACAction.COOLING
+
+        # Fallback for Auto/Unknown
+        return HVACAction.HEATING
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return extra state attributes."""
+        attrs = super().extra_state_attributes
+        state = self._get_state_data()
+        if state:
+            attrs["ip_address"] = state.get("ip")
+            attrs["firmware_version"] = state.get("FirmwareVersion")
+            attrs["lockout_modes"] = state.get("lockout_modes")
+            attrs["filter_life"] = state.get("filter_life")
+            attrs["rssi"] = state.get("rssi")
+        return attrs
+
+    @property
+    def hvac_modes(self) -> list[HVACMode]:
+        """Return supported hvac modes."""
+        return self._attr_hvac_modes
+
+    async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
+        """Set new target hvac mode."""
+        try:
+            # ST-V1-0 Mapping
+            modes = {
+                HVACMode.OFF: 0,
+                HVACMode.HEAT_COOL: 1,
+                HVACMode.COOL: 3,
+                HVACMode.HEAT: 4,
+                HVACMode.FAN_ONLY: 7,
+            }
+            mode_int = modes.get(hvac_mode, 4)
+
+            # Optimistic update
+            self._set_sticky_value("hvac_mode", hvac_mode)
+
+            await self._api.set_stv10_hvac_mode(self._device_id, mode_int)
+            self.async_write_ha_state()
+        except Exception as e:
+            if "hvac_mode" in self._pending_updates:
+                del self._pending_updates["hvac_mode"]
+            self.async_write_ha_state()
+            raise HomeAssistantError(f"Failed to set mode: {e}") from e
+
+    async def async_set_temperature(self, **kwargs: Any) -> None:
+        """Set new target temperature."""
+        temp_low = kwargs.get(ATTR_TARGET_TEMP_LOW)
+        temp_high = kwargs.get(ATTR_TARGET_TEMP_HIGH)
+
+        if temp_low is not None or temp_high is not None:
+            # Range setting (Auto Mode)
+            try:
+                step = self.target_temperature_step
+                if temp_low is not None:
+                    temp_low = round(temp_low / step) * step
+                if temp_high is not None:
+                    temp_high = round(temp_high / step) * step
+
+                if temp_low is not None and temp_high is not None:
+                    # Optimistic update
+                    self._set_sticky_value("target_temperature_low", temp_low)
+                    self._set_sticky_value("target_temperature_high", temp_high)
+
+                    # Convert to C for API
+                    low_c = self._convert_from_display(temp_low)
+                    high_c = self._convert_from_display(temp_high)
+                    # Round to 0.5 for device
+                    low_c = round(low_c * 2) / 2
+                    high_c = round(high_c * 2) / 2
+
+                    await self._api.set_target_temperature_range(
+                        self._device_id, low_c, high_c
+                    )
+                elif temp_low is not None:
+                    self._set_sticky_value("target_temperature_low", temp_low)
+                    val_c = round(self._convert_from_display(temp_low) * 2) / 2
+                    await self._api.set_stv10_heat_setpoint(self._device_id, val_c)
+                elif temp_high is not None:
+                    self._set_sticky_value("target_temperature_high", temp_high)
+                    val_c = round(self._convert_from_display(temp_high) * 2) / 2
+                    await self._api.set_stv10_cool_setpoint(self._device_id, val_c)
+
+                self.async_write_ha_state()
+                return  # Exit early
+            except Exception as e:
+                self.async_write_ha_state()
+                raise HomeAssistantError(f"Failed to set temp range: {e}") from e
+
+        temp = kwargs.get(ATTR_TEMPERATURE)
+        if temp is None:
+            return
+        try:
+            step = self.target_temperature_step
+            temp = round(temp / step) * step
+
+            # Optimistic update
+            self._set_sticky_value("target_temperature", temp)
+
+            val_c = round(self._convert_from_display(temp) * 2) / 2
+            await self._api.set_stv10_target_temperature(self._device_id, val_c)
+            self.async_write_ha_state()
+        except Exception as e:
+            if "target_temperature" in self._pending_updates:
+                del self._pending_updates["target_temperature"]
+            self.async_write_ha_state()
+            raise HomeAssistantError(f"Failed to set temp: {e}") from e

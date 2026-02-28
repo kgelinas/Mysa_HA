@@ -1,42 +1,38 @@
 {
     "config": {
-        "step": {
-            "user": {
-                "title": "Mysa Authentication",
-                "description": "Enter your Mysa account credentials.",
-                "data": {
-                    "username": "Username (Email)",
-                    "password": "Password"
-                }
-            },
-            "reauth_confirm": {
-                "title": "Re-authenticate Mysa",
-                "description": "The password for {username} is invalid. Please enter the new password.",
-                "data": {
-                    "username": "Username (Email)",
-                    "password": "Password"
-                }
-            }
+        "abort": {
+            "reauth_successful": "Re-authentication was successful.",
+            "single_instance_allowed": "Only a single configuration of Mysa is allowed."
         },
         "error": {
             "invalid_auth": "Invalid authentication",
-            "unknown": "Unexpected error",
-            "reauth_account_mismatch": "The email provided does not match the existing configuration."
+            "reauth_account_mismatch": "The email provided does not match the existing configuration.",
+            "unknown": "Unexpected error"
         },
-        "abort": {
-            "single_instance_allowed": "Only a single configuration of Mysa is allowed.",
-            "reauth_successful": "Re-authentication was successful."
-        }
-    },
-    "options": {
         "step": {
-            "init": {
-                "title": "Mysa Options",
-                "description": "Configure advanced device settings.",
+            "reauth_confirm": {
                 "data": {
-                    "upgraded_lite_devices": "Upgraded Lite Devices (Force Type 5)",
-                    "estimated_max_current": "Estimated Max Current (Amps)"
-                }
+                    "password": "Password",
+                    "username": "Username (Email)"
+                },
+                "data_description": {
+                    "password": "Your new Mysa account password.",
+                    "username": "The email address associated with your Mysa account."
+                },
+                "description": "The password for {username} is invalid. Please enter the new password.",
+                "title": "Re-authenticate Mysa"
+            },
+            "user": {
+                "data": {
+                    "password": "Password",
+                    "username": "Username (Email)"
+                },
+                "data_description": {
+                    "password": "Your Mysa account password.",
+                    "username": "The email address associated with your Mysa account."
+                },
+                "description": "Enter your Mysa account credentials.",
+                "title": "Mysa Authentication"
             }
         }
     },
@@ -52,16 +48,34 @@
             }
         },
         "number": {
-            "min_brightness": {
-                "name": "Minimum Brightness"
+            "auto_deadband": {
+                "name": "Auto Deadband"
             },
             "max_brightness": {
-                "name": "Maximum Brightness"
+                "name": "Max Brightness"
+            },
+            "max_setpoint": {
+                "name": "Max Setpoint"
+            },
+            "min_brightness": {
+                "name": "Min Brightness"
+            },
+            "min_setpoint": {
+                "name": "Min Setpoint"
             }
         },
         "select": {
             "horizontal_swing": {
-                "name": "Horizontal Swing"
+                "name": "Horizontal Swing",
+                "state": {
+                    "auto": "Auto",
+                    "center": "Center",
+                    "left": "Left",
+                    "left_center": "Left Center",
+                    "right": "Right",
+                    "right_center": "Right Center",
+                    "right_wide": "Right Wide"
+                }
             },
             "sensor_mode": {
                 "name": "Sensor Mode",
@@ -72,76 +86,169 @@
             }
         },
         "sensor": {
-            "ip_address": {
-                "name": "IP Address"
+            "adv_aux_uses_fan": {
+                "name": "Aux Uses Fan"
             },
-            "serial_number": {
-                "name": "Serial Number"
+            "adv_cool_fan_delay": {
+                "name": "Cool Fan Delay"
             },
-            "power": {
-                "name": "Power"
+            "adv_cool_fan_run_on": {
+                "name": "Cool Fan Run-on"
             },
-            "voltage": {
-                "name": "Voltage"
+            "adv_cool_stage_two_delay": {
+                "name": "Stage 2 Cool Delay"
             },
-            "energy": {
-                "name": "Energy"
+            "adv_cool_stage_two_delta": {
+                "name": "Stage 2 Cool Delta"
             },
-            "cost": {
-                "name": "Electricity Rate"
+            "adv_cool_uses_fan": {
+                "name": "Cool Uses Fan"
             },
-            "estimated_current": {
-                "name": "Estimated Current"
+            "adv_cool_when_reversed": {
+                "name": "Cool When Reversed"
             },
-            "rssi": {
-                "name": "RSSI"
+            "adv_fan_period": {
+                "name": "Fan Period"
+            },
+            "adv_fan_ramp": {
+                "name": "Fan Ramp"
+            },
+            "adv_fan_runtime": {
+                "name": "Fan Runtime"
+            },
+            "adv_heat_fan_delay": {
+                "name": "Heat Fan Delay"
+            },
+            "adv_heat_fan_run_on": {
+                "name": "Heat Fan Run-on"
+            },
+            "adv_heat_stage_two_delay": {
+                "name": "Stage 2 Heat Delay"
+            },
+            "adv_heat_stage_two_delta": {
+                "name": "Stage 2 Heat Delta"
+            },
+            "adv_heat_uses_fan": {
+                "name": "Heat Uses Fan"
             },
             "brightness": {
                 "name": "Brightness"
             },
-            "timezone": {
-                "name": "Time Zone"
-            },
-            "min_setpoint": {
-                "name": "Minimum Setpoint"
-            },
-            "max_setpoint": {
-                "name": "Maximum Setpoint"
-            },
-            "duty_cycle": {
-                "name": "Duty Cycle"
-            },
-            "max_current": {
-                "name": "Maximum Current"
-            },
-            "heatsink_temperature": {
-                "name": "HeatSink Temperature"
-            },
-            "infloor_temperature": {
-                "name": "Infloor Temperature"
+            "cost": {
+                "name": "Electricity Rate"
             },
             "current": {
                 "name": "Current"
             },
-            "temperature": {
-                "name": "Temperature"
+            "duty_cycle": {
+                "name": "Duty Cycle"
+            },
+            "emergency_heat_on_time": {
+                "name": "Runtime Emergency Heat"
+            },
+            "encryption_enabled": {
+                "name": "Encryption Enabled"
+            },
+            "energy": {
+                "name": "Energy"
+            },
+            "estimated_current": {
+                "name": "Estimated Current"
+            },
+            "fan_on_time": {
+                "name": "Runtime Fan"
+            },
+            "fan_sequence": {
+                "name": "Fan Sequence"
+            },
+            "fault_test": {
+                "name": "Fault Test"
+            },
+            "free_heap": {
+                "name": "Free Heap"
+            },
+            "heatsink_temperature": {
+                "name": "Heatsink Temperature"
             },
             "humidity": {
                 "name": "Humidity"
+            },
+            "hvac_config_index": {
+                "name": "HVAC Config Index"
+            },
+            "infloor_temperature": {
+                "name": "Floor Temperature"
+            },
+            "ip_address": {
+                "name": "IP Address"
+            },
+            "max_current": {
+                "name": "Max Current"
+            },
+            "max_setpoint": {
+                "name": "Max Setpoint"
+            },
+            "min_setpoint": {
+                "name": "Min Setpoint"
+            },
+            "multiple_fan_speeds": {
+                "name": "Multiple Fan Speeds"
+            },
+            "on_time": {
+                "name": "Runtime Total"
+            },
+            "power": {
+                "name": "Active Power"
+            },
+            "priv_key_ok": {
+                "name": "Private Key Status"
+            },
+            "pub_key_hash": {
+                "name": "Public Key Hash"
+            },
+            "rssi": {
+                "name": "Signal Strength"
+            },
+            "secure_boot": {
+                "name": "Secure Boot"
+            },
+            "stage_one_cool_on_time": {
+                "name": "Runtime Cool Stage 1"
+            },
+            "stage_two_cool_on_time": {
+                "name": "Runtime Cool Stage 2"
+            },
+            "stage_two_on_time": {
+                "name": "Runtime Stage 2"
+            },
+            "temperature": {
+                "name": "Temperature"
+            },
+            "timezone": {
+                "name": "Time Zone"
+            },
+            "voltage": {
+                "name": "Voltage"
             }
         },
         "switch": {
-            "lock": {
-                "name": "Lock"
-            },
-            "proximity": {
-                "name": "Proximity Mode"
+            "allow_auto_mode": {
+                "name": "Allow Auto Mode"
             },
             "auto_brightness": {
                 "name": "Auto Brightness"
             },
             "climate_plus": {
                 "name": "Climate+"
+            },
+            "lock": {
+                "name": "Lock"
+            },
+            "proximity": {
+                "name": "Proximity Mode"
+            },
+            "temperature_format": {
+                "name": "Display Format"
             }
         },
         "update": {
@@ -151,60 +258,77 @@
         }
     },
     "exceptions": {
-        "set_temperature_failed": {
-            "message": "Failed to set temperature: {error}"
-        },
-        "set_hvac_mode_failed": {
-            "message": "Failed to set HVAC mode: {error}"
+        "set_ac_fan_mode_failed": {
+            "message": "Failed to set AC fan mode: {error}"
         },
         "set_ac_hvac_mode_failed": {
             "message": "Failed to set AC HVAC mode: {error}"
         },
-        "set_ac_temperature_failed": {
-            "message": "Failed to set AC target temperature: {error}"
-        },
-        "set_ac_fan_mode_failed": {
-            "message": "Failed to set AC fan mode: {error}"
-        },
         "set_ac_swing_mode_failed": {
             "message": "Failed to set AC swing mode: {error}"
         },
-        "set_min_brightness_failed": {
-            "message": "Failed to set min brightness: {error}"
-        },
-        "set_max_brightness_failed": {
-            "message": "Failed to set max brightness: {error}"
-        },
-        "set_lock_failed": {
-            "message": "Failed to set lock state: {error}"
-        },
-        "set_auto_brightness_failed": {
-            "message": "Failed to set auto brightness: {error}"
-        },
-        "set_proximity_failed": {
-            "message": "Failed to set proximity mode: {error}"
-        },
-        "set_climate_plus_failed": {
-            "message": "Failed to set Climate+: {error}"
+        "set_ac_temperature_failed": {
+            "message": "Failed to set AC temperature: {error}"
         },
         "set_horizontal_swing_failed": {
             "message": "Failed to set horizontal swing: {error}"
         },
+        "set_hvac_mode_failed": {
+            "message": "Failed to set HVAC mode: {error}"
+        },
         "set_sensor_mode_failed": {
             "message": "Failed to set sensor mode: {error}"
+        },
+        "set_temperature_failed": {
+            "message": "Failed to set temperature: {error}"
         }
     },
     "issues": {
         "auth_failed": {
-            "title": "Authentication Failed",
             "fix_flow": {
                 "step": {
                     "confirm": {
-                        "title": "Re-authenticate Mysa",
-                        "description": "Authentication with the Mysa API failed: {error}\n\nPlease reconfigure the integration with valid credentials."
+                        "description": "Authentication with the Mysa API failed: {error}\n\nPlease reconfigure the integration with valid credentials.",
+                        "title": "Re-authenticate Mysa"
                     }
                 }
+            },
+            "title": "Authentication Failed"
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "data": {
+                    "estimated_max_current": "Estimated Max Current (Amps)",
+                    "simulated_energy": "Force Simulated Energy",
+                    "upgraded_lite_devices": "Upgraded Lite Devices (Force Type 5)"
+                },
+                "data_description": {
+                    "estimated_max_current": "Estimated current (Amps) for Lite devices for simulated energy calculation.",
+                    "simulated_energy": "Force all devices to use simulated power calculation.",
+                    "upgraded_lite_devices": "Select devices using the full feature set (upgraded from Lite)."
+                },
+                "description": "Configure advanced device settings.",
+                "title": "Mysa Options"
             }
+        }
+    },
+    "services": {
+        "downgrade_lite_device": {
+            "description": "Reverts a Mysa thermostat from Full features back to Lite (Downgrade).",
+            "name": "Revert Lite Device"
+        },
+        "upgrade_lite_device": {
+            "description": "Upgrades a Mysa Lite thermostat to Full features (Magic Upgrade).",
+            "name": "Upgrade Lite Device"
+        }
+    },
+    "system_health": {
+        "info": {
+            "api_connected": "API Connected",
+            "devices": "Devices",
+            "mqtt_listener": "MQTT Listener"
         }
     }
 }

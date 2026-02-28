@@ -8,6 +8,7 @@ import time
 from collections.abc import Callable
 from typing import Any, cast
 
+import websockets
 from homeassistant.core import HomeAssistant
 
 from . import mqtt
@@ -32,6 +33,7 @@ class MysaRealtime:
     """Mysa MQTT Realtime Coordinator."""
 
     # pylint: disable=too-many-instance-attributes
+    # Justification: Manages complex websocket state and authentication.
     # Justification: Class maintains complex MQTT state and connection parameters.
 
     def __init__(
@@ -51,11 +53,25 @@ class MysaRealtime:
         self._mqtt_should_reconnect = True
         self._mqtt_reconnect_delay = 1.0
         self._devices_ids: list[str] = []  # List of device IDs to subscribe to
+        self._stv10_devices: list[str] = []  # List of ST-V1-0 device IDs
+        self._use_batch = False  # Disabled in Core (not needed for history)
+        self._batch_retry_time = 0.0
+        self._last_packet_time = 0.0  # Time of last received MQTT packet
 
     @property
     def is_running(self) -> bool:
         """Return if MQTT listener is running."""
         return bool(self._mqtt_listener_task and not self._mqtt_listener_task.done())
+
+    @property
+    def last_packet_time(self) -> float:
+        """Return timestamp of last received packet."""
+        return self._last_packet_time
+
+    @property
+    def is_connected(self) -> bool:
+        """Return if MQTT is currently connected and authenticated."""
+        return bool(self._mqtt_connected.is_set() and self._mqtt_ws is not None)
 
     async def wait_until_connected(self, timeout: float = 10.0) -> bool:
         """Wait for MQTT connection to be established."""
@@ -65,9 +81,28 @@ class MysaRealtime:
         except TimeoutError:
             return False
 
-    def set_devices(self, device_ids: list[str]) -> None:
+    def set_devices(
+        self, device_ids: list[str], stv10_devices: list[str] | None = None
+    ) -> None:
         """Update list of devices to subscribe to."""
-        self._devices_ids = device_ids
+        if self._devices_ids != device_ids or self._stv10_devices != (
+            stv10_devices or []
+        ):
+            _LOGGER.debug(
+                "Updating device list (connected=%s): %d devices -> %d devices",
+                self._mqtt_connected.is_set(),
+                len(self._devices_ids),
+                len(device_ids),
+            )
+            self._devices_ids = device_ids
+            self._stv10_devices = stv10_devices or []
+
+            # If connected, force a reconnect to update subscriptions
+            if self._mqtt_connected.is_set() and self._mqtt_ws:
+                _LOGGER.info(
+                    "Device list changed, forcing MQTT reconnect to update subscriptions"
+                )
+                asyncio.create_task(self._close_websocket())
 
     async def start(self) -> None:
         """Start the persistent MQTT listener."""
@@ -123,6 +158,7 @@ class MysaRealtime:
                 _LOGGER.debug("MQTT listener task cancelled")
                 raise
             except Exception as e:  # pylint: disable=broad-except
+                # Justification: Must catch all errors to keep the keep-alive loop running.
                 # Justification: Catch-all to ensure the listener loop keeps running despite
                 # unexpected errors.
                 if not first_failure_logged:
@@ -164,8 +200,12 @@ class MysaRealtime:
         try:
             await self._perform_mqtt_handshake(ws)
             self._mqtt_connected.set()
+            self._last_packet_time = time.time()  # Initialize on connect
             await self._run_mqtt_loop(ws)
         except Exception as listen_error:
+            # If we failed during subscription/handshake specifically, and batch was on,
+            # this might be the 'causes disconnects' issue. Fallback for next time.
+
             _LOGGER.debug(
                 "MQTT listen error (will reconnect): %s", listen_error, exc_info=True
             )
@@ -180,6 +220,9 @@ class MysaRealtime:
                 pass
 
     async def _perform_mqtt_handshake(self, ws: Any) -> None:
+        # pylint: disable=too-many-locals,too-many-branches
+        # Justification: Handles complex message routing and error handling.
+        # Justification: Handles complex ST-V1-0 shadow subscriptions
         """Perform MQTT connect and subscribe handshake."""
         # Connect
         connect_pkt = create_connect_packet()
@@ -195,21 +238,87 @@ class MysaRealtime:
 
         # Subscribe
         if self._devices_ids:
-            # Disable batch for now as it causes disconnects on some accounts/brokers
-            sub_topics = build_subscription_topics(
-                list(self._devices_ids), include_batch=False
-            )
-            if sub_topics:
-                sub_pkt = mqtt.subscribe(1, sub_topics)
+            # Chunk subscriptions to avoid broker limits (e.g. AWS IoT limit is 8 topics per packet)
+            # We chunk by device to keep it simple and safe.
+            chunk_size = 2
+            device_ids_list = list(self._devices_ids)
+
+            for i in range(0, len(device_ids_list), chunk_size):
+                chunk_devs = device_ids_list[i : i + chunk_size]
+                sub_topics = build_subscription_topics(
+                    chunk_devs,
+                    include_batch=self._use_batch,
+                    stv10_devices=self._stv10_devices,
+                )
+                if not sub_topics:
+                    continue
+
+                # Packet ID starting at 1 and incrementing
+                sub_pkt = mqtt.subscribe(i // chunk_size + 1, sub_topics)
                 await ws.send(sub_pkt)
 
-                # Suback
-                resp = await ws.recv()
-                pkt = parse_mqtt_packet(resp)
-                if not isinstance(pkt, mqtt.SubackPacket):
-                    raise RuntimeError(f"Expected SUBACK, got {pkt}")
+                # Wait for SUBACK, ignoring any intervening PUBLISH packets
+                while True:
+                    resp = await ws.recv()
+                    pkt = parse_mqtt_packet(resp)
+                    if isinstance(pkt, mqtt.SubackPacket):
+                        break
+                    if not isinstance(pkt, mqtt.PublishPacket):
+                        raise RuntimeError(f"Expected SUBACK, got {pkt}")
+                    # Ignore PUBLISH packets during handshake
 
-                _LOGGER.debug("Subscribed to %d device topics", len(self._devices_ids))
+                # Verify individual return codes (MQTT 3.1.1 spec: 0x80 is failure)
+                # Topics for this chunk: [Out, In, Batch (optional), Shadow (for ST-V1-0)]
+                for j, device_id in enumerate(chunk_devs):
+                    # Count topics for this device
+                    topics_for_device = 2  # Out, In (always present)
+                    if self._use_batch:
+                        topics_for_device += 1
+                    is_stv10 = device_id in self._stv10_devices
+                    if is_stv10:
+                        topics_for_device += 1  # Shadow wildcard
+
+                    # Calculate offset in return_codes for this device
+                    offset = sum(
+                        2
+                        + (1 if self._use_batch else 0)
+                        + (1 if dev_id in self._stv10_devices else 0)
+                        for k, dev_id in enumerate(chunk_devs)
+                        if k < j
+                    )
+
+                    # Check Out/In topics (required)
+                    if (
+                        pkt.return_codes[offset] == 0x80
+                        or pkt.return_codes[offset + 1] == 0x80
+                    ):
+                        raise RuntimeError(
+                            f"Broker rejected standard topics for device {device_id}"
+                        )
+
+                    # Check Batch topic (optional fallback)
+                    if self._use_batch:
+                        if pkt.return_codes[offset + 2] == 0x80:
+                            _LOGGER.warning(
+                                "Broker rejected batch topic for device %s. Monitoring "
+                                "will continue without high-precision data.",
+                                device_id,
+                            )
+
+                    # Check Shadow wildcard for ST-V1-0 devices
+                    if is_stv10:
+                        shadow_offset = offset + 2 + (1 if self._use_batch else 0)
+                        if pkt.return_codes[shadow_offset] == 0x80:
+                            raise RuntimeError(
+                                f"Broker rejected shadow wildcard topic for "
+                                f"ST-V1-0 device {device_id}"
+                            )
+                        _LOGGER.info(
+                            "ST-V1-0 device %s: Subscribed to shadow topic $aws/things/%s/shadow/#",
+                            device_id,
+                            device_id,
+                        )
+            _LOGGER.debug("Subscribed to %d device topics", len(self._devices_ids))
 
     async def _run_mqtt_loop(self, ws: Any) -> None:
         """Run the main MQTT message and keepalive loop."""
@@ -224,6 +333,7 @@ class MysaRealtime:
                 msg = await asyncio.wait_for(
                     ws.recv(), timeout=min(time_until_ping, 20.0)
                 )
+                self._last_packet_time = time.time()  # Got some bytes!
 
                 try:
                     pkt = parse_mqtt_packet(msg)
@@ -242,6 +352,12 @@ class MysaRealtime:
 
             except TimeoutError:
                 pass
+            except websockets.exceptions.ConnectionClosedOK:
+                _LOGGER.debug("MQTT connection closed gracefully (1000 OK)")
+                raise
+            except websockets.exceptions.ConnectionClosedError as recv_error:
+                _LOGGER.warning("MQTT connection closed with error: %s", recv_error)
+                raise
             except Exception as recv_error:
                 _LOGGER.error(
                     "Error receiving MQTT message: %s", recv_error, exc_info=True
@@ -257,35 +373,70 @@ class MysaRealtime:
                     _LOGGER.error("Failed to send keepalive ping: %s", e, exc_info=True)
                     raise
 
-    async def _process_mqtt_publish(self, pkt: Any) -> None:
+            # Check for silent (zombie) connection: If no packet received for 10 minutes,
+            # force a reconnect. AWS session expiry is 12h, but we want faster recovery.
+            if time.time() - self._last_packet_time > 600:
+                _LOGGER.warning(
+                    "MQTT heartbeat watchdog: No traffic received for 600s, forcing reconnection..."
+                )
+                raise RuntimeError("MQTT silence watchdog triggered")
+
+    async def _process_mqtt_publish(self, packet: mqtt.PublishPacket) -> None:
+        # pylint: disable=too-many-branches
+        # Justification: Handles various MQTT topics including AWS shadows and legacy messages
         """Process an MQTT publish packet."""
         try:
-            payload = json.loads(pkt.payload, strict=False)
-            topic = pkt.topic
+            payload = json.loads(packet.payload, strict=False)
+            topic = packet.topic
             _LOGGER.debug("Received MQTT message on %s: %s", topic, payload)
 
-            # Extract Device ID logic -- maybe move to utility or keep here
-            # Topic format: /v1/dev/{device_id}/out
+            # Extract Device ID logic
             topic_parts = topic.split("/")
             device_id = None
-            if len(topic_parts) >= 4:
-                safe_id = topic_parts[3]
-                # We need to map safe_id back to real ID if they differ (colons)
-                # Currently simple normalization is done in api.py.
-                # Here we default to safe_id.
-                device_id = safe_id
+
+            if topic.startswith("$aws/things/"):
+                # Topic format: $aws/things/{device_id}/shadow/...
+                if len(topic_parts) >= 3:
+                    device_id = topic_parts[2]
+            elif len(topic_parts) >= 4 and topic_parts[3]:
+                # Topic format: /v1/dev/{device_id}/out
+                device_id = topic_parts[3]
 
             if device_id:
+                # Extract shadow name from topic if applicable
+                shadow_name = None
+                if topic.startswith("$aws/things/") and "shadow/name/" in topic:
+                    # format: $aws/things/{id}/shadow/name/{shadow_name}/update/...
+                    # or: $aws/things/{id}/shadow/name/{shadow_name}/get/accepted
+                    if len(topic_parts) > 5 and topic_parts[5]:
+                        shadow_name = topic_parts[5]
+                        _LOGGER.debug(
+                            "_process_mqtt_publish: Extracted shadow_name=%s from topic=%s",
+                            shadow_name,
+                            topic,
+                        )
+                    else:
+                        _LOGGER.warning(
+                            "Malformed shadow topic (missing shadow name): %s",
+                            topic,
+                        )
+                        return
+
                 # Extract state
-                state_update = self._extract_state_update(payload)
+                state_update = self._extract_state_update(payload, shadow_name)
                 if state_update:
                     await self._on_update(device_id, state_update, True)
 
         except Exception as e:
             _LOGGER.error("Error processing MQTT publish: %s", e, exc_info=True)
 
-    def _extract_state_update(self, payload: dict[str, Any]) -> dict[str, Any] | None:
-        """Extract state update from payload."""
+    def _extract_state_update(
+        self, payload: dict[str, Any], shadow_name: str | None = None
+    ) -> dict[str, Any] | None:
+        # pylint: disable=too-many-branches
+        # Justification: Handles various message types and shadow formats
+        """Extract state update from MQTT payload."""
+        # Special handlers (MsgType 1, 40, etc.)
         msg_type_raw = payload.get("msg") or payload.get("MsgType")
         try:
             msg_type = int(msg_type_raw) if msg_type_raw is not None else None
@@ -300,11 +451,41 @@ class MysaRealtime:
             4: self._extract_log_info,
             3: self._extract_batch_info,
             61: lambda p: cast(
-                dict[str, Any] | None, {"FirmwareVersion": str(p.get("version", ""))}
+                dict[str, Any] | None,
+                {
+                    "FirmwareVersion": str(p.get("version", "")),
+                    **({"_shadow_name": shadow_name} if shadow_name else {}),
+                },
             ),
         }
         if msg_type is not None and msg_type in special_handlers:
-            return special_handlers[msg_type](payload)
+            handler = special_handlers[msg_type]
+            return handler(payload)
+
+        # Special handling for AWS IoT Device Shadow messages
+        if shadow_name or ("state" in payload and "version" in payload):
+            # Skip delta messages - they only contain differences, not full state
+            # We get the full state from /update/accepted and /get/accepted topics
+            if shadow_name and "delta" in str(payload.get("metadata", {})):
+                _LOGGER.debug("Skipping shadow delta message for %s", shadow_name)
+                return None
+
+            _LOGGER.debug(
+                "_extract_state_update: Detected shadow document (shadow_name=%s)",
+                shadow_name,
+            )
+            shadow_upd = self._extract_shadow_state(payload)
+            if shadow_upd:
+                if shadow_name:
+                    shadow_upd["_shadow_name"] = shadow_name
+                _LOGGER.debug(
+                    "_extract_state_update: Extracted shadow state: %s", shadow_upd
+                )
+            else:
+                _LOGGER.debug(
+                    "_extract_state_update: No reported/desired state in shadow document"
+                )
+            return shadow_upd
 
         # Standard processing
         msg_ts = payload.get("time") or payload.get("Timestamp")
@@ -375,12 +556,48 @@ class MysaRealtime:
             if not parsed:
                 return None
 
-            # Use the latest reading from the batch
-            latest = parsed[-1]
-            return latest
+            # We don't extract history or perform live updates in Core anymore
+            # Batch data is redundant with standard messages.
+            return {}
         except Exception as e:
             _LOGGER.warning("Error parsing batch readings: %s", e)
             return None
+
+    def _extract_shadow_state(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        """Extract state from AWS Shadow document."""
+        # Save root level timestamp/version before handling nested structure
+        root_timestamp = payload.get("timestamp")
+        root_version = payload.get("version")
+
+        # Handle 'documents' topic structure which nests everything under 'current'
+        if "current" in payload and isinstance(payload["current"], dict):
+            payload = payload["current"]
+
+        state = payload.get("state", {})
+        reported = state.get("reported", {})
+        desired = state.get("desired", {})
+
+        # Merge reported and desired, prioritizing desired
+        # This provides immediate feedback for commands (optimistic UI)
+        combined = {}
+        combined.update(reported)
+        combined.update(desired)
+
+        if not combined:
+            return None
+
+        update = {}
+        update.update(combined)
+
+        # Timestamp (prioritize nested if present, otherwise root)
+        if ts := payload.get("timestamp", root_timestamp):
+            update["Timestamp"] = int(ts)
+
+        # Version (prioritize nested if present, otherwise root)
+        if version := payload.get("version", root_version):
+            update["version"] = int(version)
+
+        return update
 
     def _extract_body_state(self, body: Any) -> dict[str, Any] | None:
         """Extract state from body."""
@@ -402,7 +619,8 @@ class MysaRealtime:
         # Fallback: if no state/cmd, use body itself
         return cast(dict[str, Any], body)
 
-    async def send_command(
+    # Justification: Complex signature required to form varied command payloads and types.
+    async def send_command(  # pylint: disable=too-many-locals
         self,
         device_id: str,
         payload: dict[str, Any],
@@ -410,6 +628,7 @@ class MysaRealtime:
         msg_type: int = 44,
         src_type: int = 100,
         wrap: bool = True,
+        use_persistent_only: bool = False,
     ) -> None:
         """Send a command to a device."""
         if not user_id:
@@ -461,10 +680,40 @@ class MysaRealtime:
                 )
                 # Fall through to one-off fallback
 
+        # If caller only wants persistent (e.g. periodic polls to avoid AWS rate limits)
+        if use_persistent_only:
+            _LOGGER.debug(
+                "Skipping one-off fallback for %s (use_persistent_only=True)", device_id
+            )
+            return
+
         # Fallback to one-off
         await self._send_one_off_command(
             device_id, payload, user_id, msg_type, src_type, wrap
         )
+
+    async def publish(self, topic: str, payload: dict[str, Any] | str) -> None:
+        """Publish arbitrary message to a specific topic (e.g. AWS Shadow)."""
+        if not self._mqtt_ws:
+            _LOGGER.warning(
+                "Attempted to publish to %s but MQTT is not connected", topic
+            )
+            return
+
+        if isinstance(payload, dict):
+            json_payload = json.dumps(payload)
+        else:
+            json_payload = str(payload)
+
+        try:
+            # QoS 1 for control messages
+            pub_pkt = mqtt.publish(
+                topic, False, 1, False, packet_id=10, payload=json_payload.encode()
+            )
+            await self._mqtt_ws.send(pub_pkt)
+            _LOGGER.debug("Published to %s: %s", topic, json_payload)
+        except Exception as e:
+            _LOGGER.error("Failed to publish to %s: %s", topic, e)
 
     async def _send_one_off_command(
         self,
@@ -476,6 +725,7 @@ class MysaRealtime:
         wrap: bool,
     ) -> None:
         # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+        # Justification: Low-level command sender requiring all protocol arguments.
         # Justification: Internal helper method requiring all connection parameters.
         """Connect, send, disconnect."""
         if not user_id:

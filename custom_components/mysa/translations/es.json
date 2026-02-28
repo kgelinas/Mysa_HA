@@ -1,71 +1,82 @@
 {
     "config": {
-        "step": {
-            "user": {
-                "title": "Autenticaci\u00f3n Mysa",
-                "description": "Ingrese las credenciales de su cuenta Mysa.",
-                "data": {
-                    "username": "Usuario (Correo electr\u00f3nico)",
-                    "password": "Contrase\u00f1a"
-                },
-                "data_description": {
-                    "username": "La direcci\u00f3n de correo electr\u00f3nico asociada a su cuenta Mysa.",
-                    "password": "La contrase\u00f1a de su cuenta Mysa."
-                }
-            },
-            "reauth_confirm": {
-                "title": "Reautenticar Mysa",
-                "description": "La contrase\u00f1a para {username} no es v\u00e1lida. Por favor, introduza la nueva contrase\u00f1a.",
-                "data": {
-                    "username": "Usuario (Correo electr\u00f3nico)",
-                    "password": "Contrase\u00f1a"
-                },
-                "data_description": {
-                    "username": "La direcci\u00f3n de correo electr\u00f3nico asociada a su cuenta Mysa.",
-                    "password": "La nueva contrase\u00f1a de su cuenta Mysa."
-                }
-            }
+        "abort": {
+            "reauth_successful": "La reautenticaci\u00f3n se realiz\u00f3 correctamente.",
+            "single_instance_allowed": "Solo se permite una configuraci\u00f3n de Mysa."
         },
         "error": {
             "invalid_auth": "Autenticaci\u00f3n inv\u00e1lida",
-            "unknown": "Error inesperado",
-            "reauth_account_mismatch": "El correo electr\u00f3nico proporcionado no coincide con la configuraci\u00f3n existente."
+            "reauth_account_mismatch": "El correo electr\u00f3nico proporcionado no coincide con la configuraci\u00f3n existente.",
+            "unknown": "Error inesperado"
         },
-        "abort": {
-            "single_instance_allowed": "Solo se permite una configuraci\u00f3n de Mysa.",
-            "reauth_successful": "La reautenticaci\u00f3n se realiz\u00f3 correctamente."
-        }
-    },
-    "options": {
         "step": {
-            "init": {
-                "title": "Opciones de Mysa",
-                "description": "Configurar ajustes avanzados del dispositivo.",
+            "reauth_confirm": {
                 "data": {
-                    "upgraded_lite_devices": "Dispositivos Lite actualizados (Forzar Tipo 5)",
-                    "estimated_max_current": "Corriente m\u00e1xima estimada (Amperios)",
-                    "simulated_energy": "Forzar Energ\u00eda Simulada"
+                    "password": "Contrase\u00f1a",
+                    "username": "Usuario (Correo electr\u00f3nico)"
                 },
                 "data_description": {
-                    "upgraded_lite_devices": "Seleccione los dispositivos que ha actualizado de Lite a Full utilizando la funci\u00f3n 'Magic Upgrade'.",
-                    "estimated_max_current": "Corriente estimada (Amperios) para dispositivos Lite para el c\u00e1lculo de energ\u00eda simulada.",
-                    "simulated_energy": "Obligar a todos los dispositivos a usar el c\u00e1lculo de potencia simulada basado en el ciclo de trabajo."
-                }
+                    "password": "La nueva contrase\u00f1a de su cuenta Mysa.",
+                    "username": "La direcci\u00f3n de correo electr\u00f3nico asociada a su cuenta Mysa."
+                },
+                "description": "La contrase\u00f1a para {username} no es v\u00e1lida. Por favor, introduza la nueva contrase\u00f1a.",
+                "title": "Reautenticar Mysa"
+            },
+            "user": {
+                "data": {
+                    "password": "Contrase\u00f1a",
+                    "username": "Usuario (Correo electr\u00f3nico)"
+                },
+                "data_description": {
+                    "password": "La contrase\u00f1a de su cuenta Mysa.",
+                    "username": "La direcci\u00f3n de correo electr\u00f3nico asociada a su cuenta Mysa."
+                },
+                "description": "Ingrese las credenciales de su cuenta Mysa.",
+                "title": "Autenticaci\u00f3n Mysa"
             }
         }
     },
-    "services": {
-        "upgrade_lite_device": {
-            "name": "Actualizar dispositivo Lite",
-            "description": "Actualiza un termostato Mysa Lite a funciones completas (Magic Upgrade)."
-        },
-        "downgrade_lite_device": {
-            "name": "Revertir dispositivo Lite",
-            "description": "Revierte un termostato Mysa de funciones completas a Lite."
-        }
-    },
     "entity": {
+        "binary_sensor": {
+            "connection": {
+                "name": "Conexi\u00f3n"
+            }
+        },
+        "climate": {
+            "thermostat": {
+                "name": "Termostato"
+            }
+        },
+        "number": {
+            "auto_deadband": {
+                "name": "Banda muerta autom\u00e1tica"
+            },
+            "max_brightness": {
+                "name": "Brillo m\u00e1ximo"
+            },
+            "max_setpoint": {
+                "name": "Punto de ajuste m\u00e1ximo"
+            },
+            "min_brightness": {
+                "name": "Brillo m\u00ednimo"
+            },
+            "min_setpoint": {
+                "name": "Punto de ajuste m\u00ednimo"
+            }
+        },
         "select": {
+            "horizontal_swing": {
+                "name": "Horizontal Swing",
+                "state": {
+                    "auto": "Auto",
+                    "center": "Center",
+                    "left": "Left",
+                    "left_center": "Left Center",
+                    "right": "Right",
+                    "right_center": "Right Center",
+                    "right_wide": "Right Wide"
+                }
+            },
             "sensor_mode": {
                 "name": "Modo de Sensor",
                 "state": {
@@ -75,17 +86,249 @@
             }
         },
         "sensor": {
+            "adv_aux_uses_fan": {
+                "name": "Aux Usa Ventilador"
+            },
+            "adv_cool_fan_delay": {
+                "name": "Retardo ventilador fr\u00edo"
+            },
+            "adv_cool_fan_run_on": {
+                "name": "Tiempo adicional ventilador fr\u00edo"
+            },
+            "adv_cool_stage_two_delay": {
+                "name": "Retardo fr\u00edo etapa 2"
+            },
+            "adv_cool_stage_two_delta": {
+                "name": "Delta fr\u00edo etapa 2"
+            },
+            "adv_cool_uses_fan": {
+                "name": "Fr\u00edo Usa Ventilador"
+            },
+            "adv_cool_when_reversed": {
+                "name": "Fr\u00edo al Invertir"
+            },
+            "adv_fan_period": {
+                "name": "Periodo Ventilador"
+            },
+            "adv_fan_ramp": {
+                "name": "Rampa de ventilador"
+            },
+            "adv_fan_runtime": {
+                "name": "Tiempo Ventilador"
+            },
+            "adv_heat_fan_delay": {
+                "name": "Retardo ventilador calor"
+            },
+            "adv_heat_fan_run_on": {
+                "name": "Tiempo adicional ventilador calor"
+            },
+            "adv_heat_stage_two_delay": {
+                "name": "Retardo Calor Etapa 2"
+            },
+            "adv_heat_stage_two_delta": {
+                "name": "Delta Calor Etapa 2"
+            },
+            "adv_heat_uses_fan": {
+                "name": "Calor Usa Ventilador"
+            },
+            "brightness": {
+                "name": "Brillo"
+            },
+            "cost": {
+                "name": "Tarifa de electricidad"
+            },
+            "current": {
+                "name": "Corriente"
+            },
+            "duty_cycle": {
+                "name": "Ciclo de trabajo"
+            },
+            "emergency_heat_on_time": {
+                "name": "Tiempo calor de emergencia"
+            },
+            "encryption_enabled": {
+                "name": "Cifrado habilitado"
+            },
+            "energy": {
+                "name": "Energ\u00eda"
+            },
+            "estimated_current": {
+                "name": "Corriente estimada"
+            },
+            "fan_on_time": {
+                "name": "Tiempo ventilador"
+            },
+            "fan_sequence": {
+                "name": "Secuencia de ventilador"
+            },
+            "fault_test": {
+                "name": "Prueba de fallos"
+            },
+            "free_heap": {
+                "name": "Memoria libre"
+            },
+            "heatsink_temperature": {
+                "name": "Temperatura del disipador"
+            },
+            "humidity": {
+                "name": "Humedad"
+            },
+            "hvac_config_index": {
+                "name": "\u00cdndice Config HVAC"
+            },
+            "infloor_temperature": {
+                "name": "Temperatura del suelo"
+            },
             "ip_address": {
                 "name": "Direcci\u00f3n IP"
             },
-            "serial_number": {
-                "name": "N\u00famero de serie"
+            "max_current": {
+                "name": "Corriente m\u00e1xima"
+            },
+            "max_setpoint": {
+                "name": "Punto de consigna m\u00e1ximo"
+            },
+            "min_setpoint": {
+                "name": "Punto de consigna m\u00ednimo"
+            },
+            "multiple_fan_speeds": {
+                "name": "Velocidades vent. m\u00faltiples"
+            },
+            "on_time": {
+                "name": "Tiempo total de funcionamiento"
+            },
+            "power": {
+                "name": "Potencia activa"
+            },
+            "priv_key_ok": {
+                "name": "Estado de clave privada"
+            },
+            "pub_key_hash": {
+                "name": "Hash de clave p\u00fablica"
+            },
+            "rssi": {
+                "name": "Intensidad de se\u00f1al"
+            },
+            "secure_boot": {
+                "name": "Arranque seguro"
+            },
+            "stage_one_cool_on_time": {
+                "name": "Tiempo fr\u00edo etapa 1"
+            },
+            "stage_two_cool_on_time": {
+                "name": "Tiempo fr\u00edo etapa 2"
+            },
+            "stage_two_on_time": {
+                "name": "Tiempo etapa 2"
+            },
+            "temperature": {
+                "name": "Temperatura"
+            },
+            "timezone": {
+                "name": "Zona horaria"
+            },
+            "voltage": {
+                "name": "Voltaje"
+            }
+        },
+        "switch": {
+            "allow_auto_mode": {
+                "name": "Allow Auto Mode"
+            },
+            "auto_brightness": {
+                "name": "Brillo autom\u00e1tico"
+            },
+            "climate_plus": {
+                "name": "Clima+"
+            },
+            "lock": {
+                "name": "Bloqueo"
+            },
+            "proximity": {
+                "name": "Modo de proximidad"
+            },
+            "temperature_format": {
+                "name": "Formato de pantalla"
+            }
+        },
+        "update": {
+            "firmware": {
+                "name": "Firmware"
             }
         }
     },
     "exceptions": {
+        "set_ac_fan_mode_failed": {
+            "message": "Error al establecer el modo de ventilador del AC: {error}"
+        },
+        "set_ac_hvac_mode_failed": {
+            "message": "Error al establecer el modo AC HVAC: {error}"
+        },
+        "set_ac_swing_mode_failed": {
+            "message": "Error al establecer el modo de oscilaci\u00f3n del AC: {error}"
+        },
+        "set_ac_temperature_failed": {
+            "message": "Error al establecer la temperatura del AC: {error}"
+        },
+        "set_horizontal_swing_failed": {
+            "message": "Error al establecer la oscilaci\u00f3n horizontal: {error}"
+        },
+        "set_hvac_mode_failed": {
+            "message": "Error al establecer el modo HVAC: {error}"
+        },
         "set_sensor_mode_failed": {
             "message": "Error al establecer el modo de sensor: {error}"
+        },
+        "set_temperature_failed": {
+            "message": "Error al establecer la temperatura: {error}"
+        }
+    },
+    "issues": {
+        "auth_failed": {
+            "fix_flow": {
+                "step": {
+                    "confirm": {
+                        "description": "Authentication with the Mysa API failed: {error}\n\nPlease reconfigure the integration with valid credentials.",
+                        "title": "Re-authenticate Mysa"
+                    }
+                }
+            },
+            "title": "Authentication Failed"
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "data": {
+                    "estimated_max_current": "Corriente m\u00e1xima estimada (Amperios)",
+                    "simulated_energy": "Forzar Energ\u00eda Simulada",
+                    "upgraded_lite_devices": "Dispositivos Lite actualizados (Forzar Tipo 5)"
+                },
+                "data_description": {
+                    "estimated_max_current": "Corriente estimada (Amperios) para dispositivos Lite para el c\u00e1lculo de energ\u00eda simulada.",
+                    "simulated_energy": "Obligar a todos los dispositivos a usar el c\u00e1lculo de potencia simulada basado en el ciclo de trabajo.",
+                    "upgraded_lite_devices": "Seleccione los dispositivos que ha actualizado de Lite a Full utilizando la funci\u00f3n 'Magic Upgrade'."
+                },
+                "description": "Configurar ajustes avanzados del dispositivo.",
+                "title": "Opciones de Mysa"
+            }
+        }
+    },
+    "services": {
+        "downgrade_lite_device": {
+            "description": "Revierte un termostato Mysa de funciones completas a Lite.",
+            "name": "Revertir dispositivo Lite"
+        },
+        "upgrade_lite_device": {
+            "description": "Actualiza un termostato Mysa Lite a funciones completas (Magic Upgrade).",
+            "name": "Actualizar dispositivo Lite"
+        }
+    },
+    "system_health": {
+        "info": {
+            "api_connected": "API conectada",
+            "devices": "Dispositivos",
+            "mqtt_listener": "Oyente MQTT"
         }
     }
 }

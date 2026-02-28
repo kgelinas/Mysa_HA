@@ -54,5 +54,5 @@ async def system_health_info(hass: HomeAssistant) -> dict[str, Any]:
     return {
         "api_connected": api.is_connected,
         "devices": len(api.devices) if api.devices else 0,
-        "mqtt_listener": "Running" if api.is_mqtt_running else "Stopped",
+        "mqtt_listener": api.mqtt_status,
     }

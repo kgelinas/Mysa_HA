@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
@@ -30,6 +32,8 @@ class MysaData:
 
 
 # pylint: disable=too-many-locals,too-many-statements
+# Justification: Main setup function handling config entry loaded/unloaded states
+# and platform forwarding.
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry[MysaData]) -> bool:
@@ -95,11 +99,34 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry[MysaData]) -
         websession=session,
     )
 
+    _last_push_time = 0.0
+    _debounce_task: asyncio.Task[None] | None = None
+
     async def async_push_update() -> None:
-        """Push updated state to coordinator listeners without polling."""
-        # This notifies HA that data has changed, updating the UI immediately.
-        # We use api.states as the source of truth.
+        """Push updated state to coordinator listeners with debouncing."""
+        nonlocal _last_push_time, _debounce_task
+
+        # Debounce to prevent update storms during MQTT startup
+        now = time.time()
+        if now - _last_push_time < 0.5:
+            if _debounce_task:
+                _debounce_task.cancel()
+
+            async def delayed_push() -> None:
+                await asyncio.sleep(0.5)
+                coordinator.async_set_updated_data(api.states)
+                nonlocal _last_push_time
+                _last_push_time = time.time()
+
+            _debounce_task = asyncio.create_task(delayed_push())
+            return
+
+        if _debounce_task:
+            _debounce_task.cancel()
+            _debounce_task = None
+
         coordinator.async_set_updated_data(api.states)
+        _last_push_time = now
 
     api.coordinator_callback = async_push_update
 
@@ -121,6 +148,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry[MysaData]) -
             translation_placeholders={"error": str(e)},
         )
         raise ConfigEntryAuthFailed(f"Authentication failed: {e}") from e
+
+    # Pre-fetch devices and capabilities before starting platforms
+    await api.get_devices()
 
     await coordinator.async_config_entry_first_refresh()
 
