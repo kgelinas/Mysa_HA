@@ -63,7 +63,7 @@ You can reference devices by:
 HTTP commands modify device settings via the cloud API:
 
 ```bash
-# Lock the thermostat buttons
+# Lock the device buttons
 http 1 {"ButtonState": 1}
 
 # Unlock buttons
@@ -86,14 +86,14 @@ http 1 {"ProximityMode": true}
 http 1 {"Format": "celsius"}
 
 # Rename device
-http 1 {"Name": "Office Thermostat"}
+http 1 {"Name": "Office Heater"}
 ```
 
 ## MQTT Examples
 
 MQTT commands are sent directly to devices for real-time control. Commands are automatically wrapped in the MsgType 44 envelope.
 
-### Heating Thermostats (BB-V1, BB-V2, BB-V2-L, INF-V1)
+### Electric Heat (BB-V1, BB-V2, BB-V2-L, INF-V1)
 
 ```bash
 # Set temperature to 21°C (use type=4 for BB-V2)
@@ -115,7 +115,7 @@ mqtt 1 {"cmd":[{"pr":1,"tm":-1}],"type":4,"ver":1}
 mqtt 1 {"cmd":[{"tm":-1,"br":{"a_b":1,"a_br":100,"i_br":50,"a_dr":60,"i_dr":30}}],"type":4,"ver":1}
 ```
 
-### AC Controllers (AC-V1)
+### Mini-Split Heat Pumps (AC-V1)
 
 ```bash
 # Set temperature to 22°C
@@ -137,9 +137,9 @@ mqtt 1 {"cmd":[{"ssh":6,"tm":-1}],"type":2,"ver":1}
 mqtt 1 {"cmd":[{"it":1,"tm":-1}],"type":2,"ver":1}
 ```
 
-### ST-V1 Thermostats
+### Central HVAC (ST-V1)
 
-The ST-V1 thermostats heavily rely on HTTP state updates. You can use the `st` command to issue state updates:
+The Central HVAC (ST-V1) model heavily relies on HTTP state updates. You can use the `st` command to issue state updates:
 
 ```bash
 # Set Cool Setpoint to 21.0C
@@ -163,11 +163,11 @@ st 1 {"source":3,"hvacConfig":{"idx":1}}
 | Type | Model   | Description          |
 |:-----|:--------|:---------------------|
 | 1    | BB-V1   | Baseboard V1         |
-| 2    | AC-V1   | AC Controller        |
+| 2    | AC-V1   | Mini-Split Heat Pump |
 | 3    | INF-V1  | In-Floor Heating     |
 | 4    | BB-V2   | Baseboard V2         |
 | 5    | BB-V2-L | Baseboard V2 Lite    |
-| N/A  | ST-V1-0 | ST-V1 Thermostat     |
+| N/A  | ST-V1-0 | Central HVAC (ST-V1) |
 
 ## Sniff Mode
 
@@ -237,7 +237,7 @@ Access via the `advanced` command. Available operations:
 
 ### 1. Convert BB-V2-0-L to BB-V2-0 (Lite to Full)
 
-Upgrades a Mysa V2 Lite thermostat to the full V2 model.
+Upgrades a Mysa Baseboard V2 Lite to the full V2 model.
 
 > **Do you need this?** If you only use Home Assistant, **NO**. The Lite works perfectly with this integration. This upgrade unlocks features in the **Mysa mobile app** only (zone control, usage graphs, humidity display).
 

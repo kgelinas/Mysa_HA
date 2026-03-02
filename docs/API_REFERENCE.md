@@ -87,11 +87,11 @@ All state values use a timestamp/value object:
 | `Humidity` | number | Relative humidity (0-100%) |
 | `SetPoint` | number | Target temperature (°C) |
 | `Mode` | number | HVAC mode ID |
-| `TstatMode` | number | Thermostat operating mode |
+| `TstatMode` | number | Operating mode |
 | `Rssi` | number | WiFi signal strength (dBm) |
 | `Lock` | number | Button lock state |
 
-#### Heating Thermostat State
+#### Electric Heat State
 
 | Field | Type | Description |
 |:------|:-----|:------------|
@@ -102,7 +102,7 @@ All state values use a timestamp/value object:
 | `OnTime` | number | Seconds heater was on |
 | `OffTime` | number | Seconds heater was off |
 
-#### AC Controller State
+#### Mini-Split Heat Pump State
 
 | Field | Type | Description |
 |:------|:-----|:------------|
@@ -161,21 +161,21 @@ Update device settings.
 | `BB-V1-0` | Baseboard V1 | 1 |
 | `BB-V2-0` | Baseboard V2 | 4 |
 | `BB-V2-0-L` | Baseboard V2 Lite | 5 |
-| `AC-V1-0` | AC Controller | 2 |
+| `AC-V1-0` | Mini-Split Heat Pump | 2 |
 | `INF-V1-0` | In-Floor Heating | 3 |
 
 ---
 
 ## HVAC Modes
 
-### Heating Thermostats (BB/INF)
+### Electric Heat (Baseboard/Floor)
 
 | Mode ID | Description |
 |:--------|:------------|
 | 1 | Off |
 | 3 | Heat |
 
-### AC Controller
+### Mini-Split Heat Pumps
 
 | Mode ID | Description |
 |:--------|:------------|

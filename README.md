@@ -2,31 +2,30 @@
 
 [![Version](https://img.shields.io/badge/version-0.9.2-beta2-blue.svg)](https://github.com/kgelinas/Mysa_HA)
 
-...
 
-The integration includes a comprehensive test suite with **100% code coverage** (939 tests).
+
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz/)
 
 A native cloud integration for Mysa devices in Home Assistant. Uses the official Mysa Cloud architecture (MQTT + HTTP) for real-time updates and instant command execution.
 
 ## Features
 
-| Feature | Thermostats | AC Controller |
-|:--------|:-----------:|:-------------:|
-| 🌡️ Temperature Control | ✓ | ✓ |
-| 🔥 HVAC Mode (Heat/Off) | ✓ | - |
-| ❄️ HVAC Mode (Cool/Heat/Auto/Fan/Dry) | - | ✓ |
-| � Fan Speed Control | - | ✓ |
-| 🔄 Swing Control (Vertical/Horizontal) | - | ✓ |
-| 🌡️ Climate+ (Thermostatic Mode) | - | ✓ |
-| 🔒 Button Lock | ✓ | ✓ |
-| 💡 Brightness Control | ✓ | - |
-| � Wake on Approach | ✓ | - |
-| 📊 Diagnostic Sensors | ✓ | ✓ |
-| 🔍 Diagnostics Download | ✓ | ✓ |
-| 🔄 Firmware Updates | ✓ | ✓ |
-| ⚡ Real-time MQTT Sync | ✓ | ✓ |
-| 💰 Energy Cost Integration | ✓ | ✓ |
+| Feature | Electric Heat (Baseboard/Floor) | Mini-Split Heat Pumps (AC-V1) | Central HVAC (ST-V1) |
+|:--------|:-----------:|:-------------:|:------------:|
+| 🌡️ Temperature Control | ✓ | ✓ | ✓ |
+| 🔥 Operation Mode (Heating Only) | ✓ | - | - |
+| ❄️ Control Mode (Cool/Heat/Auto/Fan/Dry) | - | ✓ | ✓ |
+| 🌬️ Fan Speed Control | - | ✓ | ✓ |
+| 🔄 Swing Control | - | ✓ | - |
+| 🌡️ Climate+ (Auto-Thermostat) | - | ✓ | - |
+| 🔒 Button Lock | ✓ | ✓ | ✓ |
+| 💡 Brightness Control | ✓ | - | - |
+| 🚶 Wake on Approach | ✓ | - | - |
+| 📊 Diagnostic Sensors | ✓ | ✓ | ✓ |
+| 🔍 Diagnostics Download | ✓ | ✓ | ✓ |
+| 🔄 Firmware Updates | ✓ | ✓ | ✓ |
+| ⚡ Real-time MQTT Sync | ✓ | ✓ | ✓ |
+| 💰 Energy Cost Integration | ✓ | ✓ | ✓ |
 
 ## Supported Devices
 
@@ -34,16 +33,13 @@ A native cloud integration for Mysa devices in Home Assistant. Uses the official
 - **Mysa Baseboard V2** (BB-V2)
 - **Mysa Baseboard V2 Lite** (BB-V2-L)
 - **Mysa In-Floor** (INF-V1)
-- **Mysa AC Controller** (AC-V1)
+- **Mysa for Mini-Split Heat Pumps** (AC-V1)
 
 ### 🧪 Call for Testers
 
 - **Mysa for Baseboards V1** (BB-V1)
-- **Mysa for Baseboards V2** (BB-V2)
-- **Mysa for Baseboards V2 Lite** (BB-V2-L) - *With "Magic Upgrade" support*
-- **Mysa for AC/Mini-Split** (AC-V1)
 - **Mysa for In-Floor** (INF-V1)
-- **Mysa for Central AC/Heat** (ST-V1)
+- **Mysa for Central AC/Heat** (ST-V1) - *Testing required*
 
 ## Known Limitations
 - **Cloud Dependent**: Requires an active internet connection to authenticate and connect to Mysa's backend. This is **not a local-only integration** (local API was removed by Mysa).
@@ -95,33 +91,35 @@ A native cloud integration for Mysa devices in Home Assistant. Uses the official
 ### Climate
 - Temperature control with 0.5°C precision
 - HVAC modes appropriate to device type
-- AC devices include fan mode and swing controls
+- Mini-Split and Central HVAC (ST-V1) devices include fan mode controls
+- Mini-Split devices include swing controls
 
 ### Switches
-| Switch | Thermostats | AC |
-|:-------|:-----------:|:--:|
-| Button Lock | ✓ | ✓ |
-| Auto Brightness | ✓ | - |
-| Wake on Approach | ✓ | - |
-| Climate+ | - | ✓ |
+| Switch | Electric Heat (Baseboard/Floor) | Mini-Split | Central HVAC (ST-V1) |
+|:-------|:-----------:|:--:|:-----:|
+| Button Lock | ✓ | ✓ | ✓ |
+| Auto Brightness | ✓ | - | - |
+| Wake on Approach | ✓ | - | - |
+| Climate+ | - | ✓ | - |
 
 ### Number Controls
-| Control | Thermostats | AC |
-|:--------|:-----------:|:--:|
-| Min Brightness | ✓ | - |
-| Max Brightness | ✓ | - |
+| Control | Electric Heat (Baseboard/Floor) | Mini-Split | Central HVAC (ST-V1) |
+|:--------|:-----------:|:--:|:-----:|
+| Min Brightness | ✓ | - | - |
+| Max Brightness | ✓ | - | - |
+| Min Setpoint | - | - | ✓ |
+| Max Setpoint | - | - | ✓ |
 
 ### Select Controls
-| Control | Thermostats | AC |
-|:--------|:-----------:|:--:|
-| Horizontal Swing | - | ✓ |
+| Control | Electric Heat (Baseboard/Floor) | Mini-Split | Central HVAC (ST-V1) |
+|:--------|:-----------:|:--:|:-----:|
+| Horizontal Swing | - | ✓ | - |
 
 ### Sensors
 | Sensor | Default | Category |
 |:-------|:--------|:---------|
 | Temperature | Enabled | Standard |
 | Humidity | Enabled | Standard |
-| Zone | Enabled | Standard |
 | Voltage | Hidden | Diagnostic |
 | Current | Hidden | Diagnostic |
 | Max Current | Hidden | Diagnostic |
@@ -129,6 +127,8 @@ A native cloud integration for Mysa devices in Home Assistant. Uses the official
 | Duty Cycle | Hidden | Diagnostic |
 | Infloor | Enabled | Diagnostic |
 | Electricity Rate | Diagnostic | Diagnostic |
+| HVAC Runtimes | Enabled | Diagnostic (ST-V1) |
+| Advanced HVAC Logic | Hidden | Diagnostic (ST-V1) |
 
 ## Unlock Features on Lite Devices
 
@@ -282,11 +282,11 @@ A Dev Container configuration is included for VS Code. Open the project in VS Co
 
 Mysa entities can be automated using standard Home Assistant triggers and actions.
 
-### Example: Turn off AC when window opens
+### Example: Turn off Mini-Split when window opens
 
 ```yaml
-alias: "Turn off AC if window open"
-description: "Turn off Mysa AC when living room window is opened"
+alias: "Turn off Mini-Split if window open"
+description: "Turn off Mysa Mini-Split when living room window is opened"
 trigger:
   - platform: state
     entity_id: binary_sensor.living_room_window
@@ -295,12 +295,12 @@ trigger:
       seconds: 30
 condition:
   - condition: state
-    entity_id: climate.living_room_ac
+    entity_id: climate.living_room_mini_split
     state: "cool"
 action:
   - service: climate.turn_off
     target:
-      entity_id: climate.living_room_ac
+      entity_id: climate.living_room_mini_split
 ```
 
 ## Credits

@@ -267,7 +267,7 @@ Returns all devices accessible to the user (same as legacy API).
 | `Lock` | number | Button lock: 0=unlocked, 1=locked |
 | `ecoMode` | number | Eco mode: 0=disabled, 1=enabled |
 
-#### Brightness Settings (Heating Thermostats)
+#### Brightness Settings (Electric Heat)
 
 | Field | Type | Description |
 |:------|:-----|:------------|

@@ -21,7 +21,7 @@ To use the electricity rate provided directly by Mysa in the Energy Dashboard:
 
 ### Best Practices ("Individual Devices" vs "Grid Consumption")
 
-*   **Individual Devices**: **Add your Mysa devices here.** This populates the breakdown chart, showing exactly how much energy each room/thermostat used compared to the rest of your home.
+*   **Individual Devices**: **Add your Mysa devices here.** This populates the breakdown chart, showing exactly how much energy each room/device used compared to the rest of your home.
 *   **Electricity Grid**: Only add your Mysa devices here if you **do not** have a whole-home energy monitor. If you have a main meter (e.g., Shelly EM, Emporia Vue, or Utility Meter), putting Mysa devices here would result in double-counting your energy usage.
 
 ## Options Flow (Mysa Integration)
@@ -36,7 +36,7 @@ To configure advanced options for the main integration:
 - **Purpose**: Ensures correct feature exposure in Home Assistant (e.g., Energy Monitoring).
 
 #### 2. Wattage Overrides
-- **Description**: Manually specify the heater wattage for each thermostat.
+- **Description**: Manually specify the heater wattage for each Electric Heat device.
 - **Format**: Integer (Watts, 0-5000).
 - **Default**: 0
 - **Purpose**: Used for energy calculation if the device does not report it or to correct inaccurate readings. This is critical for accurate "Power" and "Energy" sensors on generic heaters.

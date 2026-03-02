@@ -137,7 +137,7 @@ The XOR checksum is calculated across all bytes from the **Timestamp** (offset 3
 ```json
 {"cmd": [{"md": MODE, "tm": -1}], "type": TYPE, "ver": 1}
 ```
-- Modes: 1=Off, 3=Heat (Thermostats); 1=Off, 4=Cool, etc. (AC)
+- Modes: 1=Off, 3=Heat (Electric Heat); 1=Off, 4=Cool, etc. (Mini-Split/Central HVAC)
 
 ### Special Commands (No Envelope)
 

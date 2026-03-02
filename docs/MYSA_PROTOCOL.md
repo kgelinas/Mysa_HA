@@ -15,7 +15,7 @@ Each Mysa device model uses a specific payload type for MQTT commands:
 | Model       | Payload Type | Description              |
 |:------------|:-------------|:-------------------------|
 | BB-V1       | `1`          | Baseboard V1             |
-| AC-V1       | `2`          | AC Controller            |
+| AC-V1       | `2`          | Mini-Split Heat Pump     |
 | INF-V1      | `3`          | In-Floor Heating         |
 | BB-V2       | `4`          | Baseboard V2             |
 | BB-V2-L     | `5`          | Baseboard V2 Lite        |
@@ -46,7 +46,7 @@ The structure of state updates (via both MQTT and HTTP) is standardized across m
 | Rssi | WiFi signal strength | int (dBm) |
 | Connected | Online status | bool |
 
-### Heating Thermostats (BB/INF)
+### Electric Heat (Baseboard/Floor)
 | Field | Description | Type |
 |:------|:------------|:-----|
 | Duty | Heater duty cycle | int (0-100) |
@@ -55,7 +55,7 @@ The structure of state updates (via both MQTT and HTTP) is standardized across m
 | HeatSink | Heat sink temperature| float |
 | flrSnsrTemp | Floor temperature (V2/INF) | float |
 
-### AC Controller (AC-V1)
+### Mini-Split Heat Pumps (AC-V1)
 | Field | Description | Type |
 |:------|:------------|:-----|
 | FanSpeed | Current fan speed | int |
