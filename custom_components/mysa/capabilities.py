@@ -33,7 +33,7 @@ class DeviceCapabilities:
     _api: MysaApi  # Reference for live upgrade checks
 
     # Dynamic - refresh when config changes
-    hvac_config_index: int
+    hvac_config_index: int | str
     hvac_modes: list[HVACMode]
     max_temp: float
     min_temp: float
@@ -117,9 +117,13 @@ class DeviceCapabilities:
         climate_ctrl = caps.get("features", {}).get("climateControl", {})
         system_info = caps.get("system", {})
 
-        # Extract HVAC modes
-        hvac_modes = cls._map_stv10_modes(
-            climate_ctrl.get("mode", {}).get("validValues", [])
+        # Dynamic from state/config
+        hvac_config_index = str(system_info.get("configCode", "0"))
+        config_info = cls._decode_stv10_config(hvac_config_index)
+
+        # We need to pass a mock state for _determine_hvac_modes
+        hvac_modes = cls._determine_hvac_modes(
+            {"hvac_config_index": hvac_config_index}, is_stv10=True, is_ac=False
         )
 
         # Extract temperature ranges
@@ -138,27 +142,45 @@ class DeviceCapabilities:
             supports_humidity_hardware=True,
             supports_floor_sensor_hardware=False,
             _api=api,
-            hvac_config_index=int(system_info.get("configCode", "0"), 16),
+            hvac_config_index=hvac_config_index,
             hvac_modes=hvac_modes,
             max_temp=max(cool_setpoints) if cool_setpoints else 37.0,
             min_temp=min(heat_setpoints) if heat_setpoints else 5.0,
             target_temperature_step=cls._get_stv10_temp_step(heat_setpoints),
-            has_aux_heat=False,  # ST-V1 uses heat pump, not aux
-            has_stage_2_heat=climate_ctrl.get("heat", {}).get("stages", 1) > 1,
-            has_stage_2_cool=climate_ctrl.get("cool", {}).get("stages", 1) > 1,
+            has_aux_heat=config_info.get("has_aux", False),
+            has_stage_2_heat=config_info.get("stage_2_heat", False),
+            has_stage_2_cool=config_info.get("stage_2_cool", False),
         )
 
     @staticmethod
-    def _map_stv10_modes(raw_modes: list[str]) -> list[HVACMode]:
-        """Map ST-V1 capability modes to HomeAssistant HVACMode."""
-        mapping = {
-            "off": HVACMode.OFF,
-            "heat": HVACMode.HEAT,
-            "cool": HVACMode.COOL,
-            "auto": HVACMode.AUTO,
-            "fanOnly": HVACMode.FAN_ONLY,
+    def _decode_stv10_config(config_code: str) -> dict[str, Any]:
+        """Decode ST-V1-0 3-digit config code (0-9, 0-9, A-P)."""
+        if not isinstance(config_code, str) or len(config_code) < 3:
+            return {}
+
+        d1, d2, d3 = config_code[0], config_code[1], config_code[2]
+
+        # Digit 1: Heating Type (0-9)
+        has_heat = d1 in ("1", "2", "3", "4", "6", "7", "8", "9")
+        is_hp_d1 = d1 in ("3", "8")
+        stage_2_heat = d1 in ("6", "7", "8", "9")
+
+        # Digit 2: Cooling Type (0-9)
+        has_cool = d2 in ("1", "4", "5", "6")
+        stage_2_cool = d2 == "6"
+
+        # Digit 3: Options (A-P)
+        is_hp_d3 = d3 in ("I", "J", "K", "L", "M", "N", "O", "P")
+        has_aux = d3 in ("C", "D", "K", "L", "O", "P")
+
+        return {
+            "has_heat": has_heat,
+            "has_cool": has_cool,
+            "stage_2_heat": stage_2_heat,
+            "stage_2_cool": stage_2_cool,
+            "is_hp": is_hp_d1 or is_hp_d3,
+            "has_aux": has_aux,
         }
-        return [mapping[mode] for mode in raw_modes if mode in mapping]
 
     @staticmethod
     def _determine_hvac_modes(
@@ -181,9 +203,24 @@ class DeviceCapabilities:
 
             # Heat pump configs support heat/cool/auto
             config_index = state.get("hvac_config_index", 0)
-            if config_index in [3, 4, 5, 6, 7, 8, 9, 15]:  # Heat pump configs
+
+            is_hp = False
+            has_cooling = False
+            if isinstance(config_index, int):
+                # Existing numeric index checks (legacy fallback)
+                is_hp = config_index in [3, 4, 5, 6, 7, 8, 9, 15]
+            elif isinstance(config_index, str) and len(config_index) >= 3:
+                # Positional decoding
+                config_info = DeviceCapabilities._decode_stv10_config(config_index)
+                is_hp = config_info.get("is_hp", False)
+                has_cooling = config_info.get("has_cool", False)
+
+            if is_hp:
                 modes.extend([HVACMode.HEAT, HVACMode.COOL, HVACMode.AUTO])
-            else:  # Heat only or other
+            elif has_cooling:
+                # If cooling is available but not a heat pump, it's a dual system
+                modes.extend([HVACMode.HEAT, HVACMode.COOL, HVACMode.AUTO])
+            else:  # Heat only
                 modes.append(HVACMode.HEAT)
 
             return modes
@@ -218,14 +255,18 @@ class DeviceCapabilities:
         return 5.0  # Default
 
     def refresh_dynamic(self, state: dict[str, Any]) -> None:
-        """Refresh dynamic capabilities from new state.
-
-        Called when HVAC configuration changes.
-        """
+        """Refresh dynamic capabilities from new state."""
         self.hvac_config_index = state.get("hvac_config_index", 0)
         self.hvac_modes = self._determine_hvac_modes(state, self.is_stv10, self.is_ac)
         self.max_temp = self._get_max_temp(state)
         self.min_temp = self._get_min_temp(state)
-        self.has_aux_heat = state.get("heating_stage_two_exists") == 1
-        self.has_stage_2_heat = state.get("heating_stage_two_exists") == 1
-        self.has_stage_2_cool = state.get("cooling_stage_two_exists") == 1
+
+        if self.is_stv10 and isinstance(self.hvac_config_index, str):
+            config_info = self._decode_stv10_config(self.hvac_config_index)
+            self.has_aux_heat = config_info.get("has_aux", False)
+            self.has_stage_2_heat = config_info.get("stage_2_heat", False)
+            self.has_stage_2_cool = config_info.get("stage_2_cool", False)
+        else:
+            self.has_aux_heat = state.get("heating_stage_two_exists") == 1
+            self.has_stage_2_heat = state.get("heating_stage_two_exists") == 1
+            self.has_stage_2_cool = state.get("cooling_stage_two_exists") == 1

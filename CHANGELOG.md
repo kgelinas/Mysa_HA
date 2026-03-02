@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 
+## [0.9.2-beta3] - 2026-03-02
+### Added
+- Parse ST-V1 HVAC capabilities using a 3-digit alphanumeric config code, update related documentation, and add a new API endpoint.
+
 ## [0.9.2-beta2] - 2026-02-28
 ### Changed
 - **Major refactoring**: Aligning with Mysa App for API and MQTT.

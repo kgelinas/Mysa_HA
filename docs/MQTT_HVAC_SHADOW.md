@@ -157,43 +157,56 @@ Full HVAC system configuration (30+ keys). Key subset:
 The `hvac_config_index` corresponds to a 3-digit alphanumeric code (e.g., **61B**, **16B**) that defines the system capabilities.
 
 ### Digit 1: Heating Type
-| Digit | Heating System | Stages | Cycle Rate (CPH) | Relays |
+| Digit | Heating Type | Stages | Cycle Rate (CPH) | Relays Used |
 |:---:|:---|:---|:---|:---|
 | 0 | No Heating | N/A | N/A | N/A |
-| 1 | Forced-Air (Gas/Oil) | 1 | 6 (10m) | W1 |
-| 2 | Forced-Air (Electric) | 1 | 12 (5m) | W1 |
-| 3 | Forced-Air (Heatpump) | 1 | 3 (20m) | Y1 |
-| 4 | Hydronic (Radiant/FCU) | 1 | 3 (20m) | W1 |
-| 6 | **Forced-Air (Gas/Oil)** | **2** | 6 (10m) | **W1, W2** |
-| 7 | **Forced-Air (Electric)** | **2** | 12 (5m) | **W1, W2** |
-| 8 | **Forced-Air (Heatpump)** | **2** | 3 (20m) | **Y1, Y2** |
-| 9 | **Hydronic** | **2** | 3 (20m) | **W1, W2** |
+| 1 | Forced-Air (Gas/Oil) | 1-stage | 6 (10 mins cycles) | W1 |
+| 2 | Forced-Air (Electric) | 1-stage | 12 (5 mins cycles) | W1 |
+| 3 | Forced-Air (Heatpump) | 1-stage | 3 (20 mins cycles) | Y1 |
+| 4 | Hydronic (Radiant & FCU) | 1-stage | 3 (20 mins cycles) | W1 |
+| 5 | Not used | N/A | N/A | N/A |
+| 6 | Forced-Air (Gas/Oil) | 2-stage | 6 (10 mins cycles) | W1, W2 |
+| 7 | Forced-Air (Electric) | 2-stage | 12 (5 mins cycles) | W1, W2 |
+| 8 | Forced-Air (Heatpump) | 2-stage | 3 (20 mins cycles) | Y1, Y2 |
+| 9 | Hydronic (Radiant & FCU) | 2-stage | 3 (20 mins cycles) | W1, W2 |
 
 > **Key Feature:** Digits 6-9 enable `heating_stage_two_exists`.
 
 ### Digit 2: Cooling Type
-| Digit | Cooling System | Stages | Cycle Rate (CPH) | Relays |
+| Digit | Cooling Type | Stages | Cycle Rate (CPH) | Relays Used |
 |:---:|:---|:---|:---|:---|
 | 0 | No Cooling | N/A | N/A | N/A |
-| 1 | Forced-Air (AC & HP) | 1 | 3 (20m) | Y1 |
-| 4 | Fan Coil, 2 Fan Spd | 1 | TBD | Y1 |
-| 5 | Fan Coil, 3 Fan Spd | 1 | TBD | Y1 |
-| 6 | **Forced-Air (AC & HP)** | **2** | 3 (20m) | **Y1, Y2** |
+| 1 | Forced-Air (AC & Heatpump) | 1-stage | 3 (20 min cycles) | Y1 |
+| 2 | No Cooling, 2 Fan speeds | N/A | N/A | N/A |
+| 3 | No Cooling, 3 Fan speeds | N/A | N/A | N/A |
+| 4 | Fan Coil, 2 Fan speeds | 1-stage | TBD | Y1 |
+| 5 | Fan Coil, 3 Fan speeds | 1-stage | TBD | Y1 |
+| 6 | Forced-Air (AC & Heatpump) | 2-stage | 3 (20 min cycles) | Y1, Y2 |
+| 7 | Not used | N/A | N/A | N/A |
+| 8 | Not used | N/A | N/A | N/A |
+| 9 | Not used | N/A | N/A | N/A |
 
 > **Key Feature:** Digit 6 enables `cooling_stage_two_exists`.
 
-### Digit 3: Features & Valve Logic
-| Digit | Fan | Aux | HP | Rev/Valve | Notes |
-|:---:|:---:|:---:|:---:|:---:|:---|
-| A | N | N | N | N/A | No Fan Control |
-| B | **Y** | N | N | N/A | Standard (Gas/Electric/Boiler) |
-| L | **Y** | **Y** | **Y** | **B-Valve** | HP (Heat Active) |
-| P | **Y** | **Y** | **Y** | **O-Valve** | HP (Cool Active) |
+### Digit 3: Options
+| Digit | Fan Control Y/N? | Emergency Heat Y/N? | Heatpump Y/N? | R/V on Cool Y/N? |
+|:---:|:---:|:---:|:---:|:---:|
+| A | N | N | N | N/A |
+| B | Y | N | N | N/A |
+| C | N | Y | N | N/A |
+| D | Y | Y | N | N/A |
+| I | N | N | Y | N |
+| J | Y | N | Y | N |
+| K | N | Y | Y | N |
+| L | Y | Y | Y | N |
+| M | N | N | Y | Y |
+| N | Y | N | Y | Y |
+| O | N | Y | Y | Y |
+| P | Y | Y | Y | Y |
 
 > **Key Feature:**
-> *   `L` sets `advCoolWhenReversed=0`
-> *   `P` sets `advCoolWhenReversed=1`
-> *   `L` & `P` enable `is_reversible_heat_pump=1`
+> *   `L`, `M`, `N`, `O`, `P` enable `is_reversible_heat_pump=1`
+> *   `M`, `N`, `O`, `P` signify `R/V on Cool = Y` (O-Valve) vs `N` (B-Valve).
 
 ### Common Configuration Codes
 | Code | Index | System Description | Key Features |

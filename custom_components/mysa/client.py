@@ -473,7 +473,19 @@ class MysaClient:
             if hvac_states:
                 result_states[device_id]["hvacStates"] = hvac_states
 
-            # 3. Re-normalize to process these new fields
+            # 3. Extract other useful reported sections
+            for section in [
+                "diagnostics",
+                "hvacConfig",
+                "identity",
+                "physicalInterface",
+            ]:
+                section_data = data.get(section, {})
+                section_reported = section_data.get("reported", {})
+                if section_reported:
+                    result_states[device_id].update(section_reported)
+
+            # 4. Re-normalize to process these new fields
             # We explicitly call the ST-V1 extractor again
             # self._extract_stv10_shadow_data is logic in MysaApi, not MysaClient
             # Wait, this method is in MysaClient. MysaApi logic is separate.

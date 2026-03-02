@@ -120,7 +120,32 @@ def test_capabilities_refresh_full():
     assert caps.has_stage_2_cool
     assert caps.max_temp == 35.0
     assert caps.min_temp == 15.0
-    assert HVACMode.COOL in caps.hvac_modes
+    # Test refresh dynamic with string configCode to hit line 278-280 coverage
+    new_state = {
+        "hvac_config_index": "66L",
+        "mxs": 3500,
+        "mns": 1500
+    }
+    caps.refresh_dynamic(new_state)
+
+    assert caps.hvac_config_index == "66L"
+    assert caps.has_aux_heat is True
+    assert caps.has_stage_2_cool is True
+    assert caps.max_temp == 35.0
+    assert caps.min_temp == 15.0
+
+    # Test validValues less than 2 items (temp step fallback) and short config code
+    caps_json_edge = {
+        "features": {
+            "climateControl": {
+                "heat": {"setpoint": {"validValues": [10]}, "stages": 1},
+            }
+        },
+        "system": {"model": "ST-V1-0", "configCode": "1"}
+    }
+    caps_edge = DeviceCapabilities.from_stv10_capabilities("st1", caps_json_edge, api)
+    assert caps_edge.target_temperature_step == 0.5
+    assert caps_edge.has_aux_heat is False
 
 def test_capabilities_stv10_from_json():
     """Test ST-V1-0 capabilities from JSON endpoint."""
@@ -133,7 +158,7 @@ def test_capabilities_stv10_from_json():
                 "cool": {"setpoint": {"validValues": [20, 25, 30]}, "stages": 2},
             }
         },
-        "system": {"model": "ST-V1-0", "configCode": "A"}
+        "system": {"model": "ST-V1-0", "configCode": "66B"}
     }
     caps = DeviceCapabilities.from_stv10_capabilities("st1", caps_json, api)
 
@@ -145,3 +170,44 @@ def test_capabilities_stv10_from_json():
     assert caps.has_stage_2_cool
     assert HVACMode.AUTO in caps.hvac_modes
     assert caps.hardware_model == "ST-V1-0"
+
+def test_capabilities_stv10_full_positional_decoding():
+    """Test ST-V1-0 capabilities with full positional decoding."""
+    api = MockApi()
+    # 31P: 1st=3 (HP, 1-stage), 2nd=1 (AC, 1-stage), 3rd=P (HP, Fan Y, Aux Y, R/V Cool Y)
+    caps_json = {
+        "features": {
+            "climateControl": {
+                "mode": {"validValues": ["off", "heat", "cool", "auto", "fanOnly"]},
+                "heat": {"setpoint": {"validValues": [10, 20]}, "stages": 1},
+                "cool": {"setpoint": {"validValues": [20, 30]}, "stages": 1},
+            }
+        },
+        "system": {"model": "ST-V1-0", "configCode": "31P"}
+    }
+    caps = DeviceCapabilities.from_stv10_capabilities("st1", caps_json, api)
+
+    assert caps.hvac_config_index == "31P"
+    # 31P is a Heat Pump with Cooling and Aux Heat
+    assert HVACMode.HEAT in caps.hvac_modes
+    assert HVACMode.COOL in caps.hvac_modes
+    assert HVACMode.AUTO in caps.hvac_modes
+    assert caps.has_aux_heat is True
+    assert caps.has_stage_2_heat is False
+    assert caps.has_stage_2_cool is False
+
+    # 66L: 6 (Gas 2-stage), 6 (AC 2-stage), L (HP Y, Fan Y, Aux Y, R/V Cool N)
+    caps_json["system"]["configCode"] = "66L"
+    caps = DeviceCapabilities.from_stv10_capabilities("st1", caps_json, api)
+    assert caps.has_stage_2_heat is True
+    assert caps.has_stage_2_cool is True
+    assert caps.has_aux_heat is True
+
+    # 10A: 1 (Gas 1-stage), 0 (No Cool), A (HP N, Fan N, Aux N)
+    caps_json["system"]["configCode"] = "10A"
+    caps = DeviceCapabilities.from_stv10_capabilities("st1", caps_json, api)
+    assert HVACMode.COOL not in caps.hvac_modes
+    assert HVACMode.AUTO not in caps.hvac_modes
+    assert caps.has_stage_2_heat is False
+    assert caps.has_stage_2_cool is False
+    assert caps.has_aux_heat is False

@@ -1496,7 +1496,8 @@ async def test_client_missing_coverage_final(hass):
         "new_dev": {
             "data": {
                 "latestTelemetry": {"reading": {"temp": 22}},
-                "modes": {"reported": {"hvacStates": ["cooling"]}}
+                "modes": {"reported": {"hvacStates": ["cooling"]}},
+                "diagnostics": {"reported": {"freeHeap": 12345}}
             }
         }
     })
@@ -1523,7 +1524,8 @@ async def test_client_missing_coverage_final(hass):
         "new_dev": {
             "data": {
                 "latestTelemetry": {"reading": {"temp": 22}},
-                "modes": {"reported": {"hvacStates": ["cooling"]}}
+                "modes": {"reported": {"hvacStates": ["cooling"]}},
+                "diagnostics": {"reported": {"freeHeap": 12345}}
             }
         }
     })
@@ -1532,6 +1534,7 @@ async def test_client_missing_coverage_final(hass):
     result = await client.get_state()
     assert "new_dev" in result
     assert result["new_dev"]["hvacStates"] == ["cooling"]
+    assert result["new_dev"]["freeHeap"] == 12345
 
     # 246: Session not initialized in fetch_capabilities
     client._user_obj = None

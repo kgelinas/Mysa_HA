@@ -154,6 +154,19 @@ Update device settings.
 
 ---
 
+### DELETE /devices/{device_id}
+
+Remove a device from the user account.
+
+**Example:**
+```http
+DELETE https://app-prod.mysa.cloud/devices/aabbccddeeff
+```
+
+**Response:** Status 200 OK
+
+---
+
 ## Device Models
 
 | Model | Description | Payload Type |

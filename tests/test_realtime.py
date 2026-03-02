@@ -1251,11 +1251,12 @@ async def test_mqtt_heartbeat_watchdog():
                 with pytest.raises(RuntimeError, match="MQTT silence watchdog triggered"):
                     await realtime._run_mqtt_loop(ws)
 
-@pytest.mark.asyncio
-async def test_realtime_is_connected():
+def test_realtime_is_connected():
     """Test is_connected property."""
     hass = MagicMock()
-    realtime = MysaRealtime(hass, AsyncMock(), MagicMock())
+    # Provide a simple MagicMock instead of AsyncMock for get_url
+    # to avoid RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    realtime = MysaRealtime(hass, MagicMock(), MagicMock())
     assert realtime.is_connected is False
     realtime._mqtt_connected.set()
     realtime._mqtt_ws = MagicMock()
