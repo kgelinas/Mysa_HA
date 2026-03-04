@@ -563,6 +563,38 @@ class MysaRealtime:
             _LOGGER.warning("Error parsing batch readings: %s", e)
             return None
 
+    def _merge_shadow_attributes(
+        self,
+        reported: dict[str, Any],
+        desired: dict[str, Any],
+        md_reported: dict[str, Any],
+        md_desired: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Merge reported and desired states using metadata timestamps."""
+        combined = {}
+        all_keys = set(reported.keys()) | set(desired.keys())
+        for key in all_keys:
+            if key in reported and key in desired:
+                r_ts = (
+                    md_reported.get(key, {}).get("timestamp", 0)
+                    if isinstance(md_reported.get(key), dict)
+                    else 0
+                )
+                d_ts = (
+                    md_desired.get(key, {}).get("timestamp", 0)
+                    if isinstance(md_desired.get(key), dict)
+                    else 0
+                )
+                if d_ts > r_ts:
+                    combined[key] = desired[key]
+                else:
+                    combined[key] = reported[key]
+            elif key in reported:
+                combined[key] = reported[key]
+            else:
+                combined[key] = desired[key]
+        return combined
+
     def _extract_shadow_state(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         """Extract state from AWS Shadow document."""
         # Save root level timestamp/version before handling nested structure
@@ -574,14 +606,25 @@ class MysaRealtime:
             payload = payload["current"]
 
         state = payload.get("state", {})
+        metadata = payload.get("metadata", {})
+
         reported = state.get("reported", {})
         desired = state.get("desired", {})
+        md_reported = metadata.get("reported", {})
+        md_desired = metadata.get("desired", {})
 
-        # Merge reported and desired, prioritizing desired
-        # This provides immediate feedback for commands (optimistic UI)
-        combined = {}
-        combined.update(reported)
-        combined.update(desired)
+        if not isinstance(reported, dict):
+            reported = {}
+        if not isinstance(desired, dict):
+            desired = {}
+        if not isinstance(md_reported, dict):
+            md_reported = {}
+        if not isinstance(md_desired, dict):
+            md_desired = {}
+
+        combined = self._merge_shadow_attributes(
+            reported, desired, md_reported, md_desired
+        )
 
         if not combined:
             return None

@@ -14,5 +14,5 @@
     "issue_tracker": "https://github.com/kgelinas/Mysa_HA/issues",
     "quality_scale": "silver",
     "homeassistant": "2024.1.0",
-    "version": "0.9.2-beta3"
+    "version": "0.9.2-beta4"
 }

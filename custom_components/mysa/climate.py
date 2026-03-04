@@ -1,11 +1,12 @@
 """Climate platform for Mysa."""
 
+from __future__ import annotations
+
 # pylint: disable=abstract-method, too-many-lines, too-many-public-methods
 # Justification:
 # abstract-method: Inherits from HA mixins (RestoreEntity) which may have abstract methods.
 # too-many-lines: Handles multiple climate device types (Baseboard, AC, ST-V1-0) in one file.
 # too-many-public-methods: Climate entities require many property overrides.
-
 import asyncio
 import logging
 import time
@@ -90,7 +91,8 @@ async def async_setup_entry(
 
 
 class MysaClimate(
-    ClimateEntity, CoordinatorEntity[DataUpdateCoordinator[dict[str, Any]]]
+    ClimateEntity,
+    CoordinatorEntity[DataUpdateCoordinator[dict[str, Any]]],
 ):
     """Representation of a Mysa Thermostat."""
 
@@ -326,7 +328,10 @@ class MysaClimate(
         if self._device_id not in self.coordinator.data:
             self.coordinator.data[self._device_id] = {}
 
-        self.coordinator.data[self._device_id][key] = value
+        # Safely update the dictionary item
+        device_data = self.coordinator.data[self._device_id]
+        if isinstance(device_data, dict):
+            device_data[key] = value
 
     def _get_sticky_value(self, key: str, current_value: Any) -> Any:
         """Get value with optimistic 'sticky' logic.
@@ -955,7 +960,7 @@ class MysaSTV10Climate(MysaClimate):
         """Return the supported step of target temperature from capabilities."""
         if self.temperature_unit == UnitOfTemperature.FAHRENHEIT:
             return 1.0
-        return float(self._attr_target_temperature_step)
+        return float(self._attr_target_temperature_step or 0.5)
 
     async def async_will_remove_from_hass(self) -> None:
         """Run when entity will be removed from hass."""

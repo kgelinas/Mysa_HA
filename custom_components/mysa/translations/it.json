@@ -281,6 +281,39 @@
         },
         "set_temperature_failed": {
             "message": "Impossibile impostare la temperatura: {error}"
+        },
+        "set_lock_failed": {
+            "message": "Impossibile bloccare/sbloccare il termostato: {error}"
+        },
+        "set_auto_brightness_failed": {
+            "message": "Impossibile impostare la luminosit\u00e0 automatica: {error}"
+        },
+        "set_proximity_failed": {
+            "message": "Impossibile impostare la modalit\u00e0 di prossimit\u00e0: {error}"
+        },
+        "set_climate_plus_failed": {
+            "message": "Impossibile impostare la modalit\u00e0 Clima+: {error}"
+        },
+        "set_allow_auto_mode_failed": {
+            "message": "Impossibile abilitare/disabilitare la modalit\u00e0 automatica: {error}"
+        },
+        "set_min_brightness_failed": {
+            "message": "Impossibile impostare la luminosit\u00e0 minima: {error}"
+        },
+        "set_max_brightness_failed": {
+            "message": "Impossibile impostare la luminosit\u00e0 massima: {error}"
+        },
+        "set_target_failed": {
+            "message": "Impossibile impostare il valore target: {error}"
+        },
+        "set_min_setpoint_failed": {
+            "message": "Impossibile impostare il setpoint minimo: {error}"
+        },
+        "set_max_setpoint_failed": {
+            "message": "Impossibile impostare il setpoint massimo: {error}"
+        },
+        "set_temperature_format_failed": {
+            "message": "Impossibile impostare il formato di visualizzazione della temperatura: {error}"
         }
     },
     "issues": {

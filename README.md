@@ -1,6 +1,6 @@
 # Mysa for Home Assistant
 
-[![Version](https://img.shields.io/badge/version-0.9.2-beta3-blue.svg)](https://github.com/kgelinas/Mysa_HA)
+[![Version](https://img.shields.io/badge/version-0.9.2-beta4-blue.svg)](https://github.com/kgelinas/Mysa_HA)
 
 
 
@@ -42,8 +42,11 @@ A native cloud integration for Mysa devices in Home Assistant. Uses the official
 - **Mysa for Central AC/Heat** (ST-V1) - *Testing required*
 
 ## Known Limitations
-- **Cloud Dependent**: Requires an active internet connection to authenticate and connect to Mysa's backend. This is **not a local-only integration** (local API was removed by Mysa).
-- **Polling Fallback**: Uses a slower polling interval (120s) as a fail-safe, relying primarily on push updates via MQTT.
+
+- **Cloud Dependency**: This integration relies on the Mysa cloud API. It will not work without an internet connection.
+- **Polling Fallback**: If the MQTT WebSocket connection drops, the integration falls back to HTTP polling every 120 seconds.
+- **AWS Authentication Stack**: The `boto3` and `pycognito` dependencies handle AWS Cogntio/SigV4 authentication. While all blocking calls are safely wrapped in async executors so they do not block the Home Assistant event loop, they cannot directly reuse the Home Assistant core `aiohttp` web session object.
+- **Simulated Energy**: The energy consumption is an estimate based on your heater's wattage and duty cycle. Unless the device explicitly reports real electrical `Current` (like the Baseboard V1 and V2 Full), the energy usage is not 100% accurate.
 - **Batch Data**: Batch history is currently used strictly for debugging purposes and is disabled in the main integration to avoid database collisions with standard real-time updates.
 
 ## Troubleshooting
@@ -83,8 +86,16 @@ A native cloud integration for Mysa devices in Home Assistant. Uses the official
 ## Configuration
 
 1. Enter your Mysa account credentials (email/password)
-2. (Optional) Configure zone names for your thermostat groups
-3. Devices will appear automatically
+2. Devices will appear automatically
+
+### Options (Settings → Devices & Services → Mysa → Configure)
+
+| Option | Description |
+|:-------|:-----------|
+| **Simulated Energy** | Enable estimated power/energy tracking for devices without a real current sensor. |
+| **Upgraded Lite Devices** | Select which BB-V2-L (Lite) devices have been upgraded to Full firmware, so correct commands are sent. |
+| **Estimated Max Current (A)** | Fallback for Lite devices: enter the heater's rated current (e.g. 10 A for a 2400 W heater at 240 V). |
+| **Per-device Wattage (W)** | Override wattage for individual heating devices used in simulated energy calculations. |
 
 ## Entities
 

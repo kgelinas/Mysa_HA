@@ -1,8 +1,9 @@
 """Update platform for Mysa."""
 
+from __future__ import annotations
+
 # pylint: disable=abstract-method
 # Justification: Inherits from HA UpdateEntity and RestoreEntity which have abstract methods.
-
 # Justification: HA Entity properties implement the required abstracts.
 import logging
 from datetime import timedelta

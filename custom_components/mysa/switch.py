@@ -1,8 +1,9 @@
 """Switch platform for Mysa."""
 
+from __future__ import annotations
+
 # pylint: disable=abstract-method
 # Justification: Inherits from HA SwitchEntity and RestoreEntity which have abstract methods.
-
 # Justification: HA Entity properties implement the required abstracts.
 import logging
 import time
@@ -485,7 +486,11 @@ class MysaSTV10AllowAutoModeSwitch(MysaSwitch):
         except Exception as e:
             self._pending_state = None
             self.async_write_ha_state()
-            raise HomeAssistantError(f"Failed to set auto mode: {e}") from e
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_allow_auto_mode_failed",
+                translation_placeholders={"error": str(e)},
+            ) from e
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Disable auto mode."""
@@ -497,4 +502,8 @@ class MysaSTV10AllowAutoModeSwitch(MysaSwitch):
         except Exception as e:
             self._pending_state = None
             self.async_write_ha_state()
-            raise HomeAssistantError(f"Failed to set auto mode: {e}") from e
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_allow_auto_mode_failed",
+                translation_placeholders={"error": str(e)},
+            ) from e

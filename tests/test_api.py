@@ -1829,9 +1829,18 @@ class TestApiRestoredConsolidated:
         assert state3["auto_mode_enabled"] == 1
 
         # 491: _flatten_stv10_shadows desired precedence
-        state4 = {"targetHeat": {"desired": {"v": 2}, "reported": {"v": 1}}}
+        state4 = {"targetHeat": {"desired": {"v": 2, "timestamp": 100}, "reported": {"v": 1, "timestamp": 200}}}
         api._flatten_stv10_shadows(state4)
-        assert state4["v"] == 2
+        assert state4["v"] == 1  # reported is newer
+
+        state4_desired = {"targetHeat": {"desired": {"v": 2, "timestamp": 200}, "reported": {"v": 1, "timestamp": 100}}}
+        api._flatten_stv10_shadows(state4_desired)
+        assert state4_desired["v"] == 2  # desired is newer
+
+        # 495-496: _flatten_stv10_shadows where reported/desired are not dicts
+        state4_invalid = {"targetHeat": {"desired": "invalid", "reported": "invalid"}}
+        api._flatten_stv10_shadows(state4_invalid)
+        assert state4_invalid["targetHeat"]["desired"] == "invalid"  # They remain unchanged, but aren't merged
 
         # 497-505: flatten latestTelemetry
         state5 = {"latestTelemetry": {"isConnected": True, "reading": {"temperature": 2000}}}

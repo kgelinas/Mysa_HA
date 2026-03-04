@@ -1,8 +1,9 @@
 """Select platform for Mysa AC horizontal swing."""
 
+from __future__ import annotations
+
 # pylint: disable=abstract-method
 # Justification: Inherits from HA SelectEntity and RestoreEntity which have abstract methods.
-
 # Justification: HA Entity properties implement the required abstracts.
 import logging
 import time
@@ -435,4 +436,8 @@ class MysaTemperatureFormatSelect(
         except Exception as e:
             _LOGGER.error("Failed to set display format: %s", e)
             self._pending_option = None
-            raise HomeAssistantError(f"Failed to set format: {e}") from e
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_temperature_format_failed",
+                translation_placeholders={"error": str(e)},
+            ) from e

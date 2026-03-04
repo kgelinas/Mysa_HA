@@ -1,8 +1,9 @@
 """Sensor platform for Mysa."""
 
+from __future__ import annotations
+
 # pylint: disable=too-many-branches,too-many-lines
 # Justification: Handles setup for many different sensor types and platforms in a single file.
-
 # Justification: Sensor mapping requires handling many device types and attributes in a single pass.
 import logging
 import time

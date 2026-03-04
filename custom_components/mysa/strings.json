@@ -326,6 +326,39 @@
         },
         "set_sensor_mode_failed": {
             "message": "Failed to set sensor mode: {error}"
+        },
+        "set_lock_failed": {
+            "message": "Failed to set thermostat lock: {error}"
+        },
+        "set_auto_brightness_failed": {
+            "message": "Failed to set auto brightness: {error}"
+        },
+        "set_proximity_failed": {
+            "message": "Failed to set proximity mode: {error}"
+        },
+        "set_climate_plus_failed": {
+            "message": "Failed to set Climate+ mode: {error}"
+        },
+        "set_allow_auto_mode_failed": {
+            "message": "Failed to set Allow Auto Mode: {error}"
+        },
+        "set_min_brightness_failed": {
+            "message": "Failed to set minimum brightness: {error}"
+        },
+        "set_max_brightness_failed": {
+            "message": "Failed to set maximum brightness: {error}"
+        },
+        "set_target_failed": {
+            "message": "Failed to set target value: {error}"
+        },
+        "set_min_setpoint_failed": {
+            "message": "Failed to set minimum setpoint: {error}"
+        },
+        "set_max_setpoint_failed": {
+            "message": "Failed to set maximum setpoint: {error}"
+        },
+        "set_temperature_format_failed": {
+            "message": "Failed to set temperature display format: {error}"
         }
     },
     "system_health": {

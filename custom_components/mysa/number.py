@@ -1,8 +1,9 @@
 """Number platform for Mysa."""
 
+from __future__ import annotations
+
 # pylint: disable=abstract-method
 # Justification: Inherits from HA NumberEntity and RestoreEntity which have abstract methods.
-
 # Justification: HA Entity properties implement the required abstracts.
 import logging
 import time
@@ -402,7 +403,11 @@ class MysaMinSetpointNumber(MysaNumber):
         except Exception as e:
             self._pending_value = None
             self.async_write_ha_state()
-            raise HomeAssistantError(f"Failed to set min setpoint: {e}") from e
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_min_setpoint_failed",
+                translation_placeholders={"error": str(e)},
+            ) from e
 
 
 class MysaMaxSetpointNumber(MysaNumber):
@@ -453,4 +458,8 @@ class MysaMaxSetpointNumber(MysaNumber):
         except Exception as e:
             self._pending_value = None
             self.async_write_ha_state()
-            raise HomeAssistantError(f"Failed to set max setpoint: {e}") from e
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_max_setpoint_failed",
+                translation_placeholders={"error": str(e)},
+            ) from e

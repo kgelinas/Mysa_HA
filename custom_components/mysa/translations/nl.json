@@ -281,6 +281,39 @@
         },
         "set_temperature_failed": {
             "message": "Doeltemperatuur instellen mislukt: {error}"
+        },
+        "set_lock_failed": {
+            "message": "Vergrendelen/ontgrendelen thermostaat mislukt: {error}"
+        },
+        "set_auto_brightness_failed": {
+            "message": "Automatische helderheid instellen mislukt: {error}"
+        },
+        "set_proximity_failed": {
+            "message": "Nabijheidsmodus instellen mislukt: {error}"
+        },
+        "set_climate_plus_failed": {
+            "message": "Klimaat+-modus instellen mislukt: {error}"
+        },
+        "set_allow_auto_mode_failed": {
+            "message": "Automatische modus in-/uitschakelen mislukt: {error}"
+        },
+        "set_min_brightness_failed": {
+            "message": "Minimale helderheid instellen mislukt: {error}"
+        },
+        "set_max_brightness_failed": {
+            "message": "Maximale helderheid instellen mislukt: {error}"
+        },
+        "set_target_failed": {
+            "message": "Doelwaarde instellen mislukt: {error}"
+        },
+        "set_min_setpoint_failed": {
+            "message": "Minimum setpoint instellen mislukt: {error}"
+        },
+        "set_max_setpoint_failed": {
+            "message": "Maximum setpoint instellen mislukt: {error}"
+        },
+        "set_temperature_format_failed": {
+            "message": "Temperatuurweergaveformaat instellen mislukt: {error}"
         }
     },
     "issues": {

@@ -281,6 +281,39 @@
         },
         "set_temperature_failed": {
             "message": "\u00c9chec du r\u00e9glage de la temp\u00e9rature : {error}"
+        },
+        "set_lock_failed": {
+            "message": "\u00c9chec du verrouillage du thermostat : {error}"
+        },
+        "set_auto_brightness_failed": {
+            "message": "\u00c9chec du r\u00e9glage de la luminosit\u00e9 automatique : {error}"
+        },
+        "set_proximity_failed": {
+            "message": "\u00c9chec du r\u00e9glage du mode de proximit\u00e9 : {error}"
+        },
+        "set_climate_plus_failed": {
+            "message": "\u00c9chec du r\u00e9glage du mode Climat+ : {error}"
+        },
+        "set_allow_auto_mode_failed": {
+            "message": "\u00c9chec de l'activation/d\u00e9sactivation du mode automatique : {error}"
+        },
+        "set_min_brightness_failed": {
+            "message": "\u00c9chec du r\u00e9glage de la luminosit\u00e9 minimale : {error}"
+        },
+        "set_max_brightness_failed": {
+            "message": "\u00c9chec du r\u00e9glage de la luminosit\u00e9 maximale : {error}"
+        },
+        "set_target_failed": {
+            "message": "\u00c9chec du r\u00e9glage de la valeur cible : {error}"
+        },
+        "set_min_setpoint_failed": {
+            "message": "\u00c9chec du r\u00e9glage de la consigne minimale : {error}"
+        },
+        "set_max_setpoint_failed": {
+            "message": "\u00c9chec du r\u00e9glage de la consigne maximale : {error}"
+        },
+        "set_temperature_format_failed": {
+            "message": "\u00c9chec du r\u00e9glage du format d'affichage de la temp\u00e9rature : {error}"
         }
     },
     "issues": {

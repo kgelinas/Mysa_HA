@@ -281,6 +281,39 @@
         },
         "set_temperature_failed": {
             "message": "Error al establecer la temperatura: {error}"
+        },
+        "set_lock_failed": {
+            "message": "Error al bloquear/desbloquear el termostato: {error}"
+        },
+        "set_auto_brightness_failed": {
+            "message": "Error al establecer el brillo autom\u00e1tico: {error}"
+        },
+        "set_proximity_failed": {
+            "message": "Error al establecer el modo de proximidad: {error}"
+        },
+        "set_climate_plus_failed": {
+            "message": "Error al establecer el modo Clima+: {error}"
+        },
+        "set_allow_auto_mode_failed": {
+            "message": "Error al activar/desactivar el modo autom\u00e1tico: {error}"
+        },
+        "set_min_brightness_failed": {
+            "message": "Error al establecer el brillo m\u00ednimo: {error}"
+        },
+        "set_max_brightness_failed": {
+            "message": "Error al establecer el brillo m\u00e1ximo: {error}"
+        },
+        "set_target_failed": {
+            "message": "Error al establecer el valor objetivo: {error}"
+        },
+        "set_min_setpoint_failed": {
+            "message": "Error al establecer el punto de ajuste m\u00ednimo: {error}"
+        },
+        "set_max_setpoint_failed": {
+            "message": "Error al establecer el punto de ajuste m\u00e1ximo: {error}"
+        },
+        "set_temperature_format_failed": {
+            "message": "Error al establecer el formato de visualizaci\u00f3n de temperatura: {error}"
         }
     },
     "issues": {

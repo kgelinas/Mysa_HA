@@ -13,6 +13,7 @@ from collections.abc import Callable
 from typing import Any, cast
 
 from aiohttp import ClientSession
+from homeassistant.core import HomeAssistant
 
 from .capabilities import DeviceCapabilities
 from .client import MysaClient
@@ -39,7 +40,7 @@ class MysaApi:
         self,
         username: str,
         password: str,
-        hass: Any,  # Changed from HomeAssistant
+        hass: HomeAssistant,  # Changed from Any
         coordinator_callback: Callable[[], Any] | None = None,
         upgraded_lite_devices: list[str] | None = None,
         estimated_max_current: int = 0,
@@ -481,14 +482,35 @@ class MysaApi:
         for key in shadow_keys:
             shadow = state_update.get(key)
             if isinstance(shadow, dict):
-                # Desired takes precedence (matches MQTT logic in realtime.py)
                 reported = shadow.get("reported", {})
                 desired = shadow.get("desired", {})
 
-                if reported and isinstance(reported, dict):
-                    state_update.update(reported)
-                if desired and isinstance(desired, dict):
-                    state_update.update(desired)
+                # Ensure they are dicts
+                if not isinstance(reported, dict):
+                    reported = {}
+                if not isinstance(desired, dict):
+                    desired = {}
+
+                # Check timestamps to determine precedence
+                r_ts = reported.get("timestamp", 0)
+                d_ts = desired.get("timestamp", 0)
+
+                merged = {}
+                # The newer one takes precedence (merged last)
+                if r_ts > d_ts:
+                    merged.update(desired)
+                    merged.update(reported)
+                else:
+                    merged.update(reported)
+                    merged.update(desired)
+
+                # Prevent targetHeat and targetCool 'setpoint' key collisions
+                if key == "targetHeat" and "setpoint" in merged:
+                    merged["target_heat"] = merged.pop("setpoint")
+                elif key == "targetCool" and "setpoint" in merged:
+                    merged["target_cool"] = merged.pop("setpoint")
+
+                state_update.update(merged)
 
         # 2. Process latestTelemetry (contains 'reading' object)
         lt = state_update.get("latestTelemetry")

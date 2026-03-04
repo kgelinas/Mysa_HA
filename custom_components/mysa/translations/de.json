@@ -281,6 +281,39 @@
         },
         "set_temperature_failed": {
             "message": "Fehler beim Einstellen der Temperatur: {error}"
+        },
+        "set_lock_failed": {
+            "message": "Fehler beim Sperren/Entsperren des Thermostats: {error}"
+        },
+        "set_auto_brightness_failed": {
+            "message": "Fehler beim Einstellen der automatischen Helligkeit: {error}"
+        },
+        "set_proximity_failed": {
+            "message": "Fehler beim Einstellen des N\u00e4herungsmodus: {error}"
+        },
+        "set_climate_plus_failed": {
+            "message": "Fehler beim Einstellen des Klima+-Modus: {error}"
+        },
+        "set_allow_auto_mode_failed": {
+            "message": "Fehler beim Aktivieren/Deaktivieren des Automatikmodus: {error}"
+        },
+        "set_min_brightness_failed": {
+            "message": "Fehler beim Einstellen der Mindesthelligkeit: {error}"
+        },
+        "set_max_brightness_failed": {
+            "message": "Fehler beim Einstellen der Maximalhelligkeit: {error}"
+        },
+        "set_target_failed": {
+            "message": "Fehler beim Einstellen des Zielwerts: {error}"
+        },
+        "set_min_setpoint_failed": {
+            "message": "Fehler beim Einstellen des minimalen Sollwerts: {error}"
+        },
+        "set_max_setpoint_failed": {
+            "message": "Fehler beim Einstellen des maximalen Sollwerts: {error}"
+        },
+        "set_temperature_format_failed": {
+            "message": "Fehler beim Einstellen des Temperaturanzeigeformats: {error}"
         }
     },
     "issues": {

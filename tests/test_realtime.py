@@ -1077,7 +1077,7 @@ async def test_realtime_aws_shadow_extraction(mock_hass):
 
     # 1. Standard shadow update
     update = rt._extract_state_update(payload, shadow_name="test_shadow")
-    assert update["Temperature"] == 23.0
+    assert update["Temperature"] == 22.5
     assert update["_shadow_name"] == "test_shadow"
     assert update["Timestamp"] == 123456789
     assert update["version"] == 1
@@ -1088,7 +1088,7 @@ async def test_realtime_aws_shadow_extraction(mock_hass):
         "version": 1  # Still need version at top for detection if no shadow_name
     }
     update = rt._extract_state_update(payload_docs, shadow_name="test_shadow")
-    assert update["Temperature"] == 23.0
+    assert update["Temperature"] == 22.5
     assert update["version"] == 1
 
 @pytest.mark.asyncio
@@ -1169,6 +1169,69 @@ async def test_realtime_shadow_no_timestamp(mock_hass):
     update = rt._extract_state_update(payload, shadow_name="test")
     assert update["v"] == 1
     assert "Timestamp" not in update
+
+@pytest.mark.asyncio
+async def test_realtime_shadow_invalid_types_coverage(mock_hass):
+    """Test realtime shadow update with invalid types for coverage."""
+    rt = MysaRealtime(mock_hass, AsyncMock(), AsyncMock())
+
+    # Invalid reported/desired, should become {}
+    payload = {
+        "state": {
+            "reported": "invalid",
+            "desired": "invalid"
+        },
+        "version": 1
+    }
+    assert rt._extract_state_update(payload, shadow_name="test") is None
+
+    # Valid state, invalid metadata
+    payload2 = {
+        "state": {
+            "reported": {"v": 1},
+            "desired": {"v": 2}
+        },
+        "metadata": {
+            "reported": "invalid",
+            "desired": ("tuple",)
+        },
+        "version": 1
+    }
+    # No timestamps due to invalid metadata, reported wins (v=1)
+    update = rt._extract_state_update(payload2, shadow_name="test")
+    assert update is not None
+    assert update["v"] == 1
+
+    # Desired dict, but reported missing
+    payload3 = {
+        "state": {"desired": {"v": 2}},
+        "version": 1
+    }
+    update3 = rt._extract_state_update(payload3, shadow_name="test")
+    assert update3["v"] == 2
+
+    # Invalid inner metadata timestamps
+    payload4 = {
+        "state": {"reported": {"v": 1}, "desired": {"v": 2}},
+        "metadata": {"reported": {"v": "invalid"}, "desired": {"v": "invalid"}},
+        "version": 1
+    }
+    update4 = rt._extract_state_update(payload4, shadow_name="test")
+    assert update4["v"] == 1
+
+    # Current has invalid type
+    payload5 = {"current": "invalid_type", "state": {"reported": {"v": 3}}, "version": 1}
+    update5 = rt._extract_state_update(payload5)
+    assert update5["v"] == 3
+
+    # Desired newer than reported
+    payload6 = {
+        "state": {"reported": {"v": 1}, "desired": {"v": 2}},
+        "metadata": {"reported": {"v": {"timestamp": 100}}, "desired": {"v": {"timestamp": 200}}},
+        "version": 1
+    }
+    update6 = rt._extract_state_update(payload6, shadow_name="test")
+    assert update6["v"] == 2
 
 
 @pytest.mark.asyncio
