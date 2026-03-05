@@ -3,7 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 
-## [0.9.2-beta4] - 2026-03-03
+## [0.9.2-beta5] - 2024-03-04
+- Fix ST-V1 thermostat sensors (such as humidity) freezing up due to aggressively discarding new HTTP telemetry if it overlaps with fresher AWS Shadow updates.
+
+## [0.9.2-beta4] - 2024-03-04
 ### Added
 - New thermostat controls, enhanced real-time update parsing, and type hinting.
 

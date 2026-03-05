@@ -2099,6 +2099,28 @@ async def test_periodic_legacy_mqtt_poll_exception():
             pass
     assert api.async_send_state_poll.call_count == 2
 
+def test_check_timestamp_staleness_stv10_http_poll():
+    """Test that ST-V1 HTTP polls do not get dropped by simple timestamp checks."""
+    api = MysaApi.__new__(MysaApi)
+    api.client = MagicMock()
+    api._latest_timestamp = {"test_device": 2000}
+    api._last_command_time = {"test_device": 0}
+    api._clock_skew = {}
+    api.devices = {"test_device": {"Model": "ST-V1-0"}}
+
+    with patch("time.time", return_value=3000):
+        # Even if incoming_ts (1000) is < current_ts (2000), it should be evaluated
+        # but filter_stale and is_shadow should bypass the drop and return False
+        result = api._check_timestamp_staleness("test_device", 1000, filter_stale=True)
+        assert result is False
+
+    with patch("time.time", return_value=3000):
+        # Regular stale test for coverage of line 1682
+        api.devices = {"test_device": {"Model": "V2"}}
+        result2 = api._check_timestamp_staleness("test_device", 1000, filter_stale=False)
+        assert result2 is True
+
+
 @pytest.mark.asyncio
 async def test_periodic_legacy_mqtt_poll_fatal_error():
     """Test _periodic_legacy_mqtt_poll handles main loop exceptions (Fatal error)."""

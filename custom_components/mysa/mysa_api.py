@@ -1675,6 +1675,11 @@ class MysaApi:
                         current_ts,
                     )
                     return True
+            elif is_shadow and filter_stale:
+                # ST-V1 HTTP poll. Telemetry timestamps natively lag behind shadow timestamps.
+                # Do NOT reject the payload, otherwise exclusive telemetry (humidity) is lost.
+                # `_filter_stale_updates` inherently protects volatile keys from snap-back.
+                pass
             else:
                 if incoming_ts < current_ts:
                     _LOGGER.debug(
