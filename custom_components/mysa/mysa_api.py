@@ -1579,7 +1579,7 @@ class MysaApi:
             self._clock_skew = {}
 
         if self._check_shadow_version_staleness(
-            device_id, incoming_version, shadow_name, filter_stale
+            device_id, incoming_version, shadow_name
         ):
             return True
 
@@ -1590,7 +1590,6 @@ class MysaApi:
         device_id: str,
         incoming_version: int | None,
         shadow_name: str | None,
-        filter_stale: bool,
     ) -> bool:
         """Check if shadow version is stale."""
         # 1. Version Check (Preferred for Shadows)
@@ -1633,8 +1632,9 @@ class MysaApi:
                     )
                     return True
 
-            if incoming_version == current_version and filter_stale:
-                return True
+            # Removed same-version suppression for HTTP polls.
+            # Allowing same-version updates through to the timestamp check is safe
+            # and necessary for telemetry fields that don't increment shadow versions.
 
             self._shadow_versions[device_id][shadow_name] = max(
                 current_version, incoming_version
@@ -1657,14 +1657,20 @@ class MysaApi:
             # So mqtt_ts = local_ts + skew
             self._clock_skew[device_id] = incoming_ts - now
 
-            # For ST-V1-0 (Shadow) devices, we tighten the stale check.
+            # For Shadow devices, we tighten the stale check.
             # AWS Shadow timestamps can often slightly lag behind the wall clock
             # (especially after an optimistic update with time.time()).
-            is_shadow = "ST-V1-0" in str(
-                self.devices.get(device_id, {}).get("Model", "")
+            model_str = str(self.devices.get(device_id, {}).get("Model", "")).upper()
+            is_shadow = any(
+                m in model_str for m in ["-V1-0", "-V2-0", "ST-V1", "AC-V1", "LITE"]
             )
 
-            if is_shadow and not filter_stale and (now - last_cmd_time >= 90):
+            if is_shadow and filter_stale:
+                # Do NOT reject the payload, otherwise exclusive telemetry
+                # (humidity, current) is lost.
+                # `_filter_stale_updates` inherently protects volatile keys from snap-back.
+                pass
+            elif is_shadow and not filter_stale and (now - last_cmd_time >= 90):
                 # Accept MQTT shadow updates even if slightly behind (up to 10s)
                 # AWS Shadows can have significant clock skew vs NTP.
                 if incoming_ts < current_ts - 10:
@@ -1675,11 +1681,6 @@ class MysaApi:
                         current_ts,
                     )
                     return True
-            elif is_shadow and filter_stale:
-                # ST-V1 HTTP poll. Telemetry timestamps natively lag behind shadow timestamps.
-                # Do NOT reject the payload, otherwise exclusive telemetry (humidity) is lost.
-                # `_filter_stale_updates` inherently protects volatile keys from snap-back.
-                pass
             else:
                 if incoming_ts < current_ts:
                     _LOGGER.debug(

@@ -1463,12 +1463,12 @@ class TestApiConsolidated:
 
         if hasattr(api, "_shadow_version_timestamps"):
             del api._shadow_version_timestamps
-        api._check_shadow_version_staleness("d1", 10, "shadow", False)
+        api._check_shadow_version_staleness("d1", 10, "shadow")
         assert hasattr(api, "_shadow_version_timestamps")
 
         api._shadow_versions["d1"] = {"shadow": 10}
         api._shadow_version_timestamps["d1"] = {"shadow": time.time() - 400}
-        assert api._check_shadow_version_staleness("d1", 5, "shadow", False) is False
+        assert api._check_shadow_version_staleness("d1", 5, "shadow") is False
 
     @pytest.mark.asyncio
     async def test_mysa_api_nested_mode_extraction_consolidated(self, hass):
@@ -1589,7 +1589,7 @@ class TestApiRestoredConsolidated:
         api._shadow_version_timestamps = {"d1": {"s1": time.time()}}
 
         # Trigger line 1612: return True (incoming < current and not relaxed)
-        assert api._check_shadow_version_staleness("d1", 5, "s1", False) is True
+        assert api._check_shadow_version_staleness("d1", 5, "s1") is True
 
     @pytest.mark.asyncio
     async def test_api_check_staleness_coverage_consolidated(self, mock_api):
@@ -1948,7 +1948,7 @@ class TestApiRestoredConsolidated:
         # 1615: _check_shadow_version_staleness == and filter_stale=True
         api._shadow_versions = {"d1": {"test_shadow": 5}}
         api._shadow_version_timestamps = {"d1": {"test_shadow": 0}}
-        assert api._check_shadow_version_staleness("d1", 5, "test_shadow", True) is True
+        assert api._check_shadow_version_staleness("d1", 5, "test_shadow") is False
 
         # 1986, 1994-1998: set_min_setpoint ST-V1-0 branch
         api.devices = {"d1": {"Model": "ST-V1-0"}}

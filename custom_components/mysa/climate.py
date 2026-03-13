@@ -536,6 +536,11 @@ class MysaACClimate(MysaClimate):
         # Get supported capabilities from device data
         self._supported_caps = device_data.get("SupportedCaps", {})
 
+        # Initialize supported mode lists (to avoid W0201)
+        self._supported_hvac_modes: list[HVACMode] = [HVACMode.OFF]
+        self._supported_fan_modes: list[str] = ["auto"]
+        self._supported_swing_modes: list[str] = ["auto"]
+
         # Build dynamic mode/fan/swing lists from SupportedCaps
         self._build_supported_options()
 
@@ -550,14 +555,22 @@ class MysaACClimate(MysaClimate):
 
     def _build_supported_options(self) -> None:
         """Build lists of supported modes from SupportedCaps."""
-        # Default supported modes if not in SupportedCaps
-        self._supported_hvac_modes: list[HVACMode] = [HVACMode.OFF]
-        self._supported_fan_modes: list[str] = ["auto"]
-        self._supported_swing_modes: list[str] = ["auto"]
-
         modes = self._supported_caps.get("modes", {})
 
-        # Map SupportedCaps mode keys to HVAC modes
+        self._build_hvac_modes(modes)
+        self._build_fan_modes(modes)
+        self._build_swing_modes(modes)
+
+        _LOGGER.debug(
+            "AC %s supported modes: hvac=%s, fan=%s, swing=%s",
+            self._device_id,
+            self._supported_hvac_modes,
+            self._supported_fan_modes,
+            self._supported_swing_modes,
+        )
+
+    def _build_hvac_modes(self, modes: dict[str, Any]) -> None:
+        """Map SupportedCaps mode keys to HVAC modes."""
         mode_mapping = {
             2: HVACMode.HEAT_COOL,  # Auto
             3: HVACMode.HEAT,
@@ -574,54 +587,55 @@ class MysaACClimate(MysaClimate):
             except ValueError:
                 pass
 
-        # Get fan speeds from first available mode's capabilities
+    def _build_fan_modes(self, modes: dict[str, Any]) -> None:
+        """Aggregate fan speeds from all available mode's capabilities."""
+        supported_fan_speeds: set[int] = set()
         for mode_caps in modes.values():
             fan_speeds = mode_caps.get("fanSpeeds", [])
             if fan_speeds:
-                self._supported_fan_modes = []
-                for speed in fan_speeds:
-                    fan_name = AC_FAN_MODES.get(speed)
-                    if fan_name:
-                        self._supported_fan_modes.append(fan_name)
+                supported_fan_speeds.update(fan_speeds)
 
-                # Fallback: If SupportedCaps only provides auto, use minimum fallback set
-                # This matches the Mysa app's manual control behavior which allows
-                # at least auto, low, and high regardless of backend restrictions
-                if (
-                    len(self._supported_fan_modes) == 1
-                    and self._supported_fan_modes[0] == "auto"
-                ):
-                    _LOGGER.info(
-                        "AC %s SupportedCaps only shows auto fan mode, "
-                        "applying fallback to match app manual control (auto, low, high)",
-                        self._device_id,
-                    )
-                    self._supported_fan_modes = [
-                        mode
-                        for speed in AC_FAN_MODES_FALLBACK
-                        if (mode := AC_FAN_MODES.get(speed)) is not None
-                    ]
+        if not supported_fan_speeds:
+            return
 
-                break
+        self._supported_fan_modes = []
+        for speed in sorted(supported_fan_speeds):
+            fan_name = AC_FAN_MODES.get(speed)
+            if fan_name:
+                self._supported_fan_modes.append(fan_name)
 
-        # Get swing positions from first available mode's capabilities
+        # Fallback: If SupportedCaps only provides auto, use minimum fallback set
+        if (
+            len(self._supported_fan_modes) == 1
+            and self._supported_fan_modes[0] == "auto"
+        ):
+            _LOGGER.info(
+                "AC %s SupportedCaps only shows auto fan mode, "
+                "applying fallback to match app manual control (auto, low, high)",
+                self._device_id,
+            )
+            self._supported_fan_modes = [
+                mode
+                for speed in AC_FAN_MODES_FALLBACK
+                if (mode := AC_FAN_MODES.get(speed)) is not None
+            ]
+
+    def _build_swing_modes(self, modes: dict[str, Any]) -> None:
+        """Aggregate swing positions from all available mode's capabilities."""
+        supported_swings: set[int] = set()
         for mode_caps in modes.values():
             vertical_swings = mode_caps.get("verticalSwing", [])
             if vertical_swings:
-                self._supported_swing_modes = []
-                for pos in vertical_swings:
-                    swing_name = AC_SWING_MODES.get(pos)
-                    if swing_name:
-                        self._supported_swing_modes.append(swing_name)
-                break
+                supported_swings.update(vertical_swings)
 
-        _LOGGER.debug(
-            "AC %s supported modes: hvac=%s, fan=%s, swing=%s",
-            self._device_id,
-            self._supported_hvac_modes,
-            self._supported_fan_modes,
-            self._supported_swing_modes,
-        )
+        if not supported_swings:
+            return
+
+        self._supported_swing_modes = []
+        for pos in sorted(supported_swings):
+            swing_name = AC_SWING_MODES.get(pos)
+            if swing_name:
+                self._supported_swing_modes.append(swing_name)
 
     @property
     def hvac_modes(self) -> list[HVACMode]:
