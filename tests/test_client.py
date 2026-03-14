@@ -7,6 +7,7 @@ import pytest
 
 
 from custom_components.mysa.client import MysaClient
+from aiohttp import ClientResponseError
 
 
 @pytest.fixture
@@ -1644,3 +1645,162 @@ async def test_set_device_setting_http_empty_json_response(hass):
     result = await client.set_device_setting_http("dev1", {"test": 1})
 
     assert result == {}
+
+
+class TestMysaClientRecovery:
+    """Test cases to reach 100% coverage for client recovery and edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_client_restore_cache_exception(self, mock_hass, mock_store):
+        """Cover exception in _restore_cached_session."""
+        client = MysaClient(mock_hass, "u", "p")
+        mock_store.async_load.return_value = {
+            "credentials_version": "2",
+            "id_token": "id",
+            "access_token": "acc",
+            "refresh_token": "ref",
+        }
+
+        with patch(
+            "custom_components.mysa.client.Cognito", side_effect=Exception("Restore Fail")
+        ):
+            result = await client._restore_cached_session()
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_client_login_password_user_id_fail(self, mock_hass, mock_store):
+        """Cover User ID fetch failure during login_with_password (non-fatal)."""
+        client = MysaClient(mock_hass, "u", "p")
+
+        mock_user = MagicMock()
+        mock_user.id_token = "token"
+
+        with (
+            patch("custom_components.mysa.client.login", return_value=mock_user),
+            patch.object(
+                client, "_fetch_user_id_internal", side_effect=Exception("Fetch Fail")
+            ),
+            patch.object(client, "_store_async_save_current_tokens"),
+        ):
+            await client._login_with_password()
+            assert client._user_obj == mock_user
+
+    @pytest.mark.asyncio
+    async def test_client_login_password_auth_fail(self, mock_hass):
+        """Cover password login failure."""
+        client = MysaClient(mock_hass, "u", "p")
+        with patch(
+            "custom_components.mysa.client.login", side_effect=Exception("Auth Fail")
+        ):
+            with pytest.raises(Exception, match="Auth Fail"):
+                await client._login_with_password()
+
+    @pytest.mark.asyncio
+    async def test_client_fetch_user_id_401_no_clear(self, mock_hass):
+        """Cover _fetch_user_id_internal with 401 but clear_on_fail=False."""
+        client = MysaClient(mock_hass, "u", "p")
+        client._user_obj = MagicMock()
+        client._user_obj.id_claims = {"exp": 9999999999}
+        client._user_obj.id_token = "token"
+
+        mock_resp = create_mock_response(status=401)
+        mock_session = MagicMock()
+        mock_session.get.return_value = create_async_context_manager(mock_resp)
+
+        with patch(
+            "custom_components.mysa.client.async_get_clientsession",
+            return_value=mock_session,
+        ):
+            await client._fetch_user_id_internal(clear_on_fail=False)
+            assert client._user_obj is not None
+
+    @pytest.mark.asyncio
+    async def test_client_fetch_user_id_generic_exception_clear(self, mock_hass):
+        """Cover generic exception in _fetch_user_id_internal with clear_on_fail=True."""
+        client = MysaClient(mock_hass, "u", "p")
+        client._user_obj = MagicMock()
+        client._user_obj.id_claims = {"exp": 9999999999}
+        client._user_obj.id_token = "token"
+
+        with patch(
+            "custom_components.mysa.client.async_get_clientsession",
+            side_effect=Exception("Bug"),
+        ):
+            await client._fetch_user_id_internal(clear_on_fail=True)
+            assert client._user_obj is None
+
+    @pytest.mark.asyncio
+    async def test_client_get_devices_not_logged_in(self, mock_hass):
+        """Cover get_devices runtime error when not logged in."""
+        client = MysaClient(mock_hass, "u", "p")
+        client._user_obj = None
+        with pytest.raises(RuntimeError, match="Session not initialized"):
+            await client.get_devices()
+
+    @pytest.mark.asyncio
+    async def test_client_get_devices_gather_exception(self, mock_hass):
+        """Cover get_devices when gather returns an exception."""
+        client = MysaClient(mock_hass, "u", "p")
+        client._user_obj = MagicMock()
+        client._user_obj.id_claims = {"exp": 9999999999}
+        client._user_obj.id_token = "token"
+
+        with (
+            patch.object(client, "fetch_homes", AsyncMock(return_value=[])),
+            patch(
+                "custom_components.mysa.client.async_get_clientsession"
+            ) as mock_session_get,
+        ):
+            mock_session = MagicMock()
+            mock_session_get.return_value = mock_session
+            # Mock actual HTTP call to fail
+            mock_resp = create_mock_response(status=500)
+            mock_resp.raise_for_status.side_effect = ClientResponseError(
+                MagicMock(), MagicMock(), status=500
+            )
+            mock_session.get.return_value = create_async_context_manager(mock_resp)
+
+            with pytest.raises(ClientResponseError):
+                await client.get_devices()
+
+    @pytest.mark.asyncio
+    async def test_client_restore_cache_incomplete_data(self, mock_hass, mock_store):
+        """Cover incomplete cached data."""
+        client = MysaClient(mock_hass, "u", "p")
+        # Missing refresh_token
+        mock_store.async_load.return_value = {
+            "credentials_version": "2",
+            "id_token": "id",
+            "access_token": "acc",
+        }
+        result = await client._restore_cached_session()
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_client_fetch_user_id_not_logged_in(self, mock_hass):
+        """Cover _fetch_user_id_internal when not logged in."""
+        client = MysaClient(mock_hass, "u", "p")
+        client._user_obj = None
+        await client._fetch_user_id_internal()
+        assert client._user_id is None
+
+    @pytest.mark.asyncio
+    async def test_client_fetch_user_id_401_clear(self, mock_hass):
+        """Cover 401 with clear_on_fail=True."""
+        client = MysaClient(mock_hass, "u", "p")
+        client._user_obj = MagicMock()
+        client._user_obj.id_claims = {"exp": 9999999999}
+        client._user_obj.id_token = "token"
+        client._user_id = "some_id"
+
+        mock_resp = create_mock_response(status=401)
+        mock_session = MagicMock()
+        mock_session.get.return_value = create_async_context_manager(mock_resp)
+
+        with patch(
+            "custom_components.mysa.client.async_get_clientsession",
+            return_value=mock_session,
+        ):
+            await client._fetch_user_id_internal(clear_on_fail=True)
+            assert client._user_obj is None
+            assert client._user_id is None

@@ -47,6 +47,7 @@ from .const import (
     AC_MODE_HEAT,
     AC_MODE_OFF,
     AC_SWING_MODES,
+    AC_SWING_MODES_FALLBACK,
     DOMAIN,
 )
 from .device import MysaDeviceLogic
@@ -595,22 +596,20 @@ class MysaACClimate(MysaClimate):
             if fan_speeds:
                 supported_fan_speeds.update(fan_speeds)
 
-        if not supported_fan_speeds:
-            return
-
         self._supported_fan_modes = []
-        for speed in sorted(supported_fan_speeds):
-            fan_name = AC_FAN_MODES.get(speed)
-            if fan_name:
-                self._supported_fan_modes.append(fan_name)
+        if supported_fan_speeds:
+            for speed in sorted(supported_fan_speeds):
+                fan_name = AC_FAN_MODES.get(speed)
+                if fan_name:
+                    self._supported_fan_modes.append(fan_name)
 
-        # Fallback: If SupportedCaps only provides auto, use minimum fallback set
-        if (
+        # Fallback: If SupportedCaps provides nothing or only auto, use minimum fallback set
+        if not self._supported_fan_modes or (
             len(self._supported_fan_modes) == 1
             and self._supported_fan_modes[0] == "auto"
         ):
             _LOGGER.info(
-                "AC %s SupportedCaps only shows auto fan mode, "
+                "AC %s SupportedCaps has limited fan modes, "
                 "applying fallback to match app manual control (auto, low, high)",
                 self._device_id,
             )
@@ -628,14 +627,24 @@ class MysaACClimate(MysaClimate):
             if vertical_swings:
                 supported_swings.update(vertical_swings)
 
-        if not supported_swings:
-            return
-
         self._supported_swing_modes = []
-        for pos in sorted(supported_swings):
-            swing_name = AC_SWING_MODES.get(pos)
-            if swing_name:
-                self._supported_swing_modes.append(swing_name)
+        if supported_swings:
+            for pos in sorted(supported_swings):
+                swing_name = AC_SWING_MODES.get(pos)
+                if swing_name:
+                    self._supported_swing_modes.append(swing_name)
+
+        # Fallback: If SupportedCaps provides nothing, use minimum fallback set
+        if not self._supported_swing_modes:
+            _LOGGER.info(
+                "AC %s SupportedCaps missing swing modes, applying fallback (off, auto)",
+                self._device_id,
+            )
+            self._supported_swing_modes = [
+                mode
+                for speed in AC_SWING_MODES_FALLBACK
+                if (mode := AC_SWING_MODES.get(speed)) is not None
+            ]
 
     @property
     def hvac_modes(self) -> list[HVACMode]:

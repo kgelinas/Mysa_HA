@@ -39,19 +39,29 @@ AC_MODE_DRY = 6
 
 # Fan Speeds - Mysa value to name mapping
 AC_FAN_AUTO = 1
+AC_FAN_QUIET = 2
 AC_FAN_LOW = 3
-AC_FAN_MEDIUM_LOW = 5
-AC_FAN_MEDIUM = 7
-AC_FAN_HIGH = 8
+AC_FAN_MEDIUM_LOW = 4
+AC_FAN_MEDIUM = 5
+AC_FAN_MEDIUM_HIGH = 6
+AC_FAN_HIGH = 7
+AC_FAN_TURBO = 8
+AC_FAN_STRONG = 9
+AC_FAN_EASY = 10
 AC_FAN_SLEEP = 12
 
 # Home Assistant fan mode names
 AC_FAN_MODES = {
     AC_FAN_AUTO: "auto",
+    AC_FAN_QUIET: "quiet",
     AC_FAN_LOW: "low",
     AC_FAN_MEDIUM_LOW: "medium_low",
     AC_FAN_MEDIUM: "medium",
+    AC_FAN_MEDIUM_HIGH: "medium_high",
     AC_FAN_HIGH: "high",
+    AC_FAN_TURBO: "turbo",
+    AC_FAN_STRONG: "strong",
+    AC_FAN_EASY: "easy",
     AC_FAN_SLEEP: "sleep",
 }
 
@@ -64,6 +74,9 @@ AC_FAN_MODES_REVERSE = {v: k for k, v in AC_FAN_MODES.items()}
 AC_FAN_MODES_FALLBACK = [AC_FAN_AUTO, AC_FAN_LOW, AC_FAN_HIGH]
 
 # Swing Positions (vertical and horizontal share the same values)
+AC_SWING_OFF = 0
+AC_SWING_VERTICAL = 1
+AC_SWING_HORIZONTAL = 2
 AC_SWING_AUTO = 3
 AC_SWING_POSITION_1 = 4  # Top / Left
 AC_SWING_POSITION_2 = 5
@@ -72,8 +85,14 @@ AC_SWING_POSITION_4 = 7
 AC_SWING_POSITION_5 = 8
 AC_SWING_POSITION_6 = 9  # Bottom / Right
 
+# Fallback minimum swing modes
+AC_SWING_MODES_FALLBACK = [AC_SWING_OFF, AC_SWING_AUTO]
+
 # Home Assistant swing mode names (vertical)
 AC_SWING_MODES = {
+    AC_SWING_OFF: "off",
+    AC_SWING_VERTICAL: "vertical",
+    AC_SWING_HORIZONTAL: "horizontal",
     AC_SWING_AUTO: "auto",
     AC_SWING_POSITION_1: "top",
     AC_SWING_POSITION_2: "upper",

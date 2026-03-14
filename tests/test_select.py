@@ -251,7 +251,6 @@ class TestSelectEntitySetup:
         assert entities == []
 
     @pytest.mark.asyncio
-    @pytest.mark.asyncio
     async def test_sensor_mode_infloor_only(self, hass, mock_api, mock_config_entry):
         """Test sensor mode select is created for In-Floor devices."""
         from custom_components.mysa.select import async_setup_entry

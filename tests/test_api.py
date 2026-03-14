@@ -12,6 +12,8 @@ from custom_components.mysa.device import MysaDeviceLogic
 from custom_components.mysa.client import MysaClient
 from custom_components.mysa.mysa_api import MysaApi
 from custom_components.mysa.realtime import MysaRealtime
+from aiohttp import ClientResponseError
+from homeassistant.helpers.update_coordinator import UpdateFailed
 
 
 @pytest.fixture
@@ -2139,3 +2141,66 @@ async def test_periodic_legacy_mqtt_poll_fatal_error():
             await api._periodic_legacy_mqtt_poll()
         except asyncio.CancelledError:
             pass
+
+
+class TestMysaApiRecovery:
+    """Test cases to reach 100% coverage for API recovery logic."""
+
+    async def test_get_state_401_recovery_success(self, mock_hass):
+        """Test get_state recovers from 401 by re-authenticating."""
+        mock_session = MagicMock()
+        api = MysaApi("u", "p", mock_hass, websession=mock_session)
+        api.client = MagicMock()
+
+        # First call fails with 401, second succeeds
+        api.client.get_state = AsyncMock(
+            side_effect=[
+                ClientResponseError(MagicMock(), MagicMock(), status=401),
+                {"dev1": {"temp": 20}},
+            ]
+        )
+        api.authenticate = AsyncMock()
+
+        result = await api.get_state()
+
+        assert api.authenticate.called
+        assert result["dev1"]["temp"] == 20
+        assert api.client.get_state.call_count == 2
+
+    async def test_get_state_401_recovery_fail(self, mock_hass):
+        """Test get_state fails if re-authentication fails after 401."""
+        mock_session = MagicMock()
+        api = MysaApi("u", "p", mock_hass, websession=mock_session)
+        api.client = MagicMock()
+
+        api.client.get_state = AsyncMock(
+            side_effect=ClientResponseError(MagicMock(), MagicMock(), status=401)
+        )
+        api.authenticate = AsyncMock(side_effect=Exception("Auth Fail"))
+
+        with pytest.raises(UpdateFailed, match="Authentication failed: Auth Fail"):
+            await api.get_state()
+
+    async def test_get_state_other_client_error(self, mock_hass):
+        """Test get_state raises other ClientResponseErrors."""
+        mock_session = MagicMock()
+        api = MysaApi("u", "p", mock_hass, websession=mock_session)
+        api.client = MagicMock()
+
+        api.client.get_state = AsyncMock(
+            side_effect=ClientResponseError(MagicMock(), MagicMock(), status=500)
+        )
+
+        with pytest.raises(ClientResponseError):
+            await api.get_state()
+
+    async def test_get_state_generic_exception(self, mock_hass):
+        """Test get_state raises generic exceptions."""
+        mock_session = MagicMock()
+        api = MysaApi("u", "p", mock_hass, websession=mock_session)
+        api.client = MagicMock()
+
+        api.client.get_state = AsyncMock(side_effect=Exception("Generic Error"))
+
+        with pytest.raises(Exception, match="Generic Error"):
+            await api.get_state()

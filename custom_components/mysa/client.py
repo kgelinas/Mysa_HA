@@ -73,7 +73,6 @@ class MysaClient:
         if not self._user_obj:
             return {}
 
-        # Check if token needs refresh (within 5 seconds of expiry)
         # Check if token needs refresh (within 60 seconds of expiry)
         if (
             self._user_obj.id_claims
@@ -89,73 +88,127 @@ class MysaClient:
 
     async def authenticate(self, use_cache: bool = True) -> bool:
         """Authenticate with Mysa (Async)."""
-        # 1. Load cached tokens (if enabled)
+        # 1. Try to restore session from cached tokens
         if use_cache:
-            cached_data = await self._store.async_load()
-        else:
-            cached_data = None
+            self._user_obj = await self._restore_cached_session()
 
-        # Try to restore session from cached tokens
-        if cached_data and isinstance(cached_data, dict):
-            # Check credential version compatibility
-            stored_version = cached_data.get("credentials_version")
-            if stored_version != CREDENTIALS_VERSION:
-                _LOGGER.info(
-                    "Credential version mismatch (stored: %s, current: %s). "
-                    "Clearing cached credentials to prevent authentication errors.",
-                    stored_version,
-                    CREDENTIALS_VERSION,
-                )
-                await self._store.async_save({})
-                cached_data = None
+        # 2. Fetch User ID (needed for MQTT commands)
+        if self._user_obj:
+            # For restored session, clear on fail to trigger password fallback
+            await self._fetch_user_id_internal(clear_on_fail=True)
 
-            id_token = cached_data.get("id_token") if cached_data else None
-            access_token = cached_data.get("access_token") if cached_data else None
-            refresh_token = cached_data.get("refresh_token") if cached_data else None
-            if id_token and refresh_token and access_token:
-                try:
-                    # Create pycognito client from cached tokens in executor
-                    cognito_client = await self.hass.async_add_executor_job(
-                        partial(
-                            Cognito,
-                            USER_POOL_ID,
-                            CLIENT_ID,
-                            user_pool_region=REGION,
-                            username=self.username,
-                            id_token=id_token,
-                            access_token=access_token,
-                            refresh_token=refresh_token,
-                        )
-                    )
+        # 3. Save tokens if we still have a session (might have been refreshed)
+        if self._user_obj and self._user_obj.id_token:
+            await self._store_async_save_current_tokens()
 
-                    user = CognitoUser(cognito_client)
-
-                    # Verify token / Try refresh if needed
-                    try:
-                        # Pyrefly note: verify_token is a method on CognitoUser
-                        await user.async_verify_token(id_token, "id")
-                        _LOGGER.debug("Restored credentials from storage")
-                        self._user_obj = user
-                    except Exception:
-                        # Try refresh
-                        _LOGGER.debug("Token expired, refreshing...")
-                        await user.renew_access_token()
-                        self._user_obj = user
-                        _LOGGER.debug("Successfully refreshed credentials")
-                except Exception as e:
-                    _LOGGER.debug("Failed to restore credentials: %s", e)
-                    self._user_obj = None
-
-        # Fallback to Password Login if restoration failed
+        # 4. Fallback to Password Login if restoration failed OR tokens were rejected
         if not self._user_obj:
-            _LOGGER.debug("Logging in with password...")
-            try:
-                self._user_obj = await login(self.username, self.password)
-            except Exception as e:
-                _LOGGER.error("Authentication failed: %s", e)
-                raise
+            await self._login_with_password()
 
-        # 2. Save tokens back to Store with version tracking
+        return True
+
+    async def _restore_cached_session(self) -> CognitoUser | None:
+        """Try to restore session from cached tokens."""
+        cached_data = await self._store.async_load()
+        if not cached_data or not isinstance(cached_data, dict):
+            return None
+
+        # Check credential version compatibility
+        stored_version = cached_data.get("credentials_version")
+        if stored_version != CREDENTIALS_VERSION:
+            _LOGGER.info(
+                "Credential version mismatch (stored: %s, current: %s). "
+                "Clearing cached credentials.",
+                stored_version,
+                CREDENTIALS_VERSION,
+            )
+            await self._store.async_save({})
+            return None
+
+        id_token = cached_data.get("id_token")
+        access_token = cached_data.get("access_token")
+        refresh_token = cached_data.get("refresh_token")
+        if not (id_token and refresh_token and access_token):
+            return None
+
+        try:
+            # Create pycognito client in executor
+            cognito_client = await self.hass.async_add_executor_job(
+                partial(
+                    Cognito,
+                    USER_POOL_ID,
+                    CLIENT_ID,
+                    user_pool_region=REGION,
+                    username=self.username,
+                    id_token=id_token,
+                    access_token=access_token,
+                    refresh_token=refresh_token,
+                )
+            )
+
+            user = CognitoUser(cognito_client)
+
+            # Verify token / Try refresh if needed
+            try:
+                await user.async_verify_token(id_token, "id")
+                _LOGGER.debug("Restored credentials from storage")
+                return user
+            except Exception:
+                _LOGGER.debug("Token expired, refreshing...")
+                await user.renew_access_token()
+                _LOGGER.debug("Successfully refreshed credentials")
+                return user
+        except Exception as e:
+            _LOGGER.debug("Failed to restore credentials: %s", e)
+            return None
+
+    async def _login_with_password(self) -> None:
+        """Login with username/password and save tokens."""
+        _LOGGER.debug("Logging in with password...")
+        try:
+            self._user_obj = await login(self.username, self.password)
+            # After fresh login, try fetching User ID (don't clear on fail)
+            try:
+                await self._fetch_user_id_internal(clear_on_fail=False)
+            except Exception as e:
+                _LOGGER.error("Failed to fetch User ID after fresh login: %s", e)
+
+            # Save new tokens
+            if self._user_obj and self._user_obj.id_token:
+                await self._store_async_save_current_tokens()
+        except Exception as e:
+            _LOGGER.error("Authentication failed: %s", e)
+            raise
+
+    async def _fetch_user_id_internal(self, clear_on_fail: bool = True) -> None:
+        """Fetch User ID using current session."""
+        if not self._user_obj:
+            return
+
+        try:
+            session = self.websession or async_get_clientsession(self.hass)
+            async with session.get(
+                f"{BASE_URL}/users", headers=await self._get_auth_headers()
+            ) as resp:
+                if resp.status == 401:
+                    _LOGGER.warning("Tokens rejected by backend (401).")
+                    if clear_on_fail:
+                        self._user_obj = None
+                        self._user_id = None
+                else:
+                    resp.raise_for_status()
+                    user_data = await resp.json()
+                    self._user_id = user_data.get("User", {}).get("Id")
+                    _LOGGER.debug("Fetched User ID: %s", self._user_id)
+        except Exception as e:
+            _LOGGER.error("Failed to fetch User ID: %s", e)
+            if clear_on_fail:
+                _LOGGER.warning("Clearing session due to fetch failure.")
+                self._user_obj = None
+                self._user_id = None
+
+    async def _store_async_save_current_tokens(self) -> None:
+        """Save current tokens to store."""
         if self._user_obj and self._user_obj.id_token:
             await self._store.async_save(
                 {
@@ -165,23 +218,6 @@ class MysaClient:
                     "refresh_token": self._user_obj.refresh_token,
                 }
             )
-
-        # 3. Fetch User ID (needed for MQTT commands)
-        try:
-            session = self.websession or async_get_clientsession(self.hass)
-            async with session.get(
-                f"{BASE_URL}/users", headers=await self._get_auth_headers()
-            ) as resp:
-                resp.raise_for_status()
-                user_data = await resp.json()
-                self._user_id = user_data.get("User", {}).get("Id")
-                _LOGGER.debug("Fetched User ID: %s", self._user_id)
-        except Exception as e:
-            _LOGGER.error("Failed to fetch User ID: %s", e)
-            # Don't strictly fail authentication if just USER ID fetch fails,
-            # though MQTT might fail later.
-
-        return True
 
     async def get_devices(self) -> dict[str, Any]:
         """Get devices."""

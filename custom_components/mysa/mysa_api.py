@@ -12,8 +12,9 @@ import time
 from collections.abc import Callable
 from typing import Any, cast
 
-from aiohttp import ClientSession
+from aiohttp import ClientResponseError, ClientSession
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from .capabilities import DeviceCapabilities
 from .client import MysaClient
@@ -282,7 +283,28 @@ class MysaApi:
     async def get_state(self) -> dict[str, Any]:
         """Get full state of all devices (HTTP merge)."""
         # Fetch fresh HTTP state
-        new_states = await self.client.get_state()
+        try:
+            new_states = await self.client.get_state()
+        except ClientResponseError as e:
+            if e.status == 401:
+                _LOGGER.warning(
+                    "Unauthorized (401) during state fetch. Attempting re-authentication."
+                )
+                try:
+                    # Force full login (skipping cache)
+                    await self.authenticate(use_cache=False)
+                    # Retry once
+                    new_states = await self.client.get_state()
+                except Exception as auth_err:
+                    _LOGGER.error("Re-authentication failed: %s", auth_err)
+                    raise UpdateFailed(
+                        f"Authentication failed: {auth_err}"
+                    ) from auth_err
+            else:
+                raise
+        except Exception as e:
+            _LOGGER.error("Error fetching state: %s", e)
+            raise
 
         if not isinstance(new_states, dict):
             _LOGGER.debug(

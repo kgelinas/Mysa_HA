@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 
+## [0.9.2-beta7] - 2026-03-14
+- **Self-Healing Auth**: Implemented automatic 401 recovery and re-authentication to resolve persistent session expiry issues.
+- **Enhanced AC Discovery**: Added robust fallback discovery for AC-V1 models with incomplete cloud reports, verified against official APK bytecode.
+- **AC Support**: Expanded fan and swing mode mappings to include intermediate IR codes, preventing UI "snap-back".
+
+
 ## [0.9.2-beta6] - 2026-03-13
 - **Improved AC-V1 Discovery**: Aggregated fan speeds and swing positions from all available HVAC modes (resolves "Auto-only" speed issues).
 

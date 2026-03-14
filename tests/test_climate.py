@@ -682,6 +682,177 @@ class TestMysaACClimateProperties:
             assert action == HVACAction.IDLE
 
 
+class TestMysaACClimateEnhancements:
+    """Test enhancements for AC climate entity (Discovery Fallbacks and Mapping)."""
+
+    @pytest.mark.asyncio
+    async def test_ac_capability_fallbacks(self, hass):
+        """Test that AC devices with missing capability keys use fallbacks."""
+        from custom_components.mysa.climate import MysaACClimate
+        from custom_components.mysa.const import AC_FAN_MODES_FALLBACK, AC_FAN_MODES, AC_SWING_MODES_FALLBACK, AC_SWING_MODES
+
+        # User-provided SupportedCaps which lacks fanSpeeds and verticalSwing in modes
+        supported_caps = {
+            "tempRange": [17, 30],
+            "modes": {
+                "2": {"temperatures": []},
+                "3": {"temperatures": [17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]},
+                "4": {"temperatures": [17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]},
+                "5": {"temperatures": []},
+                "6": {"temperatures": []}
+            },
+            "version": "1.1",
+            "keys": [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 39, 40]
+        }
+
+        device_data = {
+            "Id": "e8db8409091c",
+            "Name": "Test AC",
+            "Model": "AC-V1-0",
+            "SupportedCaps": supported_caps
+        }
+
+        coordinator = MagicMock()
+        api = MagicMock()
+        entry = MagicMock()
+
+        entity = MysaACClimate(coordinator, "e8db8409091c", device_data, api, entry)
+        entity.hass = hass
+        entity.entity_id = "climate.test_ac"
+
+        # Verify fan modes use fallback
+        expected_fan_modes = [AC_FAN_MODES[s] for s in AC_FAN_MODES_FALLBACK]
+        assert entity.fan_modes == expected_fan_modes
+        assert "auto" in entity.fan_modes
+        assert "low" in entity.fan_modes
+        assert "high" in entity.fan_modes
+
+        # Verify swing modes use fallback
+        expected_swing_modes = [AC_SWING_MODES[s] for s in AC_SWING_MODES_FALLBACK]
+        assert entity.swing_modes == expected_swing_modes
+        assert "off" in entity.swing_modes
+        assert "auto" in entity.swing_modes
+
+    @pytest.mark.asyncio
+    async def test_ac_fan_auto_only_fallback(self, hass):
+        """Test that AC devices with only 'auto' fan mode use fallback."""
+        from custom_components.mysa.climate import MysaACClimate
+        from custom_components.mysa.const import AC_FAN_MODES_FALLBACK, AC_FAN_MODES
+
+        supported_caps = {
+            "modes": {
+                "3": {"fanSpeeds": [1]} # Only Auto
+            }
+        }
+
+        device_data = {
+            "Id": "test_device",
+            "Name": "Test AC",
+            "Model": "AC-V1-0",
+            "SupportedCaps": supported_caps
+        }
+
+        coordinator = MagicMock()
+        api = MagicMock()
+        entry = MagicMock()
+
+        entity = MysaACClimate(coordinator, "test_device", device_data, api, entry)
+        entity.hass = hass
+
+        # Verify fan modes use fallback even if 'auto' was present but alone
+        expected_fan_modes = [AC_FAN_MODES[s] for s in AC_FAN_MODES_FALLBACK]
+        assert entity.fan_modes == expected_fan_modes
+
+    @pytest.mark.asyncio
+    async def test_ac_fan_swing_mappings(self, hass):
+        """Test that all fan and swing mode integers map correctly."""
+        from custom_components.mysa.climate import MysaACClimate
+        from custom_components.mysa.const import AC_MODE_COOL
+        from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+
+        # 1. Setup Mock Coordinator with a sequence of states
+        # Use fn: 2 (Quiet) and ss: 1 (Vertical) as reported by user
+        data = {
+            "ac_device": {
+                "md": AC_MODE_COOL,
+                "ambTemp": 22.0,
+                "stpt": 24.0,
+                "fn": 2,  # Quiet
+                "ss": 1,  # Vertical
+            }
+        }
+
+        async def async_update():
+            return data
+
+        coord = DataUpdateCoordinator(
+            hass,
+            MagicMock(),
+            name="test",
+            update_method=async_update,
+            config_entry=MagicMock(entry_id="test"),
+        )
+        coord.data = data
+
+        # 2. Setup Entity
+        mock_api = MagicMock()
+        mock_entry = MagicMock()
+        mock_entry.entry_id = "test_entry"
+        device_data = {
+            "Id": "ac_device",
+            "Name": "Test AC",
+            "Model": "AC-V1",
+            "SupportedCaps": {
+                "modes": {
+                    "4": {  # Cool mode
+                        "fanSpeeds": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12],
+                        "verticalSwing": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+                    }
+                }
+            }
+        }
+
+        entity = MysaACClimate(coord, "ac_device", device_data, mock_api, mock_entry)
+        entity.hass = hass
+        entity.entity_id = "climate.test_ac"
+
+        # 3. Verify Initial Mapping (fn: 2, ss: 1)
+        assert entity.fan_mode == "quiet"
+        assert entity.swing_mode == "vertical"
+
+        # 4. Test intermediate fan modes
+        fan_test_cases = [
+            (4, "medium_low"),
+            (6, "medium_high"),
+            (9, "strong"),
+            (10, "easy"),
+            (12, "sleep")
+        ]
+        for val, name in fan_test_cases:
+            coord.data["ac_device"]["fn"] = val
+            assert entity.fan_mode == name
+
+        # 5. Test swing modes
+        swing_test_cases = [
+            (0, "off"),
+            (2, "horizontal"),
+            (3, "auto"),
+            (9, "bottom")
+        ]
+        for val, name in swing_test_cases:
+            coord.data["ac_device"]["ss"] = val
+            assert entity.swing_mode == name
+
+        # 6. Test Reverse Mapping (Setting modes)
+        mock_api.set_ac_fan_speed = AsyncMock()
+        await entity.async_set_fan_mode("quiet")
+        mock_api.set_ac_fan_speed.assert_called_with("ac_device", "quiet")
+
+        mock_api.set_ac_swing_mode = AsyncMock()
+        await entity.async_set_swing_mode("vertical")
+        mock_api.set_ac_swing_mode.assert_called_with("ac_device", "vertical")
+
+
 class TestMysaACClimateActions:
     """Test MysaACClimate actions."""
 
