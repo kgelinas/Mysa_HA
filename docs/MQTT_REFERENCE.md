@@ -63,9 +63,9 @@ The `MsgType` field indicates the payload's intent.
 | 10 | ← Device | Boot Status (IP, Firmware, Serial) |
 | 11 | → Device | State Poll / Broadcast Request |
 | 20 | ← Device | Heartbeat / Status Request Response |
-| 30 | ← Device | Telemetry (AC Only: 1s updates) |
+| 30 | ← Device | Telemetry (AC Only: 1s updates) | See [AC KeyIDs](AC_KEYIDS_AND_MAPPINGS.md) |
 | 30 | ← Device | Device Shadow (Legacy) | Pinned state object |
-| 31 | ← Device | ACState Object Dump (AC Only) |
+| 31 | ← Device | ACState Object Dump (AC Only) | See [AC KeyIDs](AC_KEYIDS_AND_MAPPINGS.md) |
 | 40 | ← Device | Standard Telemetry (Alt) | Temperature, Humidity, Duty Cycle |
 | 44 | → Device | Set Setting (Cloud) | Ack for `POST /devices/{id}` updates |
 | 44 | ← Device | Command Response |

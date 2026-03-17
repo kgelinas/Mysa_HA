@@ -37,9 +37,17 @@ from homeassistant.helpers.update_coordinator import (
 
 from . import MysaData
 from .const import (
+    AC_FAN_AUTO,
+    AC_FAN_HIGH,
+    AC_FAN_LOW,
+    AC_FAN_MEDIUM,
     AC_FAN_MODES,
-    AC_FAN_MODES_FALLBACK,
     AC_FAN_MODES_REVERSE,
+    AC_KEY_FAN_AUTO,
+    AC_KEY_FAN_HIGH,
+    AC_KEY_FAN_LOW,
+    AC_KEY_FAN_MEDIUM,
+    AC_KEY_SWING_V_ON,
     AC_MODE_AUTO,
     AC_MODE_COOL,
     AC_MODE_DRY,
@@ -47,7 +55,6 @@ from .const import (
     AC_MODE_HEAT,
     AC_MODE_OFF,
     AC_SWING_MODES,
-    AC_SWING_MODES_FALLBACK,
     DOMAIN,
 )
 from .device import MysaDeviceLogic
@@ -616,21 +623,27 @@ class MysaACClimate(MysaClimate):
                 if fan_name:
                     self._supported_fan_modes.append(fan_name)
 
-        # Fallback: If SupportedCaps provides nothing or only auto, use minimum fallback set
-        if not self._supported_fan_modes or (
-            len(self._supported_fan_modes) == 1
-            and self._supported_fan_modes[0] == "auto"
-        ):
-            _LOGGER.info(
-                "AC %s SupportedCaps has limited fan modes, "
-                "applying fallback to match app manual control (auto, low, high)",
-                self._device_id,
-            )
-            self._supported_fan_modes = [
-                mode
-                for speed in AC_FAN_MODES_FALLBACK
-                if (mode := AC_FAN_MODES.get(speed)) is not None
-            ]
+        # Discovery via KeyIDs (as seen in APK) if SupportedCaps has limited data
+        keys = self._supported_caps.get("keys", [])
+        if keys:
+            key_to_speed = {
+                AC_KEY_FAN_AUTO: AC_FAN_AUTO,
+                AC_KEY_FAN_LOW: AC_FAN_LOW,
+                AC_KEY_FAN_MEDIUM: AC_FAN_MEDIUM,
+                AC_KEY_FAN_HIGH: AC_FAN_HIGH,
+            }
+            for speed_key, speed_val in key_to_speed.items():
+                if speed_key in keys:
+                    fan_name = AC_FAN_MODES.get(speed_val)
+                    if fan_name and fan_name not in self._supported_fan_modes:
+                        self._supported_fan_modes.append(fan_name)
+
+        # Sort the final list to maintain consistent UI order
+        self._supported_fan_modes.sort(
+            key=lambda x: list(AC_FAN_MODES.values()).index(x)
+            if x in AC_FAN_MODES.values()
+            else 99
+        )
 
     def _build_swing_modes(self, modes: dict[str, Any]) -> None:
         """Aggregate swing positions from all available mode's capabilities."""
@@ -647,17 +660,21 @@ class MysaACClimate(MysaClimate):
                 if swing_name:
                     self._supported_swing_modes.append(swing_name)
 
-        # Fallback: If SupportedCaps provides nothing, use minimum fallback set
-        if not self._supported_swing_modes:
-            _LOGGER.info(
-                "AC %s SupportedCaps missing swing modes, applying fallback (off, auto)",
-                self._device_id,
-            )
-            self._supported_swing_modes = [
-                mode
-                for speed in AC_SWING_MODES_FALLBACK
-                if (mode := AC_SWING_MODES.get(speed)) is not None
-            ]
+        # Discovery via KeyIDs for swing if missing in modes
+        keys = self._supported_caps.get("keys", [])
+        if not self._supported_swing_modes and keys:
+            if AC_KEY_SWING_V_ON in keys:
+                # If vertical swing key is present, provide core modes
+                for mode in ["off", "auto"]:
+                    if mode not in self._supported_swing_modes:
+                        self._supported_swing_modes.append(mode)
+
+        # Sort the final list
+        self._supported_swing_modes.sort(
+            key=lambda x: list(AC_SWING_MODES.values()).index(x)
+            if x in AC_SWING_MODES.values()
+            else 99
+        )
 
     @property
     def hvac_modes(self) -> list[HVACMode]:

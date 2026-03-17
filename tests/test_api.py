@@ -266,7 +266,7 @@ class TestMysaApi:
         await api.set_ac_fan_speed("dev1", "low")
         body = self.get_cmd_body(api)
         assert body is not None
-        assert body["cmd"][0]["fn"] == 3
+        assert body["cmd"][0]["fn"] == 2
 
         api.realtime.send_command.reset_mock()
         await api.set_ac_fan_speed("dev1", "invalid")
@@ -278,7 +278,7 @@ class TestMysaApi:
         await api.set_ac_swing_mode("dev1", "middle")
         body = self.get_cmd_body(api)
         assert body is not None
-        assert body["cmd"][0]["ss"] == 6
+        assert body["cmd"][0]["ss"] == 5
 
         api.realtime.send_command.reset_mock()
         await api.set_ac_swing_mode("dev1", "invalid")

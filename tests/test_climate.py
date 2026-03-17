@@ -686,20 +686,17 @@ class TestMysaACClimateEnhancements:
     """Test enhancements for AC climate entity (Discovery Fallbacks and Mapping)."""
 
     @pytest.mark.asyncio
-    async def test_ac_capability_fallbacks(self, hass):
-        """Test that AC devices with missing capability keys use fallbacks."""
+    async def test_ac_capability_discovery_keys(self, hass):
+        """Test that AC devices with missing capability keys use KeyID discovery."""
         from custom_components.mysa.climate import MysaACClimate
-        from custom_components.mysa.const import AC_FAN_MODES_FALLBACK, AC_FAN_MODES, AC_SWING_MODES_FALLBACK, AC_SWING_MODES
+        from custom_components.mysa.const import AC_FAN_MODES, AC_SWING_MODES
 
         # User-provided SupportedCaps which lacks fanSpeeds and verticalSwing in modes
         supported_caps = {
             "tempRange": [17, 30],
             "modes": {
-                "2": {"temperatures": []},
                 "3": {"temperatures": [17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]},
-                "4": {"temperatures": [17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]},
-                "5": {"temperatures": []},
-                "6": {"temperatures": []}
+                "4": {"temperatures": [17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]}
             },
             "version": "1.1",
             "keys": [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 39, 40]
@@ -720,29 +717,27 @@ class TestMysaACClimateEnhancements:
         entity.hass = hass
         entity.entity_id = "climate.test_ac"
 
-        # Verify fan modes use fallback
-        expected_fan_modes = [AC_FAN_MODES[s] for s in AC_FAN_MODES_FALLBACK]
-        assert entity.fan_modes == expected_fan_modes
+        # Verify fan modes discovered via keys (8=Auto, 9=Low, 11=High)
         assert "auto" in entity.fan_modes
         assert "low" in entity.fan_modes
         assert "high" in entity.fan_modes
+        assert "medium" not in entity.fan_modes
 
-        # Verify swing modes use fallback
-        expected_swing_modes = [AC_SWING_MODES[s] for s in AC_SWING_MODES_FALLBACK]
-        assert entity.swing_modes == expected_swing_modes
+        # Verify swing modes discovered via key 39
         assert "off" in entity.swing_modes
         assert "auto" in entity.swing_modes
 
     @pytest.mark.asyncio
-    async def test_ac_fan_auto_only_fallback(self, hass):
-        """Test that AC devices with only 'auto' fan mode use fallback."""
+    async def test_ac_fan_auto_only_discovery(self, hass):
+        """Test that AC devices with shared 'auto' fan mode in capabilities can still discover others."""
         from custom_components.mysa.climate import MysaACClimate
-        from custom_components.mysa.const import AC_FAN_MODES_FALLBACK, AC_FAN_MODES
+        from custom_components.mysa.const import AC_FAN_MODES
 
         supported_caps = {
             "modes": {
-                "3": {"fanSpeeds": [1]} # Only Auto
-            }
+                "3": {"fanSpeeds": [1]} # Only Auto in nested
+            },
+            "keys": [8, 9, 11] # Auto, Low, High in KeyIDs
         }
 
         device_data = {
@@ -758,10 +753,12 @@ class TestMysaACClimateEnhancements:
 
         entity = MysaACClimate(coordinator, "test_device", device_data, api, entry)
         entity.hass = hass
+        entity.entity_id = "climate.test_ac"
 
-        # Verify fan modes use fallback even if 'auto' was present but alone
-        expected_fan_modes = [AC_FAN_MODES[s] for s in AC_FAN_MODES_FALLBACK]
-        assert entity.fan_modes == expected_fan_modes
+        # Should have auto, low, high
+        assert "auto" in entity.fan_modes
+        assert "low" in entity.fan_modes
+        assert "high" in entity.fan_modes
 
     @pytest.mark.asyncio
     async def test_ac_fan_swing_mappings(self, hass):
@@ -817,14 +814,15 @@ class TestMysaACClimateEnhancements:
         entity.entity_id = "climate.test_ac"
 
         # 3. Verify Initial Mapping (fn: 2, ss: 1)
-        assert entity.fan_mode == "quiet"
+        assert entity.fan_mode == "low"
         assert entity.swing_mode == "vertical"
 
         # 4. Test intermediate fan modes
         fan_test_cases = [
-            (4, "medium_low"),
-            (6, "medium_high"),
-            (9, "strong"),
+            (3, "medium"),
+            (4, "high"),
+            (6, "strong"),
+            (7, "quiet"),
             (10, "easy"),
             (12, "sleep")
         ]
@@ -835,9 +833,9 @@ class TestMysaACClimateEnhancements:
         # 5. Test swing modes
         swing_test_cases = [
             (0, "off"),
-            (2, "horizontal"),
-            (3, "auto"),
-            (9, "bottom")
+            (1, "vertical"),
+            (2, "auto"),
+            (8, "bottom")
         ]
         for val, name in swing_test_cases:
             coord.data["ac_device"]["ss"] = val
@@ -1838,7 +1836,7 @@ class TestACClimateEdgeCases2:
             "SupportedCaps": {
                 "modes": {
                     "4": {  # Cool mode
-                        "verticalSwing": [4]  # 4 -> "top" in AC_SWING_MODES
+                        "verticalSwing": [3]  # 3 -> "top" in AC_SWING_MODES
                     }
                 }
             },

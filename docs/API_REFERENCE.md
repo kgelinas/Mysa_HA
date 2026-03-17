@@ -111,7 +111,7 @@ All state values use a timestamp/value object:
 | `SwingStateHorizontal` | number | Horizontal swing position |
 | `IsThermostatic` | number | Climate+ mode (0/1) |
 | `Delta` | number | Temperature delta |
-| `ACState` | object | Raw codes: `1`:Power, `2`:Mode, `3`:Temp, `4`:Fan, `5`:Swing |
+| `ACState` | object | Raw codes: `1`:Power, `2`:Mode, `3`:Temp, `4`:Fan, `5`:Swing (See [AC KeyIDs](AC_KEYIDS_AND_MAPPINGS.md) for details) |
 | `FanSpeed` | number | Current fan speed setting (also in `fn`) |
 
 ---

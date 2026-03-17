@@ -157,7 +157,7 @@ class TestCoverageEdgeCases:
         entity.async_write_ha_state = MagicMock()
 
         # 1. Expiration
-        mock_coordinator.data = {"device1": {"SwingStateHorizontal": 6}}  # Center (6)
+        mock_coordinator.data = {"device1": {"SwingStateHorizontal": 5}}  # Center (5)
         await entity.async_select_option("left")
         assert entity.current_option == "left"
 
@@ -169,7 +169,7 @@ class TestCoverageEdgeCases:
         entity._pending_timestamp = time.time()
 
         # Cloud updates to 'left' (4)
-        mock_coordinator.data = {"device1": {"SwingStateHorizontal": 4}}
+        mock_coordinator.data = {"device1": {"SwingStateHorizontal": 3}}
         assert entity.current_option == "left"
         assert entity._pending_option is None  # Should clear on convergence
 

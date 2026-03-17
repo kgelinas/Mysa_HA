@@ -22,31 +22,31 @@ class TestHorizontalSwingSelect:
         """Test horizontal swing position to name mapping."""
         # From const.py AC_HORIZONTAL_SWING_MODES
         swing_modes = {
-            0: "auto",
-            1: "left",
-            2: "left_center",
-            3: "center",
-            4: "right_center",
-            5: "right",
+            2: "auto",
+            3: "left",
+            4: "left_center",
+            5: "center",
+            6: "right_center",
+            8: "right",
         }
 
-        assert swing_modes[0] == "auto"
-        assert swing_modes[3] == "center"
+        assert swing_modes[2] == "auto"
+        assert swing_modes[5] == "center"
         assert len(swing_modes) >= 6
 
     def test_horizontal_swing_reverse_mapping(self):
         """Test reverse mapping from name to position."""
         reverse_map = {
-            "auto": 0,
-            "left": 1,
-            "left_center": 2,
-            "center": 3,
-            "right_center": 4,
-            "right": 5,
+            "auto": 2,
+            "left": 3,
+            "left_center": 4,
+            "center": 5,
+            "right_center": 6,
+            "right": 8,
         }
 
-        assert reverse_map["auto"] == 0
-        assert reverse_map["center"] == 3
+        assert reverse_map["auto"] == 2
+        assert reverse_map["center"] == 5
 
     def test_horizontal_swing_icon(self):
         """Test horizontal swing select icon."""
@@ -76,7 +76,7 @@ class TestHorizontalSwingFromCapabilities:
 
     def test_options_from_supported_caps(self):
         """Test building options from SupportedCaps."""
-        supported_caps = {"modes": {"cool": {"horizontalSwing": [0, 1, 2, 3, 4, 5]}}}
+        supported_caps = {"modes": {"cool": {"horizontalSwing": [2, 3, 4, 5, 6, 8]}}}
 
         modes = supported_caps.get("modes", {})
         horizontal_swings = []
@@ -86,7 +86,7 @@ class TestHorizontalSwingFromCapabilities:
             if horizontal_swings:
                 break
 
-        assert horizontal_swings == [0, 1, 2, 3, 4, 5]
+        assert horizontal_swings == [2, 3, 4, 5, 6, 8]
 
     def test_options_fallback_when_no_caps(self):
         """Test fallback to default options when no caps available."""
@@ -124,21 +124,21 @@ class TestHorizontalSwingState:
 
     def test_state_from_mqtt_simple(self):
         """Test reading horizontal swing state from simple MQTT value."""
-        state: dict[str, Any] = {"SwingStateHorizontal": 3}
+        state: dict[str, Any] = {"SwingStateHorizontal": 5}
 
         val = state.get("SwingStateHorizontal")
 
-        assert val == 3  # "center"
+        assert val == 5  # "center"
 
     def test_state_from_mqtt_nested(self):
         """Test reading horizontal swing state from nested MQTT value."""
-        state: dict[str, Any] = {"SwingStateHorizontal": {"v": 3, "t": 1704067200}}
+        state: dict[str, Any] = {"SwingStateHorizontal": {"v": 5, "t": 1704067200}}
 
         val = state.get("SwingStateHorizontal")
         if isinstance(val, dict):
             val = val.get("v")
 
-        assert val == 3
+        assert val == 5
 
     def test_state_default_when_missing(self):
         """Test default value when no state available."""
@@ -148,7 +148,7 @@ class TestHorizontalSwingState:
         if val is None:
             val = 0  # auto
 
-        swing_modes = {0: "auto", 3: "center"}
+        swing_modes = {2: "auto", 5: "center"}
         result = swing_modes.get(val, "auto")
 
         assert result == "auto"
@@ -180,7 +180,7 @@ class TestHorizontalSwingPendingState:
         if pending_option is not None:
             result = pending_option
         else:
-            swing_modes = {0: "auto", 3: "center"}
+            swing_modes = {2: "auto", 5: "center"}
             result = swing_modes.get(coordinator_value, "auto")
 
         assert result == "center"
@@ -195,14 +195,13 @@ class TestHorizontalSwingPendingState:
 
         assert pending_option is None
 
-
 class TestHorizontalSwingCommands:
     """Test horizontal swing command building."""
 
     def test_command_structure(self):
         """Test horizontal swing command structure."""
         device_id = "device1"
-        position = 3  # center
+        position = 5  # center
 
         command: dict[str, Any] = {
             "did": device_id,
@@ -210,7 +209,7 @@ class TestHorizontalSwingCommands:
         }
 
         assert command["did"] == device_id
-        assert command["cmd"][0]["swh"] == 3
+        assert command["cmd"][0]["swh"] == 5
 
     def test_command_lowercase_conversion(self):
         """Test option is lowercased before lookup."""
@@ -416,13 +415,13 @@ class TestSelectCoverageGaps:
         # Expiration
         entity._pending_option = "swing1"
         entity._pending_timestamp = time.time() - 31
-        mock_coordinator.data = {"dev1": {"ssh": AC_SWING_AUTO}}  # 3 -> 'auto'
+        mock_coordinator.data = {"dev1": {"ssh": AC_SWING_AUTO}}  # 2 -> 'auto'
         assert entity.current_option == "auto"
         assert entity._pending_option is None
         # Convergence
         entity._pending_option = "center"
         entity._pending_timestamp = time.time()
-        mock_coordinator.data = {"dev1": {"ssh": AC_SWING_POSITION_3}}  # 6 -> 'center'
+        mock_coordinator.data = {"dev1": {"ssh": AC_SWING_POSITION_3}}  # 5 -> 'center'
         assert entity.current_option == "center"
         assert entity._pending_option is None
 
@@ -524,7 +523,7 @@ class TestSelectConsolidated:
         device_id = "d1"
         device_data = {
             "SupportedCaps": {
-                "modes": {"1": {"horizontalSwing": [3, 4]}}  # 3=auto, 4=left
+                "modes": {"1": {"horizontalSwing": [2, 3]}}  # 2=auto, 3=left
             }
         }
 
@@ -539,11 +538,11 @@ class TestSelectConsolidated:
         assert "left" in entity.options
 
         # Test current_option (from coordinator data)
-        coordinator.data = {"d1": {"ssh": 3}}  # 3 = auto
+        coordinator.data = {"d1": {"ssh": 2}}  # 2 = auto
         assert entity.current_option == "auto"
 
         # Test current_option fallback (SwingStateHorizontal uses dict {"v": ...})
-        coordinator.data = {"d1": {"SwingStateHorizontal": {"v": 4}}}  # 4 = left
+        coordinator.data = {"d1": {"SwingStateHorizontal": {"v": 3}}}  # 3 = left
         assert entity.current_option == "left"
 
         # Test async_select_option
@@ -552,7 +551,7 @@ class TestSelectConsolidated:
             await entity.async_select_option("auto")
 
         assert api.set_ac_horizontal_swing.call_count == 1
-        assert api.set_ac_horizontal_swing.call_args == (("d1", 3),)
+        assert api.set_ac_horizontal_swing.call_args == (("d1", 2),)
 
         # 2. MysaSensorModeSelect (In-Floor)
         entity_sensor = MysaSensorModeSelect(
@@ -580,7 +579,7 @@ class TestSelectConsolidated:
         api = MagicMock()
         entry = MagicMock()
         device_id = "d1"
-        device_data = {"SupportedCaps": {"modes": {"1": {"horizontalSwing": [3]}}}}
+        device_data = {"SupportedCaps": {"modes": {"1": {"horizontalSwing": [2]}}}}
 
         entity = MysaHorizontalSwingSelect(
             coordinator, device_id, device_data, api, entry
@@ -601,14 +600,14 @@ class TestSelectConsolidated:
         # Pending Expiration
         entity._pending_option = "left"
         entity._pending_timestamp = time.time() - 31
-        coordinator.data = {"d1": {"ssh": 3}}  # auto
+        coordinator.data = {"d1": {"ssh": 2}}  # auto
         assert entity.current_option == "auto"
         assert entity._pending_option is None
 
         # Pending Convergence
         entity._pending_option = "auto"
         entity._pending_timestamp = time.time()
-        coordinator.data = {"d1": {"ssh": 3}}  # auto matches
+        coordinator.data = {"d1": {"ssh": 2}}  # auto matches
         assert entity.current_option == "auto"
         assert entity._pending_option is None
 
@@ -649,7 +648,7 @@ class TestSelectConsolidated:
 
         entity._pending_option = "center"
         entity._pending_timestamp = time.time()
-        coordinator.data = {"d1": {"ssh": 4}} # Different from pending
+        coordinator.data = {"d1": {"ssh": 2}} # Different from pending
         assert entity.current_option == "center" # Hits line 190
 
     @pytest.mark.asyncio
