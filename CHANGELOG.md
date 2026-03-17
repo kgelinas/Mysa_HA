@@ -3,8 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 
-## [0.9.2-beta8] - 2026-03-17
+## [0.9.2-beta9] - 2026-03-17
 - **AC Mode Realignment**: Corrected fan speed and swing mode mappings to match device-reported values and official APK constants, resolving UI state "snap-back" issues.
+- **KeyID-Based Discovery**: Implemented dynamic feature discovery for AC devices using factory KeyIDs, ensuring robust UI support even when cloud capabilities are incomplete.
+
+## [0.9.2-beta8] - 2026-03-16
 - **Dynamic AC Limits**: AC climate entities now dynamically extract temperature limits from `SupportedCaps`.
 - **Setpoint Fallbacks**: Fixed `Min Setpoint` and `Max Setpoint` diagnostic and configuration entities for AC devices by falling back to physical device limits from `SupportedCaps` when telemetry is missing.
 - **Robust Auth Recovery**: Added graceful recovery for `NotAuthorizedException: Refresh Token has expired`, ensuring the integration triggers a full re-authentication when the refresh token is invalid.
