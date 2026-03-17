@@ -52,7 +52,7 @@ async def async_setup_entry(
             MysaMaxBrightnessNumber(coordinator, device_id, device_data, api, entry)
         )
 
-        # Min/Max Setpoint limits for all heating devices
+        # Min/Max Setpoint limits for all devices
         entities.append(
             MysaMinSetpointNumber(coordinator, device_id, device_data, api, entry)
         )
@@ -387,6 +387,11 @@ class MysaMinSetpointNumber(MysaNumber):
         # ST-V1-0 reports min_setpoint in degrees and MinSetpoint/lockoutMin in centidegrees
         val = self._get_value_with_pending(["min_setpoint", "mns", "MinSetpoint"])
         if val is None:
+            # Fallback for AC devices from SupportedCaps
+            supported_caps = self._device_data.get("SupportedCaps", {})
+            temp_range = supported_caps.get("tempRange")
+            if temp_range and len(temp_range) == 2:
+                return float(temp_range[0])
             return None
         # Heuristic: if > 100, it's likely centidegrees
         return float(val) / 100.0 if float(val) > 100 else float(val)
@@ -444,6 +449,11 @@ class MysaMaxSetpointNumber(MysaNumber):
         # ST-V1-0 reports max_setpoint in degrees and MaxSetpoint/lockoutMax in centidegrees
         val = self._get_value_with_pending(["max_setpoint", "mxs", "MaxSetpoint"])
         if val is None:
+            # Fallback for AC devices from SupportedCaps
+            supported_caps = self._device_data.get("SupportedCaps", {})
+            temp_range = supported_caps.get("tempRange")
+            if temp_range and len(temp_range) == 2:
+                return float(temp_range[1])
             return None
         # Heuristic: if > 100, it's likely centidegrees
         return float(val) / 100.0 if float(val) > 100 else float(val)

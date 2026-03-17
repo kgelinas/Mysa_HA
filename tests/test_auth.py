@@ -151,9 +151,20 @@ class TestCognitoUser:
         """Test renew_access_token error paths."""
         user = CognitoUser(mock_cognito_client)
 
-        # Client error
+        # Client error (generic)
         mock_cognito_client.renew_access_token.side_effect = Exception("Refresh failed")
         with pytest.raises(Exception, match="Refresh failed"):
+            await user.renew_access_token()
+
+    async def test_renew_access_token_expired(self, mock_cognito_client):
+        """Test renew_access_token with expired refresh token."""
+        user = CognitoUser(mock_cognito_client)
+
+        # Expired Error
+        mock_cognito_client.renew_access_token.side_effect = Exception(
+            "NotAuthorizedException: Refresh Token has expired"
+        )
+        with pytest.raises(Exception, match="NotAuthorizedException"):
             await user.renew_access_token()
 
     async def test_verify_token_errors(self, mock_cognito_client):

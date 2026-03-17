@@ -126,7 +126,12 @@ class CognitoUser:
             await loop.run_in_executor(None, self._client.renew_access_token)
             _LOGGER.debug("Successfully renewed access token for %s", self.username)
         except Exception as e:
-            _LOGGER.error("Failed to renew access token: %s", e)
+            if "NotAuthorizedException" in str(e) or "Refresh Token has expired" in str(
+                e
+            ):
+                _LOGGER.info("Access token renewal failed (expired): %s", e)
+            else:
+                _LOGGER.error("Failed to renew access token: %s", e)
             raise
 
     async def get_aws_credentials(

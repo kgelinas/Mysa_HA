@@ -12,7 +12,7 @@ from custom_components.mysa.device import MysaDeviceLogic
 from custom_components.mysa.client import MysaClient
 from custom_components.mysa.mysa_api import MysaApi
 from custom_components.mysa.realtime import MysaRealtime
-from aiohttp import ClientResponseError
+from aiohttp import ClientResponseError, RequestInfo
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 
@@ -2204,3 +2204,74 @@ class TestMysaApiRecovery:
 
         with pytest.raises(Exception, match="Generic Error"):
             await api.get_state()
+
+    async def test_auth_refresh_token_expired_recovery(self, mock_hass):
+        """Test that renewal failure in client triggers re-auth in api."""
+        username = "test@example.com"
+        password = "password"
+
+        # 1. Setup network mocks
+        mock_session = MagicMock()
+        mock_session.get = MagicMock()
+
+        mock_resp_401 = MagicMock()
+        mock_resp_401.status = 401
+        mock_resp_401.raise_for_status.side_effect = ClientResponseError(
+            RequestInfo(url="http://test", method="GET", headers={}), (), status=401
+        )
+        mock_resp_401.__aenter__ = AsyncMock(return_value=mock_resp_401)
+        mock_resp_401.__aexit__ = AsyncMock(return_value=False)
+
+        mock_resp_200 = MagicMock()
+        mock_resp_200.status = 200
+        mock_resp_200.json = AsyncMock(return_value={"DeviceStatesObj": []})
+        mock_resp_200.__aenter__ = AsyncMock(return_value=mock_resp_200)
+        mock_resp_200.__aexit__ = AsyncMock(return_value=False)
+
+        api = MysaApi(username, password, mock_hass, websession=mock_session)
+
+        # 2. Patch authenticate
+        async def mock_authenticate_side_effect(*args, **kwargs):
+            # Restore a valid user object so retry succeeds
+            new_user = MagicMock()
+            new_user.id_claims = {"exp": time.time() + 3600}
+            new_user.id_token = "new_token"
+            new_user.renew_access_token = AsyncMock()
+            api.client._user_obj = new_user
+
+        with patch.object(
+            api, "authenticate", side_effect=mock_authenticate_side_effect
+        ) as mock_api_auth:
+            # Setup expired user session in client
+            mock_user = MagicMock()
+            mock_user.id_claims = {"exp": 0}  # Immediate expiry
+            mock_user.id_token = "expired_token"
+            mock_user.renew_access_token = AsyncMock()
+            mock_user.renew_access_token.side_effect = Exception(
+                "NotAuthorizedException: Refresh Token has expired"
+            )
+
+            api.client._user_obj = mock_user
+
+            # Sequential session results
+            mock_session.get.side_effect = [
+                mock_resp_401,
+                mock_resp_401,  # Round 1
+                mock_resp_200,
+                mock_resp_200,  # Retry Round 1
+                mock_resp_200,  # Round 2 (ST1)
+                mock_resp_200,
+                mock_resp_200,  # Extra
+            ]
+
+            # 3. Execution
+            result = await api.get_state()
+
+            # 4. Verification
+            assert isinstance(result, dict)
+            assert mock_user.renew_access_token.called
+            assert mock_api_auth.called
+            mock_api_auth.assert_called_with(use_cache=False)
+            # Verify that we now have a NEW user object
+            assert api.client._user_obj is not None
+            assert api.client._user_obj.id_token == "new_token"

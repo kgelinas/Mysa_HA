@@ -79,7 +79,19 @@ class MysaClient:
             and time() > self._user_obj.id_claims.get("exp", 0) - 60
         ):
             # Renew token (now async, no executor needed)
-            await self._user_obj.renew_access_token()
+            try:
+                await self._user_obj.renew_access_token()
+            except Exception as e:
+                # If renewal fails (e.g. Refresh Token Expired), clear user object.
+                # This will force the next authenticate() call to use password credentials
+                # or cause the current request to return a 401 which triggers self-healing.
+                _LOGGER.warning(
+                    "Failed to renew access token for %s: %s. Clearing session.",
+                    self.username,
+                    e,
+                )
+                self._user_obj = None
+                return {}
 
         headers = dict(CLIENT_HEADERS)
         if self._user_obj.id_token:

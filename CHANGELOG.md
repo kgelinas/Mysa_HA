@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 
+## [0.9.2-beta8] - 2026-03-16
+- **Dynamic AC Limits**: AC climate entities now dynamically extract temperature limits from `SupportedCaps`.
+- **Setpoint Fallbacks**: Fixed `Min Setpoint` and `Max Setpoint` diagnostic and configuration entities for AC devices by falling back to physical device limits from `SupportedCaps` when telemetry is missing.
+- **Robust Auth Recovery**: Added graceful recovery for `NotAuthorizedException: Refresh Token has expired`, ensuring the integration triggers a full re-authentication when the refresh token is invalid.
+
 ## [0.9.2-beta7] - 2026-03-14
 - **Self-Healing Auth**: Implemented automatic 401 recovery and re-authentication to resolve persistent session expiry issues.
 - **Enhanced AC Discovery**: Added robust fallback discovery for AC-V1 models with incomplete cloud reports, verified against official APK bytecode.

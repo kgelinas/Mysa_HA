@@ -2815,3 +2815,52 @@ class TestSensorConsolidated:
             nrg.hass = hass
             await nrg.async_added_to_hass()
             assert nrg.native_value == 0.0
+
+
+async def test_ac_sensor_entities_fallback(hass, mock_api):
+    """Test that AC devices use tempRange fallback for setpoint sensors."""
+    from custom_components.mysa.sensor import async_setup_entry as async_setup_sensor
+
+    device_id = "ac_device"
+    device_data = {
+        "Id": device_id,
+        "Model": "AC-V1-0",
+        "Name": "AC",
+        "SupportedCaps": {
+            "tempRange": [17, 30],
+        },
+    }
+
+    mock_api.devices = {device_id: device_data}
+    mock_api.is_ac_device.return_value = True
+
+    entry = MagicMock()
+    entry.runtime_data.coordinator = MagicMock()
+    entry.runtime_data.api = mock_api
+    entry.runtime_data.coordinator.data = {}  # Empty state
+
+    async_add_entities = MagicMock()
+
+    await async_setup_sensor(hass, entry, async_add_entities)
+
+    # Verify entities were added for this device
+    added_entities = async_add_entities.call_args[0][0]
+
+    # Check if they have the correct values
+    min_sp = next(
+        e
+        for e in added_entities
+        if hasattr(e, "_sensor_key")
+        and e._sensor_key == "MinSetpoint"
+        and e._device_id == device_id
+    )
+    max_sp = next(
+        e
+        for e in added_entities
+        if hasattr(e, "_sensor_key")
+        and e._sensor_key == "MaxSetpoint"
+        and e._device_id == device_id
+    )
+
+    assert min_sp.native_value == 17.0
+    assert max_sp.native_value == 30.0

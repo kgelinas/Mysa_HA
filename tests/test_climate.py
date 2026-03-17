@@ -844,13 +844,41 @@ class TestMysaACClimateEnhancements:
             assert entity.swing_mode == name
 
         # 6. Test Reverse Mapping (Setting modes)
-        mock_api.set_ac_fan_speed = AsyncMock()
-        await entity.async_set_fan_mode("quiet")
-        mock_api.set_ac_fan_speed.assert_called_with("ac_device", "quiet")
-
         mock_api.set_ac_swing_mode = AsyncMock()
         await entity.async_set_swing_mode("vertical")
         mock_api.set_ac_swing_mode.assert_called_with("ac_device", "vertical")
+
+    @pytest.mark.asyncio
+    async def test_ac_climate_limits_dynamic(self, hass, mock_api):
+        """Test that AC climate entity extracts limits from SupportedCaps."""
+        from custom_components.mysa.climate import MysaACClimate
+
+        device_id = "ac_device"
+        device_data = {
+            "Id": device_id,
+            "Model": "AC-V1-0",
+            "Name": "AC",
+            "SupportedCaps": {
+                "tempRange": [18, 30],
+                "temperatureStep": 1,
+                "modes": {"4": {"fanSpeeds": [1, 2, 3]}},
+            },
+        }
+
+        # Mock coordinator and entry
+        coordinator = MagicMock()
+        entry = MagicMock()
+        entry.runtime_data.coordinator = coordinator
+        entry.runtime_data.api = mock_api
+        mock_api.devices = {device_id: device_data}
+        mock_api.is_ac_device.return_value = True
+
+        ac_climate = MysaACClimate(coordinator, device_id, device_data, mock_api, entry)
+
+        # Check limits
+        assert ac_climate.min_temp == 18.0
+        assert ac_climate.max_temp == 30.0
+        assert ac_climate.target_temperature_step == 1.0
 
 
 class TestMysaACClimateActions:

@@ -325,7 +325,9 @@ class MysaClimate(
     async def _update_state_cache(self, key: str, value: Any) -> None:
         """Update local state cache immediately."""
         if self.coordinator.data is None:
-            self.coordinator.data = {}
+            # Fixing the previous bad cast: we want to assign an empty dict to data,
+            # and cast it to Any to satisfy the linter's 'Never' inferred type if needed.
+            self.coordinator.data = cast(Any, {})
         if self._device_id not in self.coordinator.data:
             self.coordinator.data[self._device_id] = {}
 
@@ -548,27 +550,38 @@ class MysaACClimate(MysaClimate):
         # Track last used mode for smart turn-on
         self._last_mode: HVACMode | None = None
 
-    @property
-    def target_temperature_step(self) -> float:
-        """Return the supported step of target temperature for AC."""
-        # AC units typically use 1 degree steps in both C and F
-        return 1.0
-
     def _build_supported_options(self) -> None:
         """Build lists of supported modes from SupportedCaps."""
         modes = self._supported_caps.get("modes", {})
+
+        # Extract dynamic temperature limits if available
+        temp_range = self._supported_caps.get("tempRange")
+        if isinstance(temp_range, list) and len(temp_range) >= 2:
+            self._attr_min_temp = float(temp_range[0])
+            self._attr_max_temp = float(temp_range[1])
+
+        # Extract temperature step (usually 1.0 for AC units)
+        self._temp_step = float(self._supported_caps.get("temperatureStep", 1.0))
 
         self._build_hvac_modes(modes)
         self._build_fan_modes(modes)
         self._build_swing_modes(modes)
 
         _LOGGER.debug(
-            "AC %s supported modes: hvac=%s, fan=%s, swing=%s",
+            "AC %s supported modes: hvac=%s, fan=%s, swing=%s, limits=[%s, %s], step=%s",
             self._device_id,
             self._supported_hvac_modes,
             self._supported_fan_modes,
             self._supported_swing_modes,
+            self._attr_min_temp,
+            self._attr_max_temp,
+            self._temp_step,
         )
+
+    @property
+    def target_temperature_step(self) -> float:
+        """Return the supported step of target temperature for AC."""
+        return getattr(self, "_temp_step", 1.0)
 
     def _build_hvac_modes(self, modes: dict[str, Any]) -> None:
         """Map SupportedCaps mode keys to HVAC modes."""

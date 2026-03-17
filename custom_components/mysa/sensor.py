@@ -597,8 +597,10 @@ class MysaDiagnosticSensor(
             if self.coordinator.data
             else None
         )
-        if not state or (val := self._extract_value(state, self._keys)) is None:
-            return None
+        val = self._extract_value(state, self._keys) if state else None
+
+        if val is None:
+            return self._get_fallback_value()
 
         # Allow booleans to pass through (e.g. for HVAC fan settings)
         if isinstance(val, bool):
@@ -622,6 +624,19 @@ class MysaDiagnosticSensor(
             return float(val)
         except (ValueError, TypeError):
             return str(val)
+
+    def _get_fallback_value(self) -> float | None:
+        """Get fallback value if telemetry is missing."""
+        if self._sensor_key in ["MinSetpoint", "MaxSetpoint"]:
+            supported_caps = self._device_data.get("SupportedCaps", {})
+            temp_range = supported_caps.get("tempRange")
+            if temp_range and len(temp_range) == 2:
+                return float(
+                    temp_range[0]
+                    if self._sensor_key == "MinSetpoint"
+                    else temp_range[1]
+                )
+        return None
 
     def _extract_value(self, state: dict[str, Any] | None, keys: list[str]) -> Any:
         """Helper to extract a value from state dictionary."""

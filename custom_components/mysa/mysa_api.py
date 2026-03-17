@@ -285,10 +285,19 @@ class MysaApi:
         # Fetch fresh HTTP state
         try:
             new_states = await self.client.get_state()
-        except ClientResponseError as e:
-            if e.status == 401:
+        except (ClientResponseError, Exception) as e:
+            # Catch 401 ClientResponseError OR generic Cognito NotAuthorizedException
+            is_auth_error = (
+                isinstance(e, ClientResponseError) and e.status == 401
+            ) or (
+                "NotAuthorizedException" in str(e)
+                or "Refresh Token has expired" in str(e)
+            )
+
+            if is_auth_error:
                 _LOGGER.warning(
-                    "Unauthorized (401) during state fetch. Attempting re-authentication."
+                    "Authentication failure during state fetch: %s. Attempting re-authentication.",
+                    e,
                 )
                 try:
                     # Force full login (skipping cache)
@@ -301,10 +310,10 @@ class MysaApi:
                         f"Authentication failed: {auth_err}"
                     ) from auth_err
             else:
+                if isinstance(e, ClientResponseError):
+                    raise
+                _LOGGER.error("Error fetching state: %s", e)
                 raise
-        except Exception as e:
-            _LOGGER.error("Error fetching state: %s", e)
-            raise
 
         if not isinstance(new_states, dict):
             _LOGGER.debug(
