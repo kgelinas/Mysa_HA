@@ -3,49 +3,27 @@
 All notable changes to this project will be documented in this file.
 
 
-## [0.9.2-beta9] - 2026-03-17
-- **AC Mode Realignment**: Corrected fan speed and swing mode mappings to match device-reported values and official APK constants, resolving UI state "snap-back" issues.
-- **KeyID-Based Discovery**: Implemented dynamic feature discovery for AC devices using factory KeyIDs, ensuring robust UI support even when cloud capabilities are incomplete.
-
-## [0.9.2-beta8] - 2026-03-16
+## [0.9.2] - 2026-03-22
+### Added
+- **ST-V1 Support**: Added full support for Central AC/Heat (ST-V1) devices, including mode parsing via 3-digit config codes.
+- **Enhanced AC Discovery**: Implemented dynamic feature discovery for AC devices using factory KeyIDs and capability aggregation from all HVAC modes.
 - **Dynamic AC Limits**: AC climate entities now dynamically extract temperature limits from `SupportedCaps`.
-- **Setpoint Fallbacks**: Fixed `Min Setpoint` and `Max Setpoint` diagnostic and configuration entities for AC devices by falling back to physical device limits from `SupportedCaps` when telemetry is missing.
-- **Robust Auth Recovery**: Added graceful recovery for `NotAuthorizedException: Refresh Token has expired`, ensuring the integration triggers a full re-authentication when the refresh token is invalid.
+- **Setpoint Fallbacks**: Fixed `Min Setpoint` and `Max Setpoint` diagnostics for AC devices using physical fallback limits.
+- **Batch Observation**: Added support for high-precision `/batch` topic observation in `mysa_debug` tool.
+- **Robust Auth Recovery**: Implemented self-healing authentication with automatic 401 recovery and refresh token handling.
 
-## [0.9.2-beta7] - 2026-03-14
-- **Self-Healing Auth**: Implemented automatic 401 recovery and re-authentication to resolve persistent session expiry issues.
-- **Enhanced AC Discovery**: Added robust fallback discovery for AC-V1 models with incomplete cloud reports, verified against official APK bytecode.
-- **AC Support**: Expanded fan and swing mode mappings to include intermediate IR codes, preventing UI "snap-back".
-
-
-## [0.9.2-beta6] - 2026-03-13
-- **Improved AC-V1 Discovery**: Aggregated fan speeds and swing positions from all available HVAC modes (resolves "Auto-only" speed issues).
-
-## [0.9.2-beta5] - 2026-03-13
-- Fix ST-V1 thermostat sensors (such as humidity) freezing up due to aggressively discarding new HTTP telemetry if it overlaps with fresher AWS Shadow updates.
-
-## [0.9.2-beta4] - 2024-03-04
-### Added
-- New thermostat controls, enhanced real-time update parsing, and type hinting.
-
-## [0.9.2-beta3] - 2026-03-02
-### Added
-- Parse ST-V1 HVAC capabilities using a 3-digit alphanumeric config code, update related documentation, and add a new API endpoint.
-
-## [0.9.2-beta2] - 2026-02-28
 ### Changed
-- **Major refactoring**: Aligning with Mysa App for API and MQTT.
-- **Device Type**: Added support for new device types (e.g., new HVAC models (ST-V1)).
+- **Major Refactor**: Aligned core logic and MQTT/API parsing with the official Mysa App architecture for improved stability and forward compatibility.
+- **AC Mode Realignment**: Re-mapped fan speed and swing mode integers to match device-reported values and official constants, resolving UI "snap-back" issues.
+- **MQTT Stability**: Implemented chunked topic subscriptions to resolve connection drops (Error 1005) on large accounts.
+- **Type Hinting**: Added comprehensive type annotations and `from __future__ import annotations` across primary platform files.
 
 ### Fixed
-- **Squashed bugs**: many bug with optimistic update , related to MQTT echo etc fixed
+- **Sensor Stalling**: Resolved issues where humidity or current sensors would appear "frozen" due to over-aggressive staleness checks.
+- **Optimistic UI**: Fixed multiple bugs in optimistic state convergence and command echoing.
+- **Handshake Resilience**: Improved MQTT handshake to handle asynchronous data arrival gracefully.
+- **Translation Sync**: Standardized exception strings across all supported languages.
 
-## [0.9.2-beta1] - 2026-01-29
-### Added
-- **MQTT Stability (1005 Fix)**: Implemented chunked topic subscriptions (maximum 2 devices per packet) to prevent connection dropped by broker (Error 1005) on accounts with multiple devices.
-- **Handshake Resilience**: Updated MQTT handshake to handle incoming data during the subscription phase gracefully.
-- **Batch Observation**: The `mysa_debug` tool now supports high-precision `/batch` topic observation for advanced diagnostics. (Note: This is disabled in the main integration to prevent database redundancy).
-- **Note**: Improvements to `state_class` may trigger a one-time "Statistics mismatch" notice in Home Assistant Developer Tools. This is expected and safe to accept to enable long-term history for diagnostic sensors.
 
 ## [0.9.1] - 2026-01-29
 ### Added

@@ -1,6 +1,6 @@
 # Mysa for Home Assistant
 
-[![Version](https://img.shields.io/badge/version-0.9.2--beta9-blue.svg)](https://github.com/kgelinas/Mysa_HA)
+[![Version](https://img.shields.io/badge/version-0.9.2-blue.svg)](https://github.com/kgelinas/Mysa_HA)
 
 
 
