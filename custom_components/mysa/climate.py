@@ -110,7 +110,7 @@ class MysaClimate(
         | ClimateEntityFeature.TURN_ON
     )
     _attr_min_temp = 5.0
-    _attr_max_temp = 30.0
+    _attr_max_temp = 40.0  # 104°F — matches INF-V1 max; device firmware enforces its own limits
     _attr_precision = PRECISION_TENTHS
     _attr_target_temperature_step = 0.5
 
@@ -160,9 +160,33 @@ class MysaClimate(
     def temperature_unit(self) -> str:
         """Return the unit of measurement."""
         state = self._get_state_data()
-        if state and state.get("temperature_format") == "F":
-            return UnitOfTemperature.FAHRENHEIT
+        if state:
+            # Legacy devices store format as "Format": "fahrenheit"/"celsius".
+            # ST-V1-0 devices store it as "temperature_format": "F"/"C".
+            # Check all variants (mirrors logic in select.py).
+            fmt = (
+                state.get("temperature_format")
+                or state.get("Format")
+                or state.get("format")
+            )
+            if fmt in ("F", "fahrenheit"):
+                return UnitOfTemperature.FAHRENHEIT
         return UnitOfTemperature.CELSIUS
+
+    @property
+    def min_temp(self) -> float:
+        """Return minimum temperature in display unit."""
+        return cast(float, self._convert_to_display(self._attr_min_temp))
+
+    @property
+    def max_temp(self) -> float:
+        """Return maximum temperature in display unit."""
+        state = self._get_state_data()
+        if state:
+            val = self._extract_value(state, ["MaxSetpoint", "max_setpoint"])
+            if val is not None:
+                return cast(float, self._convert_to_display(float(val)))
+        return cast(float, self._convert_to_display(self._attr_max_temp))
 
     @property
     def target_temperature_step(self) -> float:
@@ -454,19 +478,17 @@ class MysaClimate(
         if temp is None:
             return
         try:
-            # Round to target step (default 0.5 C or 1.0 F)
-            # Logic: Input `temp` is in display unit (F or C).
-            # We want to store sticky in display unit, but send C to API.
+            # Round to target step (0.5 C or 1.0 F depending on unit).
             step = self.target_temperature_step
             temp = round(temp / step) * step
 
-            # Optimistic update (in display unit)
-            self._set_sticky_value("target_temperature", temp)
-
-            # Convert to Celsius for API
+            # Convert to Celsius for API first, then snap to device's 0.5°C precision.
             temp_c = self._convert_from_display(temp)
-            # Ensure 0.5 precision for device
             temp_c = round(temp_c * 2) / 2
+
+            # Optimistic update stored in Celsius so _convert_to_display reads it correctly.
+            # Storing display-unit (F) here would cause double-conversion on read-back.
+            self._set_sticky_value("target_temperature", temp_c)
 
             await self._api.set_target_temperature(self._device_id, temp_c)
             self.async_write_ha_state()
@@ -859,18 +881,11 @@ class MysaACClimate(MysaClimate):
             if (low := kwargs.get(ATTR_TARGET_TEMP_LOW)) is not None and (
                 high := kwargs.get(ATTR_TARGET_TEMP_HIGH)
             ) is not None:
-                # Optimistic update
-                self._set_sticky_value("target_temperature_low", low)
-                self._set_sticky_value("target_temperature_high", high)
-
-                # Convert to C for API (AC usually expects int C)
+                # Convert to C first, then optimistic update in Celsius.
                 low_c = self._convert_from_display(low)
                 high_c = self._convert_from_display(high)
-                # Ensure int for AC? API seems to handle floats but usually ACs use ints.
-                # Mysa app likely sends ints for AC.
-                # Let's round to nearest int for AC specifically to be safe?
-                # The API layer set_target_temperature_range just passes float.
-                # Let's keep consistent with MysaClimate base logic: round to step then convert.
+                self._set_sticky_value("target_temperature_low", low_c)
+                self._set_sticky_value("target_temperature_high", high_c)
 
                 await self._api.set_target_temperature_range(
                     self._device_id, low_c, high_c
@@ -883,11 +898,10 @@ class MysaACClimate(MysaClimate):
 
             temp = round(temperature / step) * step
 
-            # Optimistic update
-            self._set_sticky_value("target_temperature", temp)
-
-            # Convert to C
+            # Convert to C, then optimistic update in Celsius so _convert_to_display
+            # reads it correctly without double-converting.
             temp_c = self._convert_from_display(temp)
+            self._set_sticky_value("target_temperature", temp_c)
 
             await self._api.set_target_temperature(self._device_id, temp_c)
             self.async_write_ha_state()
@@ -1380,27 +1394,22 @@ class MysaSTV10Climate(MysaClimate):
                     temp_high = round(temp_high / step) * step
 
                 if temp_low is not None and temp_high is not None:
-                    # Optimistic update
-                    self._set_sticky_value("target_temperature_low", temp_low)
-                    self._set_sticky_value("target_temperature_high", temp_high)
-
-                    # Convert to C for API
-                    low_c = self._convert_from_display(temp_low)
-                    high_c = self._convert_from_display(temp_high)
-                    # Round to 0.5 for device
-                    low_c = round(low_c * 2) / 2
-                    high_c = round(high_c * 2) / 2
+                    # Convert to C for API, then optimistic update in Celsius.
+                    low_c = round(self._convert_from_display(temp_low) * 2) / 2
+                    high_c = round(self._convert_from_display(temp_high) * 2) / 2
+                    self._set_sticky_value("target_temperature_low", low_c)
+                    self._set_sticky_value("target_temperature_high", high_c)
 
                     await self._api.set_target_temperature_range(
                         self._device_id, low_c, high_c
                     )
                 elif temp_low is not None:
-                    self._set_sticky_value("target_temperature_low", temp_low)
                     val_c = round(self._convert_from_display(temp_low) * 2) / 2
+                    self._set_sticky_value("target_temperature_low", val_c)
                     await self._api.set_stv10_heat_setpoint(self._device_id, val_c)
                 elif temp_high is not None:
-                    self._set_sticky_value("target_temperature_high", temp_high)
                     val_c = round(self._convert_from_display(temp_high) * 2) / 2
+                    self._set_sticky_value("target_temperature_high", val_c)
                     await self._api.set_stv10_cool_setpoint(self._device_id, val_c)
 
                 self.async_write_ha_state()
@@ -1416,10 +1425,11 @@ class MysaSTV10Climate(MysaClimate):
             step = self.target_temperature_step
             temp = round(temp / step) * step
 
-            # Optimistic update
-            self._set_sticky_value("target_temperature", temp)
-
             val_c = round(self._convert_from_display(temp) * 2) / 2
+
+            # Optimistic update in Celsius so _convert_to_display reads it correctly.
+            self._set_sticky_value("target_temperature", val_c)
+
             await self._api.set_stv10_target_temperature(self._device_id, val_c)
             self.async_write_ha_state()
         except Exception as e:
