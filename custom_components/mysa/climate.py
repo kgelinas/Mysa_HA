@@ -287,6 +287,38 @@ class MysaClimate(
         val = self._get_sticky_value("target_temperature_high", val)
         return self._convert_to_display(float(val)) if val is not None else None
 
+    def _setpoint_limit(self, keys: list[str], fallback_c: float) -> float:
+        """Resolve a min/max setpoint limit reported by the device.
+
+        Mirrors the logic in MysaMin/MaxSetpointNumber.native_value: legacy
+        devices often report mns/mxs/MinSetpoint/MaxSetpoint in centidegrees,
+        ST-V1-0 reports min_setpoint/max_setpoint in degrees. Falls back to
+        the class-level Celsius default if the device exposes no value.
+        """
+        state = self._get_state_data()
+        if isinstance(state, dict):
+            val = self._extract_value(state, keys)
+            if val is not None:
+                val_f = float(val)
+                if val_f > 100:
+                    val_f /= 100.0
+                return cast(float, self._convert_to_display(val_f))
+        return cast(float, self._convert_to_display(fallback_c))
+
+    @property
+    def min_temp(self) -> float:
+        """Return the minimum settable temperature reported by the device."""
+        return self._setpoint_limit(
+            ["min_setpoint", "mns", "MinSetpoint"], self._attr_min_temp
+        )
+
+    @property
+    def max_temp(self) -> float:
+        """Return the maximum settable temperature reported by the device."""
+        return self._setpoint_limit(
+            ["max_setpoint", "mxs", "MaxSetpoint"], self._attr_max_temp
+        )
+
     @property
     def current_humidity(self) -> float | None:
         """Return humidity."""

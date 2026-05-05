@@ -322,6 +322,43 @@ class TestMysaClimateProperties:
 
         assert isinstance(attrs, dict)
 
+    @pytest.mark.asyncio
+    async def test_min_max_temp_from_state(
+        self, hass, mock_coordinator, climate_entity
+    ):
+        """min_temp / max_temp pull device-reported limits, including centidegrees."""
+        await mock_coordinator.async_refresh()
+        climate_entity.hass = hass
+
+        # Degrees (ST-V1-0 style)
+        mock_coordinator.data = {
+            "device1": {"min_setpoint": 7.0, "max_setpoint": 40.0}
+        }
+        assert climate_entity.min_temp == 7.0
+        assert climate_entity.max_temp == 40.0
+
+        # Centidegrees fallback (legacy INF-V1/BB style)
+        mock_coordinator.data = {
+            "device1": {"MinSetpoint": 500, "MaxSetpoint": 4000}
+        }
+        assert climate_entity.min_temp == 5.0
+        assert climate_entity.max_temp == 40.0
+
+    @pytest.mark.asyncio
+    async def test_min_max_temp_fallback_when_keys_missing(
+        self, hass, mock_coordinator, climate_entity
+    ):
+        """Falls back to _attr_min_temp / _attr_max_temp when device omits keys."""
+        await mock_coordinator.async_refresh()
+
+        mock_coordinator.data = {"device1": {}}
+        assert climate_entity.min_temp == 5.0
+        assert climate_entity.max_temp == 30.0
+
+        mock_coordinator.data = None
+        assert climate_entity.min_temp == 5.0
+        assert climate_entity.max_temp == 30.0
+
 
 class TestMysaClimateInfloor:
     """Test dynamic current_temperature for In-Floor devices."""

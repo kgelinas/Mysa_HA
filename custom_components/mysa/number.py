@@ -357,7 +357,11 @@ class MysaMinSetpointNumber(MysaNumber):
     """Number entity for minimum setpoint limit."""
 
     _attr_native_min_value = 5.0
-    _attr_native_max_value = 30.0
+    # Mysa devices (e.g. INF-V1 in-floor) accept setpoints up to 40 °C even
+    # though the Mysa app's default range is 5–30. Keeping the slider at 30
+    # was rejecting valid values; the cloud API enforces the device's true
+    # range server-side, so a generous slider cap is safe.
+    _attr_native_max_value = 40.0
     _attr_native_step = 0.5
     _attr_native_unit_of_measurement = "°C"
 
@@ -419,7 +423,8 @@ class MysaMaxSetpointNumber(MysaNumber):
     """Number entity for maximum setpoint limit."""
 
     _attr_native_min_value = 5.0
-    _attr_native_max_value = 30.0
+    # See MysaMinSetpointNumber for the rationale on bumping from 30 → 40.
+    _attr_native_max_value = 40.0
     _attr_native_step = 0.5
     _attr_native_unit_of_measurement = "°C"
 
