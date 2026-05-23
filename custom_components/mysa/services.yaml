@@ -1,0 +1,28 @@
+hold_until:
+  name: Hold until
+  description: >-
+    Hold the thermostat (optionally at a given temperature) until a specific
+    time, then automatically resume its schedule.
+  target:
+    entity:
+      integration: mysa
+      domain: climate
+  fields:
+    until:
+      name: Until
+      description: When the hold should expire and the schedule resume.
+      required: true
+      selector:
+        datetime:
+    temperature:
+      name: Temperature
+      description: >-
+        Optional target temperature to hold, in the thermostat's display unit.
+        If omitted, the current setpoint is held.
+      required: false
+      selector:
+        number:
+          min: 5
+          max: 86
+          step: 0.5
+          mode: box

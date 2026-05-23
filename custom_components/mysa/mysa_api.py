@@ -870,6 +870,67 @@ class MysaApi:
         # 2. No additional notification needed for direct MQTT commands.
         # The device will echo its state automatically.
 
+    async def resume_schedule(self, device_id: str) -> None:
+        """Resume following the device's schedule, clearing any manual hold (ho=1, tm=-1)."""
+        self._last_command_time[device_id] = time.time()
+        self._update_state_cache(
+            device_id, {"ScheduleMode": 1, "Timestamp": int(time.time())}
+        )
+        if self.coordinator_callback:
+            await self.coordinator_callback()
+
+        device = self.devices.get(device_id)
+        payload_type = MysaDeviceLogic.get_payload_type(
+            device, self.upgraded_lite_devices
+        )
+        body = {"cmd": [{"ho": 1, "tm": -1}], "type": payload_type, "ver": 1}
+        await self.realtime.send_command(device_id, body, self.client.user_id)
+
+    async def set_hold(self, device_id: str) -> None:
+        """Hold the current setting indefinitely, until explicitly changed (ho=2, tm=-1)."""
+        self._last_command_time[device_id] = time.time()
+        self._update_state_cache(
+            device_id, {"ScheduleMode": 2, "Timestamp": int(time.time())}
+        )
+        if self.coordinator_callback:
+            await self.coordinator_callback()
+
+        device = self.devices.get(device_id)
+        payload_type = MysaDeviceLogic.get_payload_type(
+            device, self.upgraded_lite_devices
+        )
+        body = {"cmd": [{"ho": 2, "tm": -1}], "type": payload_type, "ver": 1}
+        await self.realtime.send_command(device_id, body, self.client.user_id)
+
+    async def hold_until(
+        self, device_id: str, until: int, temperature: float | None = None
+    ) -> None:
+        """Hold (optionally at `temperature` °C) until Unix time `until`, then resume the schedule (ho=1, tm=until)."""
+        self._last_command_time[device_id] = time.time()
+        cache: dict[str, Any] = {"ScheduleMode": 1, "Timestamp": int(time.time())}
+        cmd: dict[str, Any] = {"ho": 1, "tm": int(until)}
+        if temperature is not None:
+            target_val = float(temperature)
+            cmd.update({"sp": target_val, "stpt": target_val, "a_sp": target_val})
+            cache.update(
+                {
+                    "SetPoint": target_val,
+                    "sp": target_val,
+                    "stpt": target_val,
+                    "a_sp": target_val,
+                }
+            )
+        self._update_state_cache(device_id, cache)
+        if self.coordinator_callback:
+            await self.coordinator_callback()
+
+        device = self.devices.get(device_id)
+        payload_type = MysaDeviceLogic.get_payload_type(
+            device, self.upgraded_lite_devices
+        )
+        body = {"cmd": [cmd], "type": payload_type, "ver": 1}
+        await self.realtime.send_command(device_id, body, self.client.user_id)
+
     async def notify_settings_changed(self, device_id: str) -> None:
         """Notify device to check cloud settings (MsgType 6)."""
         timestamp = int(time.time())
