@@ -8,9 +8,12 @@ from __future__ import annotations
 # too-many-lines: Handles multiple climate device types (Baseboard, AC, ST-V1-0) in one file.
 # too-many-public-methods: Climate entities require many property overrides.
 import asyncio
+from datetime import datetime
 import logging
 import time
 from typing import Any, cast
+
+import voluptuous as vol
 
 from homeassistant.components.climate import ClimateEntity
 from homeassistant.components.climate.const import (
@@ -28,12 +31,14 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import config_validation as cv, entity_platform
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
     DataUpdateCoordinator,
 )
+from homeassistant.util import dt as dt_util
 
 from . import MysaData
 from .const import (
@@ -56,6 +61,11 @@ from .const import (
     AC_MODE_OFF,
     AC_SWING_MODES,
     DOMAIN,
+    PRESET_HOLD,
+    PRESET_SCHEDULE,
+    SCHEDULE_MODE_FOLLOWING,
+    SCHEDULE_MODE_HOLD,
+    SERVICE_HOLD_UNTIL,
 )
 from .device import MysaDeviceLogic
 from .mysa_api import MysaApi
@@ -97,6 +107,21 @@ async def async_setup_entry(
 
     async_add_entities(entities)
 
+    # Register the hold-until entity service (a timed hold can't be a preset, since
+    # it needs a timestamp argument). Applies to the climate platform's entities.
+    platform = entity_platform.async_get_current_platform()
+    platform.async_register_entity_service(
+        SERVICE_HOLD_UNTIL,
+        {
+            vol.Required("until"): cv.datetime,
+            vol.Optional("temperature"): vol.Coerce(float),
+        },
+        "async_hold_until",
+        # Schedule/hold control only applies to the baseboard/floor thermostats that
+        # expose the schedule presets; AC and ST-V1-0 entities don't support it.
+        required_features=[ClimateEntityFeature.PRESET_MODE],
+    )
+
 
 class MysaClimate(
     ClimateEntity,
@@ -108,7 +133,9 @@ class MysaClimate(
         ClimateEntityFeature.TARGET_TEMPERATURE
         | ClimateEntityFeature.TURN_OFF
         | ClimateEntityFeature.TURN_ON
+        | ClimateEntityFeature.PRESET_MODE
     )
+    _attr_preset_modes = [PRESET_SCHEDULE, PRESET_HOLD]
     _attr_min_temp = 5.0
     _attr_max_temp = 30.0
     _attr_precision = PRECISION_TENTHS
@@ -448,6 +475,23 @@ class MysaClimate(
         """Return supported hvac modes."""
         return [HVACMode.HEAT, HVACMode.OFF]
 
+    @property
+    def preset_mode(self) -> str | None:
+        """Return the current preset: following the schedule vs. an indefinite hold.
+
+        Read from the device's reported ScheduleMode (1=following, 2=indefinite hold);
+        falls back to None when the device hasn't reported it yet.
+        """
+        state = self._get_state_data()
+        sched = self._extract_value(state, ["ScheduleMode"]) if state else None
+        if sched == SCHEDULE_MODE_HOLD:
+            result: str | None = PRESET_HOLD
+        elif sched == SCHEDULE_MODE_FOLLOWING:
+            result = PRESET_SCHEDULE
+        else:
+            result = None
+        return self._get_sticky_value("preset_mode", result)
+
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set new target temperature."""
         temp = kwargs.get(ATTR_TEMPERATURE)
@@ -495,6 +539,51 @@ class MysaClimate(
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
                 translation_key="set_hvac_mode_failed",
+                translation_placeholders={"error": str(e)},
+            ) from e
+
+    async def async_set_preset_mode(self, preset_mode: str) -> None:
+        """Set preset mode: follow the schedule or hold indefinitely."""
+        try:
+            self._set_sticky_value("preset_mode", preset_mode)
+            if preset_mode == PRESET_SCHEDULE:
+                await self._api.resume_schedule(self._device_id)
+            elif preset_mode == PRESET_HOLD:
+                await self._api.set_hold(self._device_id)
+            else:
+                raise ValueError(f"Unsupported preset_mode: {preset_mode}")
+            self.async_write_ha_state()
+        except Exception as e:
+            if "preset_mode" in self._pending_updates:
+                del self._pending_updates["preset_mode"]
+            self.async_write_ha_state()
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_preset_mode_failed",
+                translation_placeholders={"error": str(e)},
+            ) from e
+
+    async def async_hold_until(
+        self, until: datetime, temperature: float | None = None
+    ) -> None:
+        """Service handler: hold (optionally at a temperature) until a time, then resume the schedule."""
+        try:
+            ts = int(dt_util.as_timestamp(until))
+            temp_c: float | None = None
+            if temperature is not None:
+                temp_c = round(self._convert_from_display(float(temperature)) * 2) / 2
+                self._set_sticky_value(
+                    "target_temperature", self._convert_to_display(temp_c)
+                )
+            await self._api.hold_until(self._device_id, ts, temp_c)
+            self.async_write_ha_state()
+        except Exception as e:
+            if "target_temperature" in self._pending_updates:
+                del self._pending_updates["target_temperature"]
+            self.async_write_ha_state()
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="hold_until_failed",
                 translation_placeholders={"error": str(e)},
             ) from e
 

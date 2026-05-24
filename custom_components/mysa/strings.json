@@ -62,6 +62,20 @@
         "downgrade_lite_device": {
             "name": "Revert Lite Device",
             "description": "Reverts a Mysa thermostat from Full features back to Lite (Downgrade)."
+        },
+        "hold_until": {
+            "name": "Hold until",
+            "description": "Hold the thermostat (optionally at a given temperature) until a specific time, then automatically resume its schedule.",
+            "fields": {
+                "until": {
+                    "name": "Until",
+                    "description": "When the hold should expire and the schedule resume."
+                },
+                "temperature": {
+                    "name": "Temperature",
+                    "description": "Optional target temperature to hold, in the thermostat's display unit. If omitted, the current setpoint is held."
+                }
+            }
         }
     },
     "issues": {
@@ -308,6 +322,12 @@
         },
         "set_hvac_mode_failed": {
             "message": "Failed to set HVAC mode: {error}"
+        },
+        "set_preset_mode_failed": {
+            "message": "Failed to set preset mode: {error}"
+        },
+        "hold_until_failed": {
+            "message": "Failed to hold until the requested time: {error}"
         },
         "set_ac_hvac_mode_failed": {
             "message": "Failed to set AC HVAC mode: {error}"

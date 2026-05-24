@@ -134,3 +134,27 @@ SENSOR_MODES = {
 }
 
 SENSOR_MODES_REVERSE = {v: k for k, v in SENSOR_MODES.items()}
+
+
+# =============================================================================
+# Schedule / Hold control (msg:44 "ho"/"tm" semantics)
+# =============================================================================
+# A Mysa thermostat is either following its schedule or on a manual hold. The
+# hold behaviour is expressed in the command's "ho"/"tm" fields:
+#   {"ho": 1, "tm": -1}        -> follow the schedule (resume at next change)
+#   {"ho": 1, "tm": <unixts>}  -> hold until a time, then resume the schedule
+#   {"ho": 2, "tm": -1}        -> hold indefinitely, until explicitly changed
+# (Setting a bare setpoint holds only until the next scheduled change.)
+
+PRESET_SCHEDULE = "Schedule"
+"""Climate preset: follow the device's schedule (clear any manual hold)."""
+
+PRESET_HOLD = "Hold"
+"""Climate preset: hold the current setting indefinitely, until explicitly changed."""
+
+# Values reported in the device's "ScheduleMode" state field
+SCHEDULE_MODE_FOLLOWING = 1
+SCHEDULE_MODE_HOLD = 2
+
+SERVICE_HOLD_UNTIL = "hold_until"
+"""Service: hold (optionally at a temperature) until a time, then resume the schedule."""
