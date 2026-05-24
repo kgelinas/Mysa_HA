@@ -117,6 +117,9 @@ async def async_setup_entry(
             vol.Optional("temperature"): vol.Coerce(float),
         },
         "async_hold_until",
+        # Schedule/hold control only applies to the baseboard/floor thermostats that
+        # expose the schedule presets; AC and ST-V1-0 entities don't support it.
+        required_features=[ClimateEntityFeature.PRESET_MODE],
     )
 
 
