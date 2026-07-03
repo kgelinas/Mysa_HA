@@ -1804,10 +1804,10 @@ class TestApiRestoredConsolidated:
         assert api.mqtt_status == "Connecting"
 
         api.realtime._mqtt_connected.is_set = MagicMock(return_value=True)
-        api.realtime.last_packet_time = 0
+        api.realtime.last_data_time = 0
         assert api.mqtt_status == "Starting"
 
-        api.realtime.last_packet_time = 100 # very old
+        api.realtime.last_data_time = 100 # very old
         with patch("time.time", return_value=1000):
             assert api.mqtt_status == "Stale"
 
@@ -1991,7 +1991,7 @@ async def test_mqtt_status_stale():
     api.realtime._mqtt_connected.is_set.return_value = True
 
     now = time.time()
-    type(api.realtime).last_packet_time = PropertyMock(return_value=now - 601)
+    type(api.realtime).last_data_time = PropertyMock(return_value=now - 601)
 
     mock_hass = MagicMock()
     mock_hass.async_create_task = MagicMock()
@@ -2002,10 +2002,10 @@ async def test_mqtt_status_stale():
 
     assert real_api.mqtt_status == "Stale"
 
-    type(api.realtime).last_packet_time = PropertyMock(return_value=now - 30)
+    type(api.realtime).last_data_time = PropertyMock(return_value=now - 30)
     assert real_api.mqtt_status == "Running"
 
-    type(api.realtime).last_packet_time = PropertyMock(return_value=0)
+    type(api.realtime).last_data_time = PropertyMock(return_value=0)
     assert real_api.mqtt_status == "Starting"
 
     api.realtime._mqtt_connected.is_set.return_value = False

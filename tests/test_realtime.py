@@ -1302,6 +1302,7 @@ async def test_mqtt_heartbeat_watchdog():
 
     with patch("custom_components.mysa.mqtt.pingreq", return_value=b'\xc0\x00'):
         assert realtime.last_packet_time == 0
+        assert realtime.last_data_time == 0
 
         with patch("time.time") as mock_time:
             start_time = 1000.0
@@ -1314,10 +1315,52 @@ async def test_mqtt_heartbeat_watchdog():
 
             with patch("asyncio.wait_for", side_effect=mock_wait_timeout):
                 realtime._last_packet_time = start_time
+                realtime._last_data_time = start_time
                 mock_time.return_value = start_time + 601
 
                 with pytest.raises(RuntimeError, match="MQTT silence watchdog triggered"):
                     await realtime._run_mqtt_loop(ws)
+
+
+@pytest.mark.asyncio
+async def test_mqtt_watchdog_fires_despite_live_keepalive():
+    """Regression: watchdog must fire when PINGRESP keeps arriving but no PUBLISH.
+
+    This is the silent-freeze bug: the socket + MQTT keepalive stay alive (PINGRESP
+    refreshes _last_packet_time every ping), but the subscription data stream is dead.
+    The data watchdog must ignore keepalive traffic and still force a reconnect.
+    """
+    hass = MagicMock()
+    realtime = MysaRealtime(hass, AsyncMock(), MagicMock())
+
+    ws = AsyncMock()
+
+    with patch("custom_components.mysa.mqtt.pingreq", return_value=b"\xc0\x00"):
+        with patch("time.time") as mock_time:
+            start_time = 1000.0
+            # Data last arrived at connect time; it never arrives again.
+            realtime._last_data_time = start_time
+            # Keepalive is healthy: packets keep flowing right up to "now".
+            realtime._last_packet_time = start_time + 601
+
+            # A PINGRESP is always waiting on recv, so the socket looks alive.
+            async def recv_pingresp():
+                mock_time.return_value = start_time + 601  # keepalive "now"
+                realtime._last_packet_time = start_time + 601
+                return b"\xd0\x00"  # PINGRESP
+
+            ws.recv = AsyncMock(side_effect=recv_pingresp)
+
+            async def passthrough_wait_for(coro, timeout=None):
+                return await coro
+
+            with patch("asyncio.wait_for", side_effect=passthrough_wait_for):
+                mock_time.return_value = start_time + 601
+                with pytest.raises(
+                    RuntimeError, match="MQTT silence watchdog triggered"
+                ):
+                    await realtime._run_mqtt_loop(ws)
+
 
 def test_realtime_is_connected():
     """Test is_connected property."""
