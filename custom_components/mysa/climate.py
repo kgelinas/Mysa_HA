@@ -64,6 +64,15 @@ PARALLEL_UPDATES = 0
 
 _LOGGER = logging.getLogger(__name__)
 
+# Minimum change (in the entity's display unit, °C or °F) before a new
+# current_temperature is reported to Home Assistant. Floor thermistors jitter by
+# ±0.1-0.3 °C every few seconds; without hysteresis every reading is a distinct
+# HA state write (~11k/day for a single entity) even though the state and every
+# meaningful attribute are unchanged. Holding the last reported value until the
+# reading moves by at least this deadband lets HA's identical-state dedup drop
+# the noise while still surfacing real temperature changes.
+CURRENT_TEMP_DEADBAND = 0.5
+
 
 async def async_setup_entry(
     _hass: HomeAssistant,
@@ -135,6 +144,8 @@ class MysaClimate(
         self._attr_unique_id = device_id
         self._pending_updates: dict[str, dict[str, Any]] = {}
         self._has_logged_sensortemp_warning = False
+        # Last current_temperature value reported to HA, for deadband hysteresis.
+        self._ct_reported: float | None = None
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -241,11 +252,29 @@ class MysaClimate(
         if val is not None:
             try:
                 f_val = float(val)
-                # Apply conversion
-                return self._convert_to_display(f_val if f_val != 0 else None)
+                # Apply conversion, then a deadband to suppress sensor noise.
+                display = self._convert_to_display(f_val if f_val != 0 else None)
+                return self._apply_current_temp_deadband(display)
             except (ValueError, TypeError):
                 pass
         return None
+
+    def _apply_current_temp_deadband(self, value: float | None) -> float | None:
+        """Hold the last reported current_temperature until it moves meaningfully.
+
+        Floor thermistors report a marginally different value every few seconds.
+        Forwarding each one makes HA record a new state ~11k times/day even
+        though nothing meaningful changed. We only advance the reported value
+        once it moves by at least CURRENT_TEMP_DEADBAND from the value we last
+        reported, so HA's identical-state dedup drops the noise. A value of None
+        (sensor unavailable) is passed through and does not update the baseline.
+        """
+        if value is None:
+            return None
+        last = self._ct_reported
+        if last is None or abs(value - last) >= CURRENT_TEMP_DEADBAND:
+            self._ct_reported = value
+        return self._ct_reported
 
     @property
     def target_temperature(self) -> float | None:
