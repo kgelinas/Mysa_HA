@@ -12,7 +12,7 @@ import websockets
 from homeassistant.core import HomeAssistant
 
 from . import mqtt
-from .const import MQTT_PING_INTERVAL
+from .const import MQTT_DATA_TIMEOUT, MQTT_PING_INTERVAL
 from .mysa_mqtt import (
     build_subscription_topics,
     connect_websocket,
@@ -56,7 +56,11 @@ class MysaRealtime:
         self._stv10_devices: list[str] = []  # List of ST-V1-0 device IDs
         self._use_batch = False  # Disabled in Core (not needed for history)
         self._batch_retry_time = 0.0
-        self._last_packet_time = 0.0  # Time of last received MQTT packet
+        self._last_packet_time = 0.0  # Time of last received MQTT packet (any type)
+        # Time of last inbound PUBLISH (actual device telemetry). Kept distinct
+        # from _last_packet_time so PINGRESP/PUBACK traffic can't mask a dead
+        # subscription stream (the silent-freeze bug).
+        self._last_data_time = 0.0
 
     @property
     def is_running(self) -> bool:
@@ -65,8 +69,13 @@ class MysaRealtime:
 
     @property
     def last_packet_time(self) -> float:
-        """Return timestamp of last received packet."""
+        """Return timestamp of last received packet (any type, incl. PINGRESP)."""
         return self._last_packet_time
+
+    @property
+    def last_data_time(self) -> float:
+        """Return timestamp of last inbound PUBLISH (device telemetry)."""
+        return self._last_data_time
 
     @property
     def is_connected(self) -> bool:
@@ -200,7 +209,9 @@ class MysaRealtime:
         try:
             await self._perform_mqtt_handshake(ws)
             self._mqtt_connected.set()
-            self._last_packet_time = time.time()  # Initialize on connect
+            now = time.time()
+            self._last_packet_time = now  # Initialize on connect
+            self._last_data_time = now  # Grace period before data watchdog can fire
             await self._run_mqtt_loop(ws)
         except Exception as listen_error:
             # If we failed during subscription/handshake specifically, and batch was on,
@@ -339,6 +350,8 @@ class MysaRealtime:
                     pkt = parse_mqtt_packet(msg)
                     if pkt:
                         if isinstance(pkt, mqtt.PublishPacket):
+                            # Actual device telemetry: refresh the data watchdog.
+                            self._last_data_time = time.time()
                             await self._process_mqtt_publish(pkt)
                         elif (
                             hasattr(pkt, "pkt_type")
@@ -373,11 +386,17 @@ class MysaRealtime:
                     _LOGGER.error("Failed to send keepalive ping: %s", e, exc_info=True)
                     raise
 
-            # Check for silent (zombie) connection: If no packet received for 10 minutes,
-            # force a reconnect. AWS session expiry is 12h, but we want faster recovery.
-            if time.time() - self._last_packet_time > 600:
+            # Check for silent (zombie) connection: if no device telemetry (PUBLISH)
+            # has arrived for MQTT_DATA_TIMEOUT, force a reconnect. We track data
+            # separately from _last_packet_time because MQTT keepalive PINGRESP (and
+            # PUBACK) keep the socket "alive" even when the subscription stream has
+            # silently died - the classic frozen-readings failure. AWS session expiry
+            # is 12h, but we want faster recovery.
+            if time.time() - self._last_data_time > MQTT_DATA_TIMEOUT:
                 _LOGGER.warning(
-                    "MQTT heartbeat watchdog: No traffic received for 600s, forcing reconnection..."
+                    "MQTT data watchdog: No device telemetry received for %ds "
+                    "(keepalive still alive), forcing reconnection...",
+                    MQTT_DATA_TIMEOUT,
                 )
                 raise RuntimeError("MQTT silence watchdog triggered")
 

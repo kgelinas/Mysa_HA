@@ -137,12 +137,14 @@ class MysaApi:
         if not self.realtime._mqtt_connected.is_set():
             return "Connecting"
 
-        # Check staleness (5 minutes)
-        last_pkt = self.realtime.last_packet_time
-        if last_pkt == 0:
+        # Check staleness against actual telemetry, not keepalive traffic (5 minutes).
+        # Using last_data_time here means a silently dropped subscription surfaces as
+        # "Stale" instead of hiding behind PINGRESP keepalive.
+        last_data = self.realtime.last_data_time
+        if last_data == 0:
             return "Starting"
 
-        if time.time() - last_pkt > 300:
+        if time.time() - last_data > 300:
             return "Stale"
 
         return "Running"

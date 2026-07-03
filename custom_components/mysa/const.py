@@ -22,6 +22,12 @@ MQTT_KEEPALIVE: int = 60
 MQTT_PING_INTERVAL: int = 25
 """Interval between MQTT PINGREQ packets (less than keepalive)"""
 
+MQTT_DATA_TIMEOUT: int = 600
+"""Max seconds without an inbound PUBLISH (telemetry) before the connection is
+considered a zombie and force-reconnected. PINGRESP/PUBACK traffic does NOT
+reset this timer, so a silently dropped subscription (data stops while the
+socket and MQTT keepalive stay alive) is detected and recovered."""
+
 MQTT_USER_AGENT: str = "okhttp/4.11.0"
 """User-Agent header matching Mysa Android app"""
 
