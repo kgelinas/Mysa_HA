@@ -383,6 +383,41 @@ class TestMysaClimateInfloor:
         }
         assert infloor_entity.current_temperature == 22.0
 
+    @pytest.mark.asyncio
+    async def test_current_temperature_deadband_suppresses_noise(
+        self, hass, mock_coordinator, infloor_entity
+    ):
+        """Floor-sensor jitter below the deadband must not change the reported value.
+
+        Regression for excessive HA state writes: the floor thermistor jitters by
+        ±0.1-0.3 °C every few seconds, which produced ~11k state writes/day. The
+        reported current_temperature must hold until the reading moves by at least
+        CURRENT_TEMP_DEADBAND, so HA's identical-state dedup drops the noise.
+        """
+        from custom_components.mysa.climate import CURRENT_TEMP_DEADBAND
+
+        assert CURRENT_TEMP_DEADBAND == 0.5
+
+        def read(infloor: float | None) -> float | None:
+            mock_coordinator.data = {"infloor1": {"Infloor": infloor, "SensorMode": 1}}
+            return infloor_entity.current_temperature
+
+        # First real reading is reported as-is.
+        assert read(23.4) == 23.4
+        # Sub-deadband jitter holds the last reported value (no HA write).
+        assert read(23.5) == 23.4
+        assert read(23.2) == 23.4
+        assert read(23.6) == 23.4  # 0.2 above baseline, still < 0.5
+        # A move of >= deadband advances the reported value.
+        assert read(23.9) == 23.9  # exactly 0.5 above baseline
+        assert read(24.1) == 23.9  # holds around the new baseline
+        # A downward move of >= deadband advances too.
+        assert read(23.4) == 23.4  # 0.5 below 23.9
+        # None (sensor unavailable) passes through without corrupting the baseline.
+        mock_coordinator.data = {"infloor1": {"SensorMode": 1}}
+        assert infloor_entity.current_temperature is None
+        assert read(23.5) == 23.4  # baseline preserved across the None
+
 
 class TestMysaClimateActions:
     """Test MysaClimate actions."""
