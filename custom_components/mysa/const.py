@@ -72,6 +72,7 @@ AC_FAN_MODES = {
 AC_FAN_MODES_REVERSE = {v: k for k, v in AC_FAN_MODES.items()}
 
 # KeyIDs for swing discovery
+AC_KEY_SWING_V_TOGGLE = 12
 AC_KEY_SWING_V_ON = 39
 AC_KEY_SWING_V_OFF = 40
 
