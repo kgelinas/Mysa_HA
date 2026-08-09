@@ -75,6 +75,7 @@ AC_FAN_MODES_REVERSE = {v: k for k, v in AC_FAN_MODES.items()}
 AC_KEY_SWING_V_TOGGLE = 12
 AC_KEY_SWING_V_ON = 39
 AC_KEY_SWING_V_OFF = 40
+AC_KEY_SWING_K = 47
 
 # Swing Positions (vertical and horizontal share the same values)
 AC_SWING_OFF = 0

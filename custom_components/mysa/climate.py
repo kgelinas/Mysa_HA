@@ -50,6 +50,7 @@ from .const import (
     AC_KEY_SWING_V_TOGGLE,
     AC_KEY_SWING_V_ON,
     AC_KEY_SWING_V_OFF,
+    AC_KEY_SWING_K,
     AC_MODE_AUTO,
     AC_MODE_COOL,
     AC_MODE_DRY,
@@ -671,6 +672,13 @@ class MysaACClimate(MysaClimate):
                 for mode in ["off", "auto"]:
                     if mode not in self._supported_swing_modes:
                         self._supported_swing_modes.append(mode)
+
+        # Discovery via AC_KEY_SWING_K is a special case. It supports "auto", but it doesn't respond to the "off" mode
+        if AC_KEY_SWING_K in keys:
+            # If the vertical swing keyID is present, provide basic modes
+            for mode in ["vertical", "auto"]:
+                if mode not in self._supported_swing_modes:
+                    self._supported_swing_modes.append(mode)
 
         # Sort the final list
         self._supported_swing_modes.sort(
