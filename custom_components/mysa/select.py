@@ -51,11 +51,19 @@ async def async_setup_entry(
     for device_id, device_data in devices.items():
         # Add horizontal swing select only for AC devices
         if api.is_ac_device(device_id):
-            entities.append(
-                MysaHorizontalSwingSelect(
-                    coordinator, device_id, device_data, api, entry
-                )
+            # Add horizontal swing select entity only if the device supports horizontal swing
+            supported_caps = device_data.get("SupportedCaps", {})
+            modes = supported_caps.get("modes", {})
+            supports_horizontal_swing = any(
+                mode_caps.get("horizontalSwing") for mode_caps in modes.values()
             )
+
+            if supports_horizontal_swing:
+                entities.append(
+                    MysaHorizontalSwingSelect(
+                        coordinator, device_id, device_data, api, entry
+                    )
+                )
 
         # Add sensor mode select for In-Floor devices
         model = str(device_data.get("Model", ""))
@@ -124,10 +132,11 @@ class MysaHorizontalSwingSelect(
                     name = AC_HORIZONTAL_SWING_MODES.get(pos)
                     if name and name not in self._options:
                         self._options.append(name)
+
+                # Fallback to defaults if not found
+                if not self._options:
+                    self._options = list(AC_HORIZONTAL_SWING_MODES.values())
                 break
-        # Fallback to defaults if not found
-        if not self._options:
-            self._options = list(AC_HORIZONTAL_SWING_MODES.values())
 
         _LOGGER.debug(
             "Horizontal swing options for %s: %s", self._device_id, self._options
