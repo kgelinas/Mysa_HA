@@ -124,10 +124,11 @@ class MysaHorizontalSwingSelect(
                     name = AC_HORIZONTAL_SWING_MODES.get(pos)
                     if name and name not in self._options:
                         self._options.append(name)
+
+                # Fallback to defaults if not found
+                if not self._options:
+                    self._options = list(AC_HORIZONTAL_SWING_MODES.values())
                 break
-        # Fallback to defaults if not found
-        if not self._options:
-            self._options = list(AC_HORIZONTAL_SWING_MODES.values())
 
         _LOGGER.debug(
             "Horizontal swing options for %s: %s", self._device_id, self._options
