@@ -676,7 +676,7 @@ class MysaACClimate(MysaClimate):
         # Discovery via AC_KEY_SWING_K is a special case. It supports "auto", but it doesn't respond to the "off" mode
         if AC_KEY_SWING_K in keys:
             # If the vertical swing keyID is present, provide basic modes
-            for mode in ["vertical", "auto"]:
+            for mode in ["still", "auto"]:
                 if mode not in self._supported_swing_modes:
                     self._supported_swing_modes.append(mode)
 

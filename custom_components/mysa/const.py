@@ -79,7 +79,7 @@ AC_KEY_SWING_K = 47
 
 # Swing Positions (vertical and horizontal share the same values)
 AC_SWING_OFF = 0
-AC_SWING_VERTICAL = 1
+AC_SWING_STILL = 1
 AC_SWING_AUTO = 2
 AC_SWING_POSITION_1 = 3  # Top
 AC_SWING_POSITION_2 = 4
@@ -93,7 +93,7 @@ AC_SWING_HORIZONTAL = 10  # Moved out of vertical sequence
 # Home Assistant swing mode names (vertical)
 AC_SWING_MODES = {
     AC_SWING_OFF: "off",
-    AC_SWING_VERTICAL: "vertical",
+    AC_SWING_STILL: "still",
     AC_SWING_AUTO: "auto",
     AC_SWING_POSITION_1: "top",
     AC_SWING_POSITION_2: "upper",
