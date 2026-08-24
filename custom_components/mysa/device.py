@@ -333,6 +333,18 @@ class MysaDeviceLogic:
         if heap_val is not None:
             state["free_heap"] = int(heap_val)
 
+        # Extract V3 nested reading dictionary values
+        reading = state.get("reading")
+        if isinstance(reading, dict):
+            if "roomTemperature" in reading:
+                state["ambTemp"] = float(reading["roomTemperature"])
+                state["SensorTemp"] = float(reading["roomTemperature"])
+            if "heatSetpoint" in reading:
+                state["stpt"] = float(reading["heatSetpoint"])
+                state["SetPoint"] = float(reading["heatSetpoint"])
+            if "mode" in reading:
+                state["Mode"] = int(reading["mode"])
+                
         # ---------------------------------------------------------------------
         # Section 3: AC Controller Specific Logic
         # ---------------------------------------------------------------------
@@ -405,12 +417,14 @@ class MysaDeviceLogic:
                 # Extract values from ACState numbered keys
                 if "1" in acstate_v:  # Power state
                     state["ACPower"] = int(acstate_v["1"])
-                if "2" in acstate_v:  # Mode
+                if "2" in acstate_v:
                     state["ACMode"] = int(acstate_v["2"])
-                    state["Mode"] = int(acstate_v["2"])  # Also override here
-                if "3" in acstate_v:  # Temperature
-                    state["ACTemp"] = float(acstate_v["3"])
-                    state["stpt"] = float(acstate_v["3"])
+                    if "Mode" not in state:
+                        state["Mode"] = int(acstate_v["2"])
+                if "3" in acstate_v:
+                        state["ACTemp"] = float(acstate_v["3"])
+                        if "stpt" not in state:
+                            state["stpt"] = float(acstate_v["3"])
                 if "4" in acstate_v:  # Fan speed
                     if "FanSpeed" not in state:
                         state["FanSpeed"] = int(acstate_v["4"])
