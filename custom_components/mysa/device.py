@@ -182,7 +182,9 @@ class MysaDeviceLogic:
         if current_val is not None:
             state["Current"] = current_val
         # Handle 'temperature' and 'humidity' variants
-        temp_val = get_v(["currentTemperature", "ambTemp", "current_temp_raw"])
+        temp_val = get_v(
+            ["currentTemperature", "ambTemp", "current_temp_raw", "CorrectedTemp"]
+        )
         if temp_val is not None:
             # Most devices send C*100, some send C
             f_temp = float(temp_val)
@@ -191,7 +193,9 @@ class MysaDeviceLogic:
             else:
                 state["current_temp"] = f_temp
 
-        hum_val = get_v(["currentHumidity", "humidity", "hum", "relativeHumidity"])
+        hum_val = get_v(
+            ["currentHumidity", "humidity", "hum", "relativeHumidity", "Humidity"]
+        )
         if hum_val is not None:
             state["current_humidity"] = float(hum_val)
         hs_val = get_v(["hs", "HeatSink"])

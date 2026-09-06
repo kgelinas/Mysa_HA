@@ -6,7 +6,6 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from datetime import timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -71,8 +70,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry[MysaData]) -
         _LOGGER,
         name="mysa_integration",
         update_method=async_update_data,
-        # Slower polling since MQTT provides real-time updates
-        update_interval=timedelta(seconds=120),
+        # MQTT pushes reset coordinator timers; use an independent loop below.
+        update_interval=None,
         config_entry=entry,
     )
 
@@ -166,6 +165,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry[MysaData]) -
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    async def async_poll_state() -> None:
+        """Refresh HTTP state independently of incoming MQTT traffic."""
+        while True:
+            await asyncio.sleep(120)
+            try:
+                async with asyncio.timeout(90):
+                    await coordinator.async_refresh()
+            except TimeoutError:
+                _LOGGER.warning("Periodic Mysa HTTP refresh exceeded 90 seconds")
+
+    poll_task = hass.async_create_background_task(
+        async_poll_state(), name="mysa_http_poll"
+    )
+    entry.async_on_unload(poll_task.cancel)
 
     # Monitor for device changes during polling and remove stale devices
     previous_devices: set[str] = (

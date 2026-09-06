@@ -44,7 +44,7 @@ A native cloud integration for Mysa devices in Home Assistant. Uses the official
 ## Known Limitations
 
 - **Cloud Dependency**: This integration relies on the Mysa cloud API. It will not work without an internet connection.
-- **Polling Fallback**: If the MQTT WebSocket connection drops, the integration falls back to HTTP polling every 120 seconds.
+- **Polling Fallback**: HTTP state refresh runs independently of MQTT traffic, with a 120-second pause between refreshes and a 90-second timeout. This also refreshes devices that stop reporting measurements while the MQTT connection remains open.
 - **AWS Authentication Stack**: The `boto3` and `pycognito` dependencies handle AWS Cogntio/SigV4 authentication. While all blocking calls are safely wrapped in async executors so they do not block the Home Assistant event loop, they cannot directly reuse the Home Assistant core `aiohttp` web session object.
 - **Simulated Energy**: The energy consumption is an estimate based on your heater's wattage and duty cycle. Unless the device explicitly reports real electrical `Current` (like the Baseboard V1 and V2 Full), the energy usage is not 100% accurate.
 - **Batch Data**: Batch history is currently used strictly for debugging purposes and is disabled in the main integration to avoid database collisions with standard real-time updates.
