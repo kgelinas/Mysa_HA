@@ -473,11 +473,13 @@ class MysaClient:
         else:
             self.devices = {}
 
-        # Round 2: Batch Telemetry (ST1 / All Devices)
-        # Now that self.devices is populated, we can target them.
-        # We query ALL devices to allow the backend to decide what data to return.
-        # This supports ST1 and potentially other device types discovered later.
-        target_ids = list(self.devices.keys())
+        # BB/INF batch readings can be days older than /devices/state.
+        # Preserve the existing batch path for other device families.
+        target_ids = [
+            device_id
+            for device_id, device in self.devices.items()
+            if not str(device.get("Model", "")).upper().startswith(("BB-", "INF-"))
+        ]
         st1_states = {}
 
         if target_ids:
@@ -500,6 +502,9 @@ class MysaClient:
     ) -> None:
         """Merge ST1 batch telemetry into result states."""
         for device_id, device_payload in st1_batch.items():
+            model = str(self.devices.get(device_id, {}).get("Model", "")).upper()
+            if model.startswith(("BB-", "INF-")):
+                continue
             if device_id not in result_states:
                 # Provide base if missing from standard poll
                 result_states[device_id] = self.devices.get(device_id, {}).copy()
